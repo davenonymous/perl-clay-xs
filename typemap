@@ -1,0 +1,19 @@
+#
+# typemap for Clay::Layout
+#
+# Maps the fixed-width integer types that Clay returns / accepts at the
+# XS boundary onto Perl's IV / UV system. Perl's UV is at least 32 bits
+# wide, which is sufficient for uint32_t. Larger sizes would need
+# bigint handling we do not require.
+#
+
+TYPEMAP
+
+uint8_t                T_UV
+uint16_t               T_UV
+uint32_t               T_UV
+uint64_t               T_UV
+int8_t                 T_IV
+int16_t                T_IV
+int32_t                T_IV
+int64_t                T_IV

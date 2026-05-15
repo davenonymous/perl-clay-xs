@@ -1,0 +1,16 @@
+# Vendored upstream Clay repo, kept for reference only.
+references
+
+# ExtUtils::MakeMaker build artifacts.
+/Makefile
+/Makefile.old
+/MYMETA.json
+/MYMETA.yml
+/pm_to_blib
+/blib/
+
+# XS compilation outputs (Layout.c is generated from Layout.xs by xsubpp).
+/Layout.c
+/Layout.o
+/Layout.bs
+/src/*.o
