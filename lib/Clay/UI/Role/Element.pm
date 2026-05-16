@@ -10,9 +10,11 @@ use Object::Pad::MOP::Class;
 use Scalar::Util qw(blessed);
 no warnings 'experimental';
 
+use Clay::UI::Role::HasSizingGroup;
+
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Element {
+role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup) {
 	no warnings 'experimental';
 
 	field $id       :param :reader = undef;

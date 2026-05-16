@@ -706,6 +706,24 @@ static Clay_TransitionElementConfig clay_transition_config_from_sv(pTHX_ clay_pe
 }
 
 /* ===========================================================================
+ * Clay_SizingGroup. {width => N, height => M}; either may be omitted.
+ * ======================================================================== */
+
+static Clay_SizingGroup clay_sizing_group_from_sv(pTHX_ SV *sv)
+{
+    Clay_SizingGroup g;
+    memset(&g, 0, sizeof(g));
+    if (!sv || !SvOK(sv)) return g;
+    if (!SvROK(sv) || SvTYPE(SvRV(sv)) != SVt_PVHV) {
+        croak("Clay_SizingGroup: expected hash reference");
+    }
+    HV *hv = (HV *) SvRV(sv);
+    g.width  = (uint32_t) hv_fetch_uv_or(aTHX_ hv, "width",  0);
+    g.height = (uint32_t) hv_fetch_uv_or(aTHX_ hv, "height", 0);
+    return g;
+}
+
+/* ===========================================================================
  * Clay_ElementDeclaration - the big one. Composes every sub-config above
  * plus the transition config.
  * ======================================================================== */
@@ -734,19 +752,21 @@ Clay_ElementDeclaration clay_element_declaration_from_sv(pTHX_ clay_perl_context
     SV *clip        = hv_fetch_pv(aTHX_ hv, "clip");
     SV *border      = hv_fetch_pv(aTHX_ hv, "border");
     SV *transition  = hv_fetch_pv(aTHX_ hv, "transition");
+    SV *sizinggroup = hv_fetch_pv(aTHX_ hv, "sizingGroup");
     SV *userdata    = hv_fetch_pv(aTHX_ hv, "userData");
 
-    if (layout)     d.layout          = clay_layout_config_from_sv(aTHX_ layout);
-    if (bg)         d.backgroundColor = clay_color_from_sv(aTHX_ bg);
-    if (overlay)    d.overlayColor    = clay_color_from_sv(aTHX_ overlay);
-    if (corner)     d.cornerRadius    = clay_corner_radius_from_sv(aTHX_ corner);
-    if (aspect)     d.aspectRatio     = clay_aspect_ratio_config_from_sv(aTHX_ aspect);
-    if (image)      d.image           = clay_image_config_from_sv(aTHX_ image);
-    if (floating)   d.floating        = clay_floating_config_from_sv(aTHX_ floating);
-    if (custom)     d.custom          = clay_custom_config_from_sv(aTHX_ custom);
-    if (clip)       d.clip            = clay_clip_config_from_sv(aTHX_ clip);
-    if (border)     d.border          = clay_border_config_from_sv(aTHX_ border);
-    if (transition) d.transition      = clay_transition_config_from_sv(aTHX_ ctx, transition);
+    if (layout)      d.layout          = clay_layout_config_from_sv(aTHX_ layout);
+    if (bg)          d.backgroundColor = clay_color_from_sv(aTHX_ bg);
+    if (overlay)     d.overlayColor    = clay_color_from_sv(aTHX_ overlay);
+    if (corner)      d.cornerRadius    = clay_corner_radius_from_sv(aTHX_ corner);
+    if (aspect)      d.aspectRatio     = clay_aspect_ratio_config_from_sv(aTHX_ aspect);
+    if (image)       d.image           = clay_image_config_from_sv(aTHX_ image);
+    if (floating)    d.floating        = clay_floating_config_from_sv(aTHX_ floating);
+    if (custom)      d.custom          = clay_custom_config_from_sv(aTHX_ custom);
+    if (clip)        d.clip            = clay_clip_config_from_sv(aTHX_ clip);
+    if (border)      d.border          = clay_border_config_from_sv(aTHX_ border);
+    if (transition)  d.transition      = clay_transition_config_from_sv(aTHX_ ctx, transition);
+    if (sizinggroup) d.sizingGroup     = clay_sizing_group_from_sv(aTHX_ sizinggroup);
 
     if (userdata && SvOK(userdata)) {
         d.userData = INT2PTR(void *, SvIV(userdata));

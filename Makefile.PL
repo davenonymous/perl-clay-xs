@@ -54,14 +54,14 @@ WriteMakefile(
                     'src/marshal.c',
                     'src/callbacks.c' ],
     H          => [ 'src/clay_perl.h',
-                    'src/clay/clay.h' ],
+                    'src/clay/clay.h.orig' ],
     OBJECT     => '$(O_FILES)',
 
     INC        => '-I. -Isrc',
     CCFLAGS    => "$Config{ccflags} $ccflags",
 
     # Sanity: clean intermediate objects.
-    clean      => { FILES => 'Layout.c Layout.o src/*.o' },
+    clean      => { FILES => 'Layout.c Layout.o src/*.o src/clay/clay.h src/clay/.patched' },
 
     META_MERGE => {
         'meta-spec' => { version => 2 },
@@ -82,6 +82,22 @@ WriteMakefile(
 # for our src/ tree so the object files land where O_FILES expects them.
 sub MY::postamble {
     return <<'POSTAMBLE';
+
+# The pristine upstream Clay header lives in src/clay/clay.h.orig (tracked in
+# git). The build copy at src/clay/clay.h is regenerated each time the pristine
+# or any patch file changes: copy from .orig, then apply patches/*.patch in
+# order. Both src/clay/clay.h and the .patched sentinel are gitignored so the
+# working tree stays clean after a build.
+src/clay/clay.h : src/clay/clay.h.orig patches/0001-clay-sizing-groups.patch
+	cp src/clay/clay.h.orig src/clay/clay.h
+	patch -p1 < patches/0001-clay-sizing-groups.patch
+	@touch src/clay/.patched
+
+src/clay_impl$(OBJ_EXT) : src/clay/clay.h
+src/marshal$(OBJ_EXT) : src/clay/clay.h
+src/callbacks$(OBJ_EXT) : src/clay/clay.h
+src/clay_perl_context$(OBJ_EXT) : src/clay/clay.h
+Layout$(OBJ_EXT) : src/clay/clay.h
 
 src/%$(OBJ_EXT) : src/%.c
 	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) -o $@ $<

@@ -1,0 +1,214 @@
+--- a/src/clay/clay.h
++++ b/src/clay/clay.h
+@@ -336,6 +336,16 @@
+     Clay_SizingAxis height;  // Controls the height sizing of the element, along the y axis.
+ } Clay_Sizing;
+ 
++// Identifies a cross-tree sizing constraint group. Elements sharing a non-zero
++// group id on a given axis have their fit-sizes equalized to the per-group max
++// before grow distribution. Used by Clay::UI::Grid to implement auto-sized
++// columns and rows; also usable directly for cross-tree alignment (form labels,
++// equal-height buttons, etc.).
++typedef struct Clay_SizingGroup {
++    uint32_t width;  // Width-axis group id; 0 means no group on this axis.
++    uint32_t height; // Height-axis group id; 0 means no group on this axis.
++} Clay_SizingGroup;
++
+ // Controls "padding" in pixels, which is a gap between the bounding box of this element and where its children
+ // will be placed.
+ typedef struct Clay_Padding {
+@@ -867,6 +877,10 @@
+     // Controls settings related to element borders, and will generate BORDER render commands.
+     Clay_BorderElementConfig border;
+     Clay_TransitionElementConfig transition;
++    // Cross-tree sizing constraint group. Non-zero width/height ids cause this
++    // element to share its fit-size with all other elements declaring the same
++    // id on the same axis (max wins). Default 0 = no group.
++    Clay_SizingGroup sizingGroup;
+     // A pointer that will be transparently passed through to resulting render commands.
+     void *userData;
+ } Clay_ElementDeclaration;
+@@ -1192,6 +1206,13 @@
+ CLAY__ARRAY_DEFINE_FUNCTIONS(Clay_RenderCommand, Clay_RenderCommandArray)
+ 
+ typedef struct {
++    uint32_t id;
++    float maxSize;
++} Clay__SizingGroupEntry;
++
++CLAY__ARRAY_DEFINE(Clay__SizingGroupEntry, Clay__SizingGroupEntryArray)
++
++typedef struct {
+     Clay_Dimensions dimensions;
+     Clay_String line;
+ } Clay__WrappedTextLine;
+@@ -1375,6 +1396,11 @@
+     Clay__TransitionDataInternalArray transitionDatas;
+     Clay__boolArray treeNodeVisited;
+     Clay__charArray dynamicStringData;
++    // Per-frame storage for sizing-group equalization (one entry per distinct
++    // group id encountered on each axis). Allocated as ephemeral memory and
++    // reset every frame.
++    Clay__SizingGroupEntryArray sizingGroupsX;
++    Clay__SizingGroupEntryArray sizingGroupsY;
+ };
+ 
+ Clay_Context* Clay__Context_Allocate_Arena(Clay_Arena *arena) {
+@@ -2240,6 +2266,8 @@
+     context->reusableElementIndexBuffer = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+     context->layoutElementClipElementIds = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+     context->dynamicStringData = Clay__charArray_Allocate_Arena(maxElementCount, arena);
++    context->sizingGroupsX = Clay__SizingGroupEntryArray_Allocate_Arena(maxElementCount, arena);
++    context->sizingGroupsY = Clay__SizingGroupEntryArray_Allocate_Arena(maxElementCount, arena);
+ }
+ 
+ void Clay__InitializePersistentMemory(Clay_Context* context) {
+@@ -2570,9 +2598,134 @@
+            (boundingBox->y + boundingBox->height < 0);
+ }
+ 
++// Equalizes the per-axis dimensions of elements that share a sizing group id.
++// Walks all layout elements twice: first to compute the max fit-size per group,
++// then to write that max back to every member. PERCENT and FIXED elements do
++// not participate (their sizes are independent of content). Returns true if
++// any element's dimension actually changed, allowing the caller to skip a
++// follow-up propagation pass when nothing was equalized.
++bool Clay__EqualizeSizingGroups(bool xAxis) {
++    Clay_Context* context = Clay_GetCurrentContext();
++    Clay__SizingGroupEntryArray* groups = xAxis ? &context->sizingGroupsX : &context->sizingGroupsY;
++    groups->length = 0;
++
++    for (int32_t i = 0; i < context->layoutElements.length; ++i) {
++        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
++        if (element->isTextElement) continue;
++        uint32_t groupId = xAxis ? element->config.sizingGroup.width : element->config.sizingGroup.height;
++        if (groupId == 0) continue;
++        Clay__SizingType sizingType = xAxis ? element->config.layout.sizing.width.type
++                                            : element->config.layout.sizing.height.type;
++        if (sizingType == CLAY__SIZING_TYPE_FIXED || sizingType == CLAY__SIZING_TYPE_PERCENT) continue;
++        float size = xAxis ? element->dimensions.width : element->dimensions.height;
++        bool found = false;
++        for (int32_t g = 0; g < groups->length; ++g) {
++            Clay__SizingGroupEntry* entry = Clay__SizingGroupEntryArray_Get(groups, g);
++            if (entry->id == groupId) {
++                if (size > entry->maxSize) entry->maxSize = size;
++                found = true;
++                break;
++            }
++        }
++        if (!found) {
++            Clay__SizingGroupEntryArray_Add(groups, CLAY__INIT(Clay__SizingGroupEntry) { .id = groupId, .maxSize = size });
++        }
++    }
++
++    if (groups->length == 0) return false;
++
++    bool changed = false;
++    for (int32_t i = 0; i < context->layoutElements.length; ++i) {
++        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
++        if (element->isTextElement) continue;
++        uint32_t groupId = xAxis ? element->config.sizingGroup.width : element->config.sizingGroup.height;
++        if (groupId == 0) continue;
++        Clay__SizingType sizingType = xAxis ? element->config.layout.sizing.width.type
++                                            : element->config.layout.sizing.height.type;
++        if (sizingType == CLAY__SIZING_TYPE_FIXED || sizingType == CLAY__SIZING_TYPE_PERCENT) continue;
++        for (int32_t g = 0; g < groups->length; ++g) {
++            Clay__SizingGroupEntry* entry = Clay__SizingGroupEntryArray_Get(groups, g);
++            if (entry->id == groupId) {
++                float* dim    = xAxis ? &element->dimensions.width    : &element->dimensions.height;
++                float* minDim = xAxis ? &element->minDimensions.width : &element->minDimensions.height;
++                if (*dim != entry->maxSize) {
++                    *dim = entry->maxSize;
++                    changed = true;
++                }
++                // Raise minDimensions to the group max so Clay's shrink-to-fit
++                // logic treats every group member uniformly: a sizing group is
++                // an indivisible unit on this axis and cannot be compressed
++                // below its largest member without breaking alignment.
++                if (*minDim < entry->maxSize) {
++                    *minDim = entry->maxSize;
++                }
++                break;
++            }
++        }
++    }
++    return changed;
++}
++
++// Walks elements in reverse declaration order (which approximates post-order
++// because children are declared after their parents in the DSL) and, for each
++// FIT container on the requested axis, re-aggregates its dimension from its
++// children's current dimensions. Elements that themselves belong to a sizing
++// group on this axis are skipped: their dimension was just set by
++// Clay__EqualizeSizingGroups and is authoritative. Used on the X axis after
++// equalization to widen parent rows; the Y axis has Clay's existing DFS
++// propagation pass which automatically picks up equalized values.
++void Clay__PropagateFitSizeUp(bool xAxis) {
++    Clay_Context* context = Clay_GetCurrentContext();
++    for (int32_t i = context->layoutElements.length - 1; i >= 0; --i) {
++        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
++        if (element->isTextElement) continue;
++        if (element->children.length == 0) continue;
++        uint32_t groupId = xAxis ? element->config.sizingGroup.width : element->config.sizingGroup.height;
++        if (groupId != 0) continue;
++        Clay_SizingAxis sizing = xAxis ? element->config.layout.sizing.width
++                                       : element->config.layout.sizing.height;
++        if (sizing.type != CLAY__SIZING_TYPE_FIT) continue;
++
++        Clay_LayoutConfig* layoutConfig = &element->config.layout;
++        bool sizingAlongAxis = (xAxis && layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT)
++                            || (!xAxis && layoutConfig->layoutDirection == CLAY_TOP_TO_BOTTOM);
++        float padding = xAxis ? (float)(layoutConfig->padding.left + layoutConfig->padding.right)
++                              : (float)(layoutConfig->padding.top + layoutConfig->padding.bottom);
++        float newSize;
++        if (sizingAlongAxis) {
++            newSize = padding;
++            for (int32_t j = 0; j < element->children.length; ++j) {
++                Clay_LayoutElement* child = Clay_LayoutElementArray_Get(&context->layoutElements, element->children.elements[j]);
++                newSize += xAxis ? child->dimensions.width : child->dimensions.height;
++            }
++            if (element->children.length > 1) {
++                newSize += (float)(element->children.length - 1) * (float)layoutConfig->childGap;
++            }
++        } else {
++            float maxChild = 0;
++            for (int32_t j = 0; j < element->children.length; ++j) {
++                Clay_LayoutElement* child = Clay_LayoutElementArray_Get(&context->layoutElements, element->children.elements[j]);
++                float c = xAxis ? child->dimensions.width : child->dimensions.height;
++                if (c > maxChild) maxChild = c;
++            }
++            newSize = maxChild + padding;
++        }
++        newSize = CLAY__MIN(CLAY__MAX(newSize, sizing.size.minMax.min), sizing.size.minMax.max);
++        if (xAxis) element->dimensions.width = newSize;
++        else element->dimensions.height = newSize;
++    }
++}
++
+ void Clay__CalculateFinalLayout(float deltaTime, bool useStoredBoundingBoxes, bool generateRenderCommands) {
+     Clay_Context* context = Clay_GetCurrentContext();
+ 
++    // Equalize X-axis sizing groups before X distribution. If anything was
++    // equalized, propagate the new widths up through FIT-width parents so
++    // row containers grow to accommodate widened cells.
++    if (Clay__EqualizeSizingGroups(true)) {
++        Clay__PropagateFitSizeUp(true);
++    }
++
+     // Calculate sizing along the X axis
+     Clay__int32_tArray textElements = context->openClipElementStack;
+     textElements.length = 0;
+@@ -2690,6 +2843,13 @@
+         }
+     }
+ 
++    // Equalize Y-axis sizing groups after the existing height-propagation DFS
++    // has settled wrapped-text heights, then propagate any equalized heights
++    // back up through non-group FIT-height ancestors.
++    if (Clay__EqualizeSizingGroups(false)) {
++        Clay__PropagateFitSizeUp(false);
++    }
++
+     // Calculate sizing along the Y axis
+     Clay__SizeContainersAlongAxis(false, deltaTime, NULL, NULL);
+ 

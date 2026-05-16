@@ -14,3 +14,8 @@ references
 /Layout.o
 /Layout.bs
 /src/*.o
+
+# Patched build copy of clay.h (regenerated from clay.h.orig + patches/*.patch
+# by make; see Makefile.PL postamble). The pristine clay.h.orig is committed.
+/src/clay/clay.h
+/src/clay/.patched
