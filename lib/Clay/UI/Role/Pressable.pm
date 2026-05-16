@@ -1,0 +1,108 @@
+package Clay::UI::Role::Pressable;
+
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Object::Pad 0.800;
+
+use Clay::Layout qw(
+	CLAY_POINTER_DATA_PRESSED
+	CLAY_POINTER_DATA_PRESSED_THIS_FRAME
+);
+
+use Clay::UI::Role::Hoverable;
+use Clay::UI::Events::OnPress;
+
+our $VERSION = '0.01';
+
+role Clay::UI::Role::Pressable :does(Clay::UI::Role::Hoverable) {
+	field $is_pressed :reader = 0;
+
+	# Last pointer.state observed during this frame's Clay_OnHover
+	# trampoline. The transition hook turns this into $is_pressed at
+	# end-of-frame, which lets the reader stay valid between renders.
+	field $_press_state_this_frame = undef;
+
+	ADJUST {
+		$self->_register_pointer_hook(sub ($pointer, $userdata) {
+			$_press_state_this_frame = $pointer->{state};
+
+			# Fire OnPress on the leading edge (PRESSED_THIS_FRAME from
+			# a non-pressed state). is_pressed has not yet been updated
+			# by the transition hook for this frame, so it still holds
+			# the previous frame's value.
+			if (!$is_pressed && $pointer->{state} == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+				my $pos = $pointer->{position} // { x => 0, y => 0 };
+				$self->fire_event(Clay::UI::Events::OnPress->new(
+					x        => $pos->{x},
+					y        => $pos->{y},
+					userdata => $userdata,
+				));
+			}
+		});
+
+		$self->_register_transition_hook(sub ($was_over) {
+			if (!$was_over) {
+				# Pointer not over this widget this frame: no callback
+				# fired, so we can't be pressed on this element.
+				$is_pressed = 0;
+			} else {
+				my $st = $_press_state_this_frame;
+				$is_pressed = (defined $st
+					&& ($st == CLAY_POINTER_DATA_PRESSED
+					 || $st == CLAY_POINTER_DATA_PRESSED_THIS_FRAME)) ? 1 : 0;
+			}
+			$_press_state_this_frame = undef;
+		});
+	}
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+Clay::UI::Role::Pressable - stateful press-tracking + OnPress event
+
+=head1 SYNOPSIS
+
+	use Object::Pad;
+	use Clay::UI::Role::Element;
+	use Clay::UI::Role::Pressable;
+
+	class My::Button
+		:does(Clay::UI::Role::Element)
+		:does(Clay::UI::Role::Pressable)
+	{}
+
+	my $btn = My::Button->new(id => 'go');
+	$btn->on('OnPress', sub ($e) {
+		warn sprintf "pressed at (%d,%d)", $e->x, $e->y;
+	});
+
+=head1 DESCRIPTION
+
+Composed with L<Clay::UI::Role::Hoverable> (so press-trackable widgets
+are also hover-trackable). Adds:
+
+=over 4
+
+=item C<is_pressed> (reader)
+
+Live boolean reflecting whether the pointer is currently down B<and>
+over the widget. Goes back to 0 when either condition becomes false.
+
+=back
+
+Fires L<Clay::UI::Events::OnPress> on the leading edge of the
+press-down state (Clay's C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>).
+Subsequent frames of held-down state do not refire; release the pointer
+and press again to get another event.
+
+Emitter is composed transitively (through Hoverable), so no extra
+roles are needed on the consuming widget.
+
+=cut

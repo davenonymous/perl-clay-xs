@@ -19,7 +19,7 @@ no warnings 'experimental::signatures';
 use Clay::Layout qw(:all);
 use Clay::UI;
 use Clay::UI::Box;
-use Clay::UI::Cell;
+use Clay::UI::Grid::Cell;
 use Clay::UI::Text;
 use Clay::UI::Grid;
 
@@ -127,7 +127,7 @@ sub label ($text, $font_size = 16) {
 }
 
 sub header_cell ($text) {
-	return Clay::UI::Cell->new(
+	return Clay::UI::Grid::Cell->new(
 		layout           => { padding => { left => 12, right => 12, top => 8, bottom => 8 } },
 		background_color => $HEADER_BG,
 		border_color     => $BORDER,
@@ -137,7 +137,7 @@ sub header_cell ($text) {
 }
 
 sub body_cell ($text, $r) {
-	return Clay::UI::Cell->new(
+	return Clay::UI::Grid::Cell->new(
 		layout           => { padding => { left => 12, right => 12, top => 8, bottom => 8 } },
 		background_color => ($r % 2 ? $ALT_BG : $CELL_BG),
 		border_color     => $BORDER,

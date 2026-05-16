@@ -12,11 +12,13 @@ no warnings 'experimental';
 
 use Clay::UI::Role::HasSizingGroup;
 use Clay::UI::Role::HasParent;
+use Clay::UI::Events::Listener;
 
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup)
-                              :does(Clay::UI::Role::HasParent) {
+                              :does(Clay::UI::Role::HasParent)
+                              :does(Clay::UI::Events::Listener) {
 	no warnings 'experimental';
 
 	field $id       :param :reader = undef;

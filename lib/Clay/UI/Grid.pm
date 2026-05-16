@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 use Clay::Layout qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
 use Clay::UI::Box;
-use Clay::UI::Cell;
+use Clay::UI::Grid::Cell;
 use Clay::UI::Role::Element;
 use Clay::UI::Role::HasLayout;
 use Clay::UI::Role::HasBackground;
@@ -34,10 +34,10 @@ class Clay::UI::Grid
 	field $cell_gap :param = 0;
 	field $row_gap  :param = 0;
 	# Per-cell wrappers ([row][col]). For each input cell: if it is already a
-	# Clay::UI::Cell, it is used directly (so the caller's styling becomes the
-	# visible cell); otherwise the Grid wraps it in an unstyled Cell. The
-	# wrapper is what Clay sees with the sizing-group ids set, so its rendered
-	# box is exactly the equalized column-width x row-height.
+	# Clay::UI::Grid::Cell, it is used directly (so the caller's styling
+	# becomes the visible cell); otherwise the Grid wraps it in an unstyled
+	# Cell. The wrapper is what Clay sees with the sizing-group ids set, so
+	# its rendered box is exactly the equalized column-width x row-height.
 	field $cell_wrappers :reader = [];
 
 	ADJUST {
@@ -63,9 +63,9 @@ class Clay::UI::Grid
 			my @wrapper_row;
 			for my $c (0 .. $#$row) {
 				my $cell    = $row->[$c];
-				my $wrapper = $cell->isa('Clay::UI::Cell')
+				my $wrapper = $cell->isa('Clay::UI::Grid::Cell')
 					? $cell
-					: Clay::UI::Cell->new(
+					: Clay::UI::Grid::Cell->new(
 						layout   => { sizing => { width => sizing_fit(), height => sizing_fit() } },
 						children => [ $cell ],
 					);
@@ -171,8 +171,8 @@ Pixel gap between rows. Used as the outer container's C<child_gap>.
 
 =head1 STYLING CELLS
 
-Pass L<Clay::UI::Cell> instances directly in C<rows> to control each
-cell's appearance. The Grid recognises Cell objects and uses them as
+Pass L<Clay::UI::Grid::Cell> instances directly in C<rows> to control
+each cell's appearance. The Grid recognises Cell objects and uses them as
 the per-cell wrapper, so their background / border / padding / corner
 radius render exactly at the equalized column-width x row-height.
 

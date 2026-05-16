@@ -97,16 +97,18 @@ above.
 
 `Clay::UI::Grid` builds row-major grids whose columns shrink-wrap to
 their widest cell and rows to their tallest, in a single layout pass
-(no two-pass measure, first-frame correct). Pass `Clay::UI::Cell`
+(no two-pass measure, first-frame correct). Pass `Clay::UI::Grid::Cell`
 instances for styled cells; the Grid auto-wraps non-Cell widgets:
 
 ```perl
-use Clay::UI::{Cell, Grid, Text};
+use Clay::UI::Grid;
+use Clay::UI::Grid::Cell;
+use Clay::UI::Text;
 
 my $grid = Clay::UI::Grid->new(
     id   => 'report',
     rows => [
-        [ Clay::UI::Cell->new(
+        [ Clay::UI::Grid::Cell->new(
               background_color => [55, 90, 140, 255],
               children         => [ Clay::UI::Text->new(text => 'Header') ],
           ),
@@ -122,6 +124,42 @@ Every widget (not just grid cells) accepts `width_group => N` /
 equalized to the per-group max. Use this for form-label alignment,
 equal-height buttons, etc., independent of the Grid widget. See
 `examples/05-ui-grid.pl` for an SVG demo.
+
+### Events
+
+A small DOM-style event system, split in two roles:
+
+- `Clay::UI::Events::Listener` is composed transitively into every
+  widget (via `Role::Element` and `Role::TextNode`), giving everything
+  `on($name, $sub)` and the ability to receive bubbled events.
+- `Clay::UI::Events::Emitter` is composed only into widgets that
+  originate events (currently `Box` and `Button`), adding
+  `fire_event($event)`.
+
+```perl
+use Clay::UI::Events qw(EVENT_HANDLED EVENT_CONTINUE BUBBLE_ALWAYS);
+use Clay::UI::Events::OnPress;
+
+$button->on('OnPress', sub ($event) {
+    warn "pressed ", $event->target->id, " at (", $event->x, ",", $event->y, ")";
+    return EVENT_HANDLED;  # stop bubbling (only matters in BUBBLE_IF_CONTINUE mode)
+});
+
+# Fire manually (or let Button's hover callback fire it for you):
+$button->fire_event(
+    Clay::UI::Events::OnPress->new(x => 10, y => 20, bubble_mode => BUBBLE_ALWAYS),
+);
+```
+
+Event objects are typed Object::Pad classes (`OnHoverStart`,
+`OnHoverStopped`, `OnPress`, `OnScroll`, plus the base `Event`); bubble
+policy is carried on the event (`BUBBLE_ALWAYS`, `BUBBLE_IF_CONTINUE`,
+`BUBBLE_NEVER`). Hover/press events are driven by the
+`Clay::UI::Role::Hoverable` and `Clay::UI::Role::Pressable` roles -
+composing those gives a widget edge-triggered `OnHoverStart` /
+`OnHoverStopped` / `OnPress` events plus `is_hovered` / `is_pressed`
+state readers without any custom callback wiring. `Clay::UI::Button`
+is just `Stateful + Pressable + the visual mixins`.
 
 ## What's here
 
@@ -140,7 +178,7 @@ equal-height buttons, etc., independent of the Grid widget. See
 | Phase 11: golden-fixture regression harness                         | Complete      |
 | Phase 12: documentation and examples                                | Complete      |
 | Phase 13: Perl-idiomatic high-level layer (`Clay::UI`, roles + widgets) | Complete  |
-| Phase 14: cross-tree sizing groups + `Clay::UI::{Cell,Grid}` widgets | Complete  |
+| Phase 14: cross-tree sizing groups + `Clay::UI::Grid` + `Clay::UI::Grid::Cell` | Complete  |
 
 ## Known limitations
 

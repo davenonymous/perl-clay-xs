@@ -23,7 +23,6 @@ use Imager;
 use Clay::Layout qw(:all);
 use Clay::UI;
 use Clay::UI::Box;
-use Clay::UI::Cell;
 use Clay::UI::Text;
 
 # ---------------------------------------------------------------------------
@@ -170,7 +169,7 @@ sub build_tree () {
     my @cards;
     for my $i (0 .. 2) {
         my ($name, $align) = @{ $ALIGN_DEMO[$i] };
-        push @cards, Clay::UI::Cell->new(
+        push @cards, Clay::UI::Box->new(
             id => "card-$i",
             layout => {
                 sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -202,7 +201,7 @@ sub build_tree () {
         },
         background_color => [245, 246, 250, 255],
         children => [
-            Clay::UI::Cell->new(
+            Clay::UI::Box->new(
                 id => 'header',
                 layout => {
                     sizing          => { width => sizing_grow(), height => sizing_fixed(48) },
@@ -213,7 +212,7 @@ sub build_tree () {
                 corner_radius    => 6,
                 children         => [ label("Clay -> PNG demo", 20) ],
             ),
-            Clay::UI::Cell->new(
+            Clay::UI::Box->new(
                 id => 'body',
                 layout => {
                     sizing    => { width => sizing_grow(), height => sizing_grow() },

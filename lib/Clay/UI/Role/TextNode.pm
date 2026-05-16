@@ -8,10 +8,12 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::Role::HasParent;
+use Clay::UI::Events::Listener;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::TextNode :does(Clay::UI::Role::HasParent) {
+role Clay::UI::Role::TextNode :does(Clay::UI::Role::HasParent)
+                              :does(Clay::UI::Events::Listener) {
 	method text;
 	method text_config;
 }

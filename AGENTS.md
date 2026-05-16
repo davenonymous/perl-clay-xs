@@ -127,7 +127,7 @@ Useful invocations:
   `t/12-ui-widgets.t`. Example: `examples/04-ui-sidebar.pl`.
 - Phase 14 added the Clay-level sizing-group feature (vendored patch),
   the Perl-side `HasSizingGroup` mixin (composed transitively into every
-  widget via `Role::Element`), and the `Clay::UI::{Cell,Grid}` widgets
+  widget via `Role::Element`), and the `Clay::UI::Grid` + `Clay::UI::Grid::Cell` widgets
   for auto-sized grid layouts. The Grid wraps each cell in a `Cell`
   carrying the per-column / per-row group ids, so each column shrink-
   wraps to its widest cell and each row to its tallest, in a single
@@ -163,7 +163,25 @@ Useful invocations:
    after `Clay_Initialize` will dispatch hover callbacks with that
    ghost state regardless of `isPointerDown`. Tests of click behavior
    need a warm-up frame to settle Clay into `RELEASED`.
-7. The walker injects `user_data => refaddr($widget)` into every
+7. The event system is split in two: `Clay::UI::Events::Listener`
+   (the `on($name, $sub)` / `handlers_for($name)` half) is composed
+   transitively into every widget through `Role::Element` and
+   `Role::TextNode`, so anything can register a handler and be a
+   bubble target. `Clay::UI::Events::Emitter` (the `fire_event($event)`
+   half) is composed into widgets that originate events: directly on
+   `Box`, transitively via `Role::Hoverable` (which itself composes
+   Emitter) on `Button` and anything else that goes through
+   Hoverable/Pressable. Neither role composes
+   `Role::HasParent` itself (would form a diamond); both declare
+   `method parent;` as a requirement and let the consuming widget
+   supply it. The bubble walk uses the existing weak-parent chain.
+   An event object is single-use: the first `fire_event` stamps
+   `target` and any subsequent dispatch dies. In `BUBBLE_IF_CONTINUE`
+   mode, the stop check is per-node (all handlers at a node always
+   run); after the list, only an all-`EVENT_CONTINUE` outcome keeps
+   bubbling. Bubble-mode and result constants are typed singletons
+   backed by `Object::PadX::Enum`; compare with `==`, never `eq`.
+8. The walker injects `user_data => refaddr($widget)` into every
    element and text config and maintains a module-level weak registry
    so `Clay::UI::widget_for($cmd->{userData})` can recover the
    originating widget from a render command. A widget's `to_config`

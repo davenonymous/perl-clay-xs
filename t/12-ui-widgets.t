@@ -140,19 +140,22 @@ subtest 'ScrollPanel emits scroll container' => sub {
 # Button hover + click callback dispatch.
 # -----------------------------------------------------------------------------
 
-subtest 'Button dispatches hover and click' => sub {
+subtest 'Button: hover-edge events, press events, live state readers' => sub {
 	@errors = ();
 
-	my @hover_calls;
-	my @click_calls;
+	my @hover_start;
+	my @hover_stop;
+	my @press;
 
 	my $button = Clay::UI::Button->new(
 		id               => 'btn',
 		layout           => { sizing => { width => sizing_fixed(100), height => sizing_fixed(40) } },
 		background_color => [70, 130, 200, 255],
-		on_hover         => sub ($id, $pointer, $ud) { push @hover_calls, $pointer->{position} },
-		on_click         => sub ($id, $pointer, $ud) { push @click_calls, $pointer->{position} },
 	);
+	$button->on('OnHoverStart',   sub ($e) { push @hover_start, $e->target });
+	$button->on('OnHoverStopped', sub ($e) { push @hover_stop,  $e->target });
+	$button->on('OnPress',        sub ($e) { push @press, { x => $e->x, y => $e->y } });
+
 	my $ui = make_ui($button);
 
 	# Frame 1: build geometry (no pointer state yet).
@@ -165,27 +168,45 @@ subtest 'Button dispatches hover and click' => sub {
 	# before the real test frames begin.
 	$ui->render( pointer_state => { x => -100, y => -100, down => 0 } );
 
-	@hover_calls = ();
-	@click_calls = ();
+	@hover_start = ();
+	@hover_stop  = ();
+	@press       = ();
 
-	# Frame 2: pointer hovering, not pressed.
+	is( $button->is_hovered, 0, 'pointer not over yet => is_hovered false' );
+	is( $button->is_pressed, 0, '...and is_pressed false' );
+
+	# Frame 2: pointer hovering, not pressed. Edge-trigger: OnHoverStart fires.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
 
-	is( scalar(@hover_calls), 1, 'on_hover fired while pointer over element' );
-	is( scalar(@click_calls), 0, 'on_click did not fire without press' );
+	is( scalar(@hover_start), 1, 'OnHoverStart fired on entry' );
+	is( scalar(@hover_stop),  0, 'OnHoverStopped not yet' );
+	is( $button->is_hovered,  1, 'is_hovered true' );
+	is( $button->is_pressed,  0, 'is_pressed still false (not pressed)' );
 
-	# Frame 3: button pressed. Clay's hover dispatch uses the CURRENT
-	# state (still RELEASED) and only transitions to PRESSED_THIS_FRAME
-	# after dispatching. So the press is observed on frame 4.
+	# Frame 3: still hovering => no new edge event.
+	$ui->render( pointer_state => { x => 51, y => 21, down => 0 } );
+
+	is( scalar(@hover_start), 1, 'OnHoverStart edge-triggered: no refire while still over' );
+
+	# Frame 4: pointer leaves => OnHoverStopped fires once.
+	$ui->render( pointer_state => { x => -100, y => -100, down => 0 } );
+
+	is( scalar(@hover_stop), 1, 'OnHoverStopped fired on exit' );
+	is( $button->is_hovered, 0, 'is_hovered back to false' );
+
+	# Frame 5: enter again, this time pressed. Clay reports
+	# PRESSED_THIS_FRAME the frame AFTER `down => 1` is first observed,
+	# so we need a follow-up frame.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
+	is( scalar(@press), 0, 'press pending: state still RELEASED on first down-frame' );
 
-	is( scalar(@hover_calls), 2, 'on_hover fired again' );
-	is( scalar(@click_calls), 0, 'on_click pending: state transitioned to PRESSED_THIS_FRAME post-dispatch' );
-
-	# Frame 4: dispatch now sees PRESSED_THIS_FRAME.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
+	is( scalar(@press),  1,  'OnPress fired once Clay transitioned to PRESSED_THIS_FRAME' );
+	is( $button->is_pressed, 1, 'is_pressed true while held' );
 
-	is( scalar(@click_calls), 1, 'on_click fired once the PRESSED_THIS_FRAME state was visible' );
+	# Holding => no refire on subsequent frames (still PRESSED, not PRESSED_THIS_FRAME).
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
+	is( scalar(@press), 1, 'OnPress edge-triggered: no refire while held' );
 };
 
 # -----------------------------------------------------------------------------

@@ -14,6 +14,7 @@ use Clay::UI::Role::HasBorder;
 use Clay::UI::Role::HasCornerRadius;
 use Clay::UI::Role::HasClip;
 use Clay::UI::Role::HasFloating;
+use Clay::UI::Events::Emitter;
 
 our $VERSION = '0.01';
 
@@ -25,6 +26,7 @@ class Clay::UI::Box
 	:does(Clay::UI::Role::HasCornerRadius)
 	:does(Clay::UI::Role::HasClip)
 	:does(Clay::UI::Role::HasFloating)
+	:does(Clay::UI::Events::Emitter)
 {}
 
 1;
