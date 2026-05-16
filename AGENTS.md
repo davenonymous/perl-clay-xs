@@ -139,6 +139,15 @@ Useful invocations:
    after `Clay_Initialize` will dispatch hover callbacks with that
    ghost state regardless of `isPointerDown`. Tests of click behavior
    need a warm-up frame to settle Clay into `RELEASED`.
+7. The walker injects `user_data => refaddr($widget)` into every
+   element and text config and maintains a module-level weak registry
+   so `Clay::UI::widget_for($cmd->{userData})` can recover the
+   originating widget from a render command. A widget's `to_config`
+   (or `text_config`) that sets `user_data` itself triggers a fail-loud
+   error - pick one mechanism. The walker builds + validates the config
+   BEFORE calling `Clay__OpenElementWithId` so a conflict cannot leave
+   Clay's open-element stack unbalanced (an unbalanced stack SEGVs
+   `Clay_EndLayout`).
 
 ## Pointers when something breaks
 
