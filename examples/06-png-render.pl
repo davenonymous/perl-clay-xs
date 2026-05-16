@@ -144,9 +144,19 @@ sub render_to_png ($commands, $width, $height, $path) {
 # ---------------------------------------------------------------------------
 
 my $out = $ARGV[0] // 'out.png';
-my ($W, $H) = (480, 280);
+my ($W, $H) = (720, 360);
 
 my $WHITE = [255, 255, 255, 255];
+
+my $LOREM = 'Clay reflows this sentence to fit the card width, '
+          . 'breaking on word boundaries so each alignment value '
+          . 'can be compared side by side.';
+
+my @ALIGN_DEMO = (
+    [ 'left',   CLAY_TEXT_ALIGN_LEFT   ],
+    [ 'center', CLAY_TEXT_ALIGN_CENTER ],
+    [ 'right',  CLAY_TEXT_ALIGN_RIGHT  ],
+);
 
 sub label ($text, $font_size = 16) {
     return Clay::UI::Text->new(
@@ -159,16 +169,26 @@ sub label ($text, $font_size = 16) {
 sub build_tree () {
     my @cards;
     for my $i (0 .. 2) {
+        my ($name, $align) = @{ $ALIGN_DEMO[$i] };
         push @cards, Clay::UI::Cell->new(
             id => "card-$i",
             layout => {
-                sizing          => { width => sizing_grow(), height => sizing_grow() },
-                padding         => padding_all(8),
-                child_alignment => { x => CLAY_ALIGN_X_CENTER, y => CLAY_ALIGN_Y_CENTER },
+                sizing           => { width => sizing_grow(), height => sizing_grow() },
+                padding          => padding_all(10),
+                child_gap        => 8,
+                layout_direction => CLAY_TOP_TO_BOTTOM,
             },
             background_color => [225 - $i * 40, 138, 50 + $i * 30, 255],
             corner_radius    => 4,
-            children         => [ label("card $i") ],
+            children         => [
+                label("card $i ($name)"),
+                Clay::UI::Text->new(
+                    text           => $LOREM,
+                    font_size      => 14,
+                    text_color     => $WHITE,
+                    text_alignment => $align,
+                ),
+            ],
         );
     }
 
