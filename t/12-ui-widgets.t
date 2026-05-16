@@ -146,6 +146,7 @@ subtest 'Button: hover-edge events, press events, live state readers' => sub {
 	my @hover_start;
 	my @hover_stop;
 	my @press;
+	my @release;
 
 	my $button = Clay::UI::Button->new(
 		id               => 'btn',
@@ -154,7 +155,8 @@ subtest 'Button: hover-edge events, press events, live state readers' => sub {
 	);
 	$button->on('OnHoverStart',   sub ($e) { push @hover_start, $e->target });
 	$button->on('OnHoverStopped', sub ($e) { push @hover_stop,  $e->target });
-	$button->on('OnPress',        sub ($e) { push @press, { x => $e->x, y => $e->y } });
+	$button->on('OnPress',        sub ($e) { push @press,   { x => $e->x, y => $e->y } });
+	$button->on('OnRelease',      sub ($e) { push @release, { x => $e->x, y => $e->y } });
 
 	my $ui = make_ui($button);
 
@@ -206,7 +208,34 @@ subtest 'Button: hover-edge events, press events, live state readers' => sub {
 
 	# Holding => no refire on subsequent frames (still PRESSED, not PRESSED_THIS_FRAME).
 	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
-	is( scalar(@press), 1, 'OnPress edge-triggered: no refire while held' );
+	is( scalar(@press),   1, 'OnPress edge-triggered: no refire while held' );
+	is( scalar(@release), 0, 'OnRelease not yet (still held)' );
+
+	# Release the pointer while over the button: Clay observes RELEASED_THIS_FRAME
+	# the frame after `down => 0` is first reported, mirroring the press path.
+	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
+	is( scalar(@release), 0, 'release pending: state still PRESSED on first up-frame' );
+
+	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
+	is( scalar(@release),    1, 'OnRelease fired once Clay transitioned to RELEASED_THIS_FRAME' );
+	is( $button->is_pressed, 0, 'is_pressed back to false after release' );
+
+	# Hold still => no refire.
+	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
+	is( scalar(@release), 1, 'OnRelease edge-triggered: no refire while idle' );
+
+	# Press, then drag off-element and release: OnRelease must NOT fire,
+	# because the underlying Clay_OnHover only runs while the pointer is
+	# over the element. is_pressed drops to 0 once the pointer leaves.
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );  # PRESSED_THIS_FRAME edge
+	is( scalar(@press), 2, 'second press registered' );
+
+	$ui->render( pointer_state => { x => -100, y => -100, down => 1 } );  # drag off, still down
+	is( $button->is_pressed, 0, 'is_pressed reset once pointer leaves the widget' );
+
+	$ui->render( pointer_state => { x => -100, y => -100, down => 0 } );  # release off-element
+	is( scalar(@release), 1, 'no OnRelease when release happens off-element (click-cancel)' );
 };
 
 # -----------------------------------------------------------------------------

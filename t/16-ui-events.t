@@ -15,6 +15,7 @@ use Clay::UI::Events::Event;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
 use Clay::UI::Events::OnPress;
+use Clay::UI::Events::OnRelease;
 use Clay::UI::Events::OnScroll;
 
 # -----------------------------------------------------------------------------
@@ -36,6 +37,7 @@ subtest 'event_name default propagates to name' => sub {
 	is( Clay::UI::Events::OnHoverStart  ->new->name, 'OnHoverStart',  'OnHoverStart defaults name' );
 	is( Clay::UI::Events::OnHoverStopped->new->name, 'OnHoverStopped','OnHoverStopped defaults name' );
 	is( Clay::UI::Events::OnPress       ->new->name, 'OnPress',       'OnPress defaults name' );
+	is( Clay::UI::Events::OnRelease     ->new->name, 'OnRelease',     'OnRelease defaults name' );
 	is( Clay::UI::Events::OnScroll      ->new->name, 'OnScroll',      'OnScroll defaults name' );
 
 	is(

@@ -99,7 +99,7 @@ of whether that ancestor is an Emitter.
 
 Build a typed event object (see L<Clay::UI::Events::Event> and the
 concrete subclasses C<OnHoverStart>, C<OnHoverStopped>, C<OnPress>,
-C<OnScroll>), then call
+C<OnRelease>, C<OnScroll>), then call
 C<< $widget->fire_event($event) >>. The emitter:
 
 =over 4
@@ -144,6 +144,7 @@ C<BUBBLE_NEVER> stops after the originating widget.
 
 L<Clay::UI::Events::Emitter>, L<Clay::UI::Events::Event>,
 L<Clay::UI::Events::OnHoverStart>, L<Clay::UI::Events::OnHoverStopped>,
-L<Clay::UI::Events::OnPress>, L<Clay::UI::Events::OnScroll>.
+L<Clay::UI::Events::OnPress>, L<Clay::UI::Events::OnRelease>,
+L<Clay::UI::Events::OnScroll>.
 
 =cut

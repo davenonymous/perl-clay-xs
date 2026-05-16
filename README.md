@@ -152,7 +152,8 @@ $button->fire_event(
 ```
 
 Event objects are typed Object::Pad classes (`OnHoverStart`,
-`OnHoverStopped`, `OnPress`, `OnScroll`, plus the base `Event`); bubble
+`OnHoverStopped`, `OnPress`, `OnRelease`, `OnScroll`, plus the base
+`Event`); bubble
 policy is carried on the event (`BUBBLE_ALWAYS`, `BUBBLE_IF_CONTINUE`,
 `BUBBLE_NEVER`). Hover/press events are driven by the
 `Clay::UI::Role::Hoverable` and `Clay::UI::Role::Pressable` roles -

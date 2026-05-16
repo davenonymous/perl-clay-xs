@@ -10,10 +10,12 @@ use Object::Pad 0.800;
 use Clay::Layout qw(
 	CLAY_POINTER_DATA_PRESSED
 	CLAY_POINTER_DATA_PRESSED_THIS_FRAME
+	CLAY_POINTER_DATA_RELEASED_THIS_FRAME
 );
 
 use Clay::UI::Role::Hoverable;
 use Clay::UI::Events::OnPress;
+use Clay::UI::Events::OnRelease;
 
 our $VERSION = '0.01';
 
@@ -33,9 +35,15 @@ role Clay::UI::Role::Pressable :does(Clay::UI::Role::Hoverable) {
 			# a non-pressed state). is_pressed has not yet been updated
 			# by the transition hook for this frame, so it still holds
 			# the previous frame's value.
+			my $pos = $pointer->{position} // { x => 0, y => 0 };
 			if (!$is_pressed && $pointer->{state} == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-				my $pos = $pointer->{position} // { x => 0, y => 0 };
 				$self->fire_event(Clay::UI::Events::OnPress->new(
+					x        => $pos->{x},
+					y        => $pos->{y},
+					userdata => $userdata,
+				));
+			} elsif ($is_pressed && $pointer->{state} == CLAY_POINTER_DATA_RELEASED_THIS_FRAME) {
+				$self->fire_event(Clay::UI::Events::OnRelease->new(
 					x        => $pos->{x},
 					y        => $pos->{y},
 					userdata => $userdata,
@@ -98,9 +106,31 @@ over the widget. Goes back to 0 when either condition becomes false.
 =back
 
 Fires L<Clay::UI::Events::OnPress> on the leading edge of the
-press-down state (Clay's C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>).
-Subsequent frames of held-down state do not refire; release the pointer
-and press again to get another event.
+press-down state (Clay's C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>) and
+L<Clay::UI::Events::OnRelease> on the matching release edge
+(C<CLAY_POINTER_DATA_RELEASED_THIS_FRAME>) B<while still over the
+widget>. Subsequent frames of held-down state do not refire OnPress;
+release the pointer and press again to get another event.
+
+The role intentionally does not fire its own synthetic "click" event:
+combine OnPress and OnRelease however you like - short press, long
+press, release-only, etc.
+
+	# Short vs long press:
+	my $down_at;
+	$btn->on('OnPress',   sub ($e) { $down_at = time });
+	$btn->on('OnRelease', sub ($e) {
+		(time - $down_at) < 0.3 ? short_click() : long_click();
+	});
+
+	# Release-only behavior (fires only when pointer was pressed AND
+	# released over the widget, i.e. a "successful click"):
+	$btn->on('OnRelease', sub ($e) { activate() });
+
+A release that happens after the pointer leaves the widget does not
+fire OnRelease - the underlying Clay_OnHover callback runs only while
+the pointer is over the element. Use that asymmetry for click-cancel
+behavior.
 
 Emitter is composed transitively (through Hoverable), so no extra
 roles are needed on the consuming widget.

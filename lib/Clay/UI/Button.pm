@@ -79,8 +79,15 @@ Edge-triggered: fires once on the frame the pointer leaves.
 =item L<Clay::UI::Events::OnPress>
 
 Edge-triggered: fires once on the frame the pointer becomes pressed
-while over the button. Drag-then-release elsewhere does B<not> refire
-on later releases.
+while over the button.
+
+=item L<Clay::UI::Events::OnRelease>
+
+Edge-triggered: fires once on the frame the pointer is released
+B<while still over> the button. A release that happens after the
+pointer drags off does not fire. Combine with C<OnPress> to implement
+whatever click semantics you want (short press, long press,
+release-only, etc).
 
 =back
 
