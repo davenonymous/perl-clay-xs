@@ -11,14 +11,23 @@ use Scalar::Util qw(blessed);
 no warnings 'experimental';
 
 use Clay::UI::Role::HasSizingGroup;
+use Clay::UI::Role::HasParent;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup) {
+role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup)
+                              :does(Clay::UI::Role::HasParent) {
 	no warnings 'experimental';
 
 	field $id       :param :reader = undef;
 	field $children :param :reader = [];
+
+	ADJUST {
+		for my $kid (@$children) {
+			_validate_child($kid);
+			$kid->_set_parent($self);
+		}
+	}
 
 	method resolve_id ($path) {
 		return $id if defined $id;
@@ -26,15 +35,18 @@ role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup) {
 	}
 
 	method add_child (@kids) {
-		for my $kid (@kids) {
-			next if blessed($kid)
-				&& ( $kid->DOES('Clay::UI::Role::Element')
-				  || $kid->DOES('Clay::UI::Role::TextNode') );
-			die "Clay::UI: add_child argument is not a widget (got "
-				. (ref($kid) || 'non-ref') . ")";
-		}
+		_validate_child($_) for @kids;
+		$_->_set_parent($self) for @kids;
 		push @$children, @kids;
 		return $self;
+	}
+
+	sub _validate_child ($kid) {
+		return if blessed($kid)
+			&& ( $kid->DOES('Clay::UI::Role::Element')
+			  || $kid->DOES('Clay::UI::Role::TextNode') );
+		die "Clay::UI: child is not a widget (got "
+			. (ref($kid) || 'non-ref') . ")";
 	}
 
 	method clear_children () {
@@ -117,7 +129,10 @@ L</resolve_id>.
 =head2 children (optional, default C<[]>)
 
 Arrayref of nested widget instances. Each element must consume
-C<Clay::UI::Role::Element>.
+C<Clay::UI::Role::Element> or C<Clay::UI::Role::TextNode>. Children
+passed at construction are validated and parent-stamped identically to
+L</add_child>, so the same no-reparenting rule applies to widgets
+handed to the constructor.
 
 =head1 METHODS
 
@@ -147,6 +162,12 @@ C<Clay::UI::Role::TextNode>; anything else dies with a descriptive
 error. Returns C<$self> so calls chain:
 
 	$root->add_child($header)->add_child($body, $footer);
+
+Stamps the parent reference (see L<Clay::UI::Role::HasParent>) on every
+kid. Dies if a kid already has a parent: a widget can be attached
+exactly once, and that includes re-adding it under the same parent
+(idempotent-builder patterns must construct fresh widgets per call).
+See L<Clay::UI::Role::HasParent/NO REPARENTING> for the full contract.
 
 =head2 clear_children
 

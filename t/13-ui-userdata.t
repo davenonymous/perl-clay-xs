@@ -72,9 +72,12 @@ subtest 'render commands carry refaddr in userData' => sub {
 		$widgets_seen{ refaddr $w } = $w;
 	}
 
-	is( $widgets_seen{ refaddr $root },      $root,      'root widget recovered' );
-	is( $widgets_seen{ refaddr $child_box }, $child_box, 'child box recovered' );
-	is( $widgets_seen{ refaddr $text_leaf }, $text_leaf, 'text leaf recovered' );
+	# Identity compare via refaddr: widgets now back-reference their
+	# parents (Clay::UI::Role::HasParent), creating a cycle that Test2's
+	# deep `is` cannot traverse.
+	is( refaddr $widgets_seen{ refaddr $root },      refaddr $root,      'root widget recovered' );
+	is( refaddr $widgets_seen{ refaddr $child_box }, refaddr $child_box, 'child box recovered' );
+	is( refaddr $widgets_seen{ refaddr $text_leaf }, refaddr $text_leaf, 'text leaf recovered' );
 
 	is( $ui->widget_for(undef), undef, 'undef -> undef' );
 	is( $ui->widget_for(0),     undef, '0 -> undef (Clay default for non-user elements)' );

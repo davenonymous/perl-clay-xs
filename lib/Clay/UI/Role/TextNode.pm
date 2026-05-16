@@ -7,9 +7,11 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::Role::HasParent;
+
 our $VERSION = '0.01';
 
-role Clay::UI::Role::TextNode {
+role Clay::UI::Role::TextNode :does(Clay::UI::Role::HasParent) {
 	method text;
 	method text_config;
 }

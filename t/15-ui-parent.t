@@ -1,0 +1,141 @@
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Test2::V0;
+use Scalar::Util qw(refaddr);
+
+sub same ($a, $b, $name) { is(refaddr($a), refaddr($b), $name) }
+
+use Clay::UI::Box;
+use Clay::UI::Text;
+
+# -----------------------------------------------------------------------------
+# Constructor-time stamping: children passed via `children => [...]` get
+# their parent slot filled before the caller ever sees the tree.
+# -----------------------------------------------------------------------------
+
+subtest 'root widget has no parent and is its own root' => sub {
+	my $root = Clay::UI::Box->new;
+	is($root->parent, undef, 'root parent is undef');
+	same($root->root, $root, 'root->root is itself');
+};
+
+subtest 'children passed at construction are parent-stamped' => sub {
+	my $kid    = Clay::UI::Box->new(id => 'kid');
+	my $parent = Clay::UI::Box->new(id => 'parent', children => [$kid]);
+	same($kid->parent, $parent, 'child parent points at constructor parent');
+	same($kid->root,   $parent, 'child root resolves to the parent');
+};
+
+subtest 'children added via add_child are parent-stamped' => sub {
+	my $parent = Clay::UI::Box->new(id => 'p');
+	my $kid    = Clay::UI::Box->new(id => 'k');
+	$parent->add_child($kid);
+	same($kid->parent, $parent, 'add_child stamps parent');
+	same($kid->root,   $parent, 'add_child child root resolves');
+};
+
+subtest 'TextNode children are parent-stamped too' => sub {
+	my $text = Clay::UI::Text->new(text => 'hi');
+	my $box  = Clay::UI::Box->new(children => [$text]);
+	same($text->parent, $box, 'text node parent set');
+	same($text->root,   $box, 'text node root resolves');
+};
+
+# -----------------------------------------------------------------------------
+# Deep chains: root walks all the way to the top, no matter the depth.
+# -----------------------------------------------------------------------------
+
+subtest 'root walks a multi-level chain' => sub {
+	my $leaf = Clay::UI::Box->new(id => 'leaf');
+	my $b    = Clay::UI::Box->new(id => 'b', children => [$leaf]);
+	my $a    = Clay::UI::Box->new(id => 'a', children => [$b]);
+	my $root = Clay::UI::Box->new(id => 'r', children => [$a]);
+	same($leaf->root, $root, 'leaf->root reaches the top');
+	same($b->root,    $root, 'mid-chain->root reaches the top');
+	same($a->root,    $root, 'one-from-top->root reaches the top');
+};
+
+# -----------------------------------------------------------------------------
+# No reparenting: a widget can be attached exactly once, ever.
+# -----------------------------------------------------------------------------
+
+subtest 'adding an already-parented widget to a second parent dies' => sub {
+	my $kid = Clay::UI::Box->new(id => 'k');
+	my $p1  = Clay::UI::Box->new(children => [$kid]);
+	my $p2  = Clay::UI::Box->new;
+	like(
+		dies { $p2->add_child($kid) },
+		qr/no reparenting/,
+		'second-parent attempt dies with descriptive message',
+	);
+};
+
+subtest 'adding the same widget twice to the same parent also dies' => sub {
+	# Re-add is treated identically to a conflict: the parent slot is
+	# write-once, no exceptions. Idempotent-builder patterns must build
+	# fresh widgets per call rather than re-attaching cached ones.
+	my $kid = Clay::UI::Box->new(id => 'k');
+	my $p   = Clay::UI::Box->new(children => [$kid]);
+	like(
+		dies { $p->add_child($kid) },
+		qr/no reparenting/,
+		'second add under same parent dies',
+	);
+};
+
+subtest 'remove_child leaves the parent slot intact (permanent brick)' => sub {
+	# Detached widgets are permanently bricked: their parent slot is
+	# still set, so they can never be attached anywhere else. Build a
+	# fresh widget per mount instead of reusing.
+	my $kid = Clay::UI::Box->new(id => 'k');
+	my $p1  = Clay::UI::Box->new(children => [$kid]);
+	$p1->remove_child('k');
+	same($kid->parent, $p1, 'parent slot survives remove_child');
+	my $p2 = Clay::UI::Box->new;
+	like(
+		dies { $p2->add_child($kid) },
+		qr/no reparenting/,
+		'detached widget still cannot be reattached',
+	);
+};
+
+# -----------------------------------------------------------------------------
+# Weak-ref behaviour: the parent slot does not keep the parent alive.
+# -----------------------------------------------------------------------------
+
+subtest 'parent slot is a weak reference' => sub {
+	my $kid;
+	{
+		my $parent = Clay::UI::Box->new(children => [Clay::UI::Box->new(id => 'k')]);
+		($kid) = @{ $parent->children };
+		same($kid->parent, $parent, 'parent set inside scope');
+	}
+	# $parent has now gone out of scope; the parent's children arrayref
+	# was the only strong ref to $kid above, so we held $kid out via the
+	# direct assignment above. The weak parent slot should now read undef.
+	is($kid->parent, undef, 'parent slot collapses to undef after GC');
+	same($kid->root, $kid,  'root falls back to self once chain is gone');
+};
+
+# -----------------------------------------------------------------------------
+# Non-widget children still rejected (validation preserved across refactor).
+# -----------------------------------------------------------------------------
+
+subtest 'non-widget children are rejected at both call sites' => sub {
+	like(
+		dies { Clay::UI::Box->new(children => ['not a widget']) },
+		qr/not a widget/,
+		'constructor rejects non-widgets',
+	);
+	my $p = Clay::UI::Box->new;
+	like(
+		dies { $p->add_child('not a widget') },
+		qr/not a widget/,
+		'add_child rejects non-widgets',
+	);
+};
+
+done_testing;

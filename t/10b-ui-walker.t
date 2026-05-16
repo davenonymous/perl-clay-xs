@@ -107,12 +107,12 @@ subtest 'fail loud on bad root' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'fail loud on bad child without segfault' => sub {
-	my $ui = make_ui(
-		TestWidget->new(
-			id       => 'parent',
-			children => [ { not => 'a widget' } ],
-		),
-	);
+	# Construction now validates children (via ADJUST + add_child) so we
+	# inject directly into the live children arrayref to reproduce a
+	# rotten tree that only the walker can catch.
+	my $parent = TestWidget->new(id => 'parent');
+	push @{ $parent->children }, { not => 'a widget' };
+	my $ui = make_ui($parent);
 	like(
 		dies { $ui->render },
 		qr/not a blessed widget/,
