@@ -7,6 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 use Object::Pad::MOP::Class;
+use Scalar::Util qw(blessed);
 no warnings 'experimental';
 
 our $VERSION = '0.01';
@@ -20,6 +21,41 @@ role Clay::UI::Role::Element {
 	method resolve_id ($path) {
 		return $id if defined $id;
 		return 'anon:' . join('/', @$path);
+	}
+
+	method add_child (@kids) {
+		for my $kid (@kids) {
+			next if blessed($kid)
+				&& ( $kid->DOES('Clay::UI::Role::Element')
+				  || $kid->DOES('Clay::UI::Role::TextNode') );
+			die "Clay::UI: add_child argument is not a widget (got "
+				. (ref($kid) || 'non-ref') . ")";
+		}
+		push @$children, @kids;
+		return $self;
+	}
+
+	method clear_children () {
+		@$children = ();
+		return $self;
+	}
+
+	method remove_child ($target_id) {
+		@$children = grep {
+			!( $_->DOES('Clay::UI::Role::Element')
+				&& defined $_->id
+				&& $_->id eq $target_id )
+		} @$children;
+		return $self;
+	}
+
+	method remove_children_with ($predicate) {
+		@$children = grep { !$predicate->($_) } @$children;
+		return $self;
+	}
+
+	method get_children_with ($predicate) {
+		return grep { $predicate->($_) } @$children;
 	}
 
 	method to_config {
@@ -100,5 +136,41 @@ have no C<SUPER>, so an override loses every C<contribute_*> call.
 Returns the user-supplied id if set, otherwise returns
 C<"anon:$joined_path">. The walker uses the result to call
 C<Clay_GetElementId>, which hashes the string into a stable Clay id.
+
+=head2 add_child(@kids)
+
+Appends one or more widgets to C<children>. Each argument must be a
+blessed instance consuming C<Clay::UI::Role::Element> or
+C<Clay::UI::Role::TextNode>; anything else dies with a descriptive
+error. Returns C<$self> so calls chain:
+
+	$root->add_child($header)->add_child($body, $footer);
+
+=head2 clear_children
+
+Empties C<children> in place and returns C<$self>.
+
+=head2 remove_child($id)
+
+Removes every direct child whose C<id> equals C<$id>. Text nodes have
+no id and are never removed. Unknown ids are silently ignored. Returns
+C<$self>.
+
+=head2 remove_children_with($predicate)
+
+Removes every direct child for which C<< $predicate->($child) >> is
+true. C<$_> is also bound to the current child inside the block.
+Returns C<$self>.
+
+=head2 get_children_with($predicate)
+
+Returns the list of direct children for which C<< $predicate->($child) >>
+is true. C<$_> is also set to the current child inside the block, so
+both calling styles work:
+
+	my @foos = $root->get_children_with(sub { $_->id =~ /^foo_/ });
+	my @bars = $root->get_children_with(sub { $_[0]->isa('My::Bar') });
+
+Does not recurse into descendants.
 
 =cut
