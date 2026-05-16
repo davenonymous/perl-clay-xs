@@ -31,21 +31,26 @@ class TestWidget :does(Clay::UI::Role::Element) {
 }
 
 my @errors;
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => 400, height => 300 },
-	sub ($err, $userdata) { push @errors, $err },
-);
-Clay_SetMeasureTextFunction(sub { return { width => 0, height => 0 } });
+my $error_handler = sub ($err, $userdata) { push @errors, $err };
+my $measure_text  = sub { return { width => 0, height => 0 } };
+
+sub make_ui ($root) {
+	return Clay::UI->new(
+		width         => 400,
+		height        => 300,
+		root          => $root,
+		error_handler => $error_handler,
+		measure_text  => $measure_text,
+	);
+}
 
 # -----------------------------------------------------------------------------
 # Walker emits a single rectangle for a single widget.
 # -----------------------------------------------------------------------------
 
 subtest 'single node' => sub {
-	Clay_BeginLayout();
-	Clay::UI::layout( TestWidget->new(id => 'solo') );
-	my $cmds = Clay_EndLayout(0);
+	my $ui = make_ui( TestWidget->new(id => 'solo') );
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 
@@ -59,8 +64,7 @@ subtest 'single node' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'parent with children' => sub {
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		TestWidget->new(
 			id       => 'parent',
 			bg       => [10, 20, 30, 255],
@@ -70,7 +74,7 @@ subtest 'parent with children' => sub {
 			],
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 
 	my @rects = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @$cmds;
 	is( scalar(@rects), 3, 'three rectangles (parent + two children)' );
@@ -80,18 +84,46 @@ subtest 'parent with children' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Non-Element values in a tree fail loud.
+# Non-Element values in a tree fail loud at construction.
 # -----------------------------------------------------------------------------
 
-subtest 'fail loud on bad node' => sub {
-	Clay_BeginLayout();
+subtest 'fail loud on bad root' => sub {
 	like(
-		dies { Clay::UI::layout( { not => 'a widget' } ) },
-		qr/not a blessed widget/,
-		'plain hashref rejected',
+		dies {
+			Clay::UI->new(
+				width  => 400,
+				height => 300,
+				root   => { not => 'a widget' },
+			)
+		},
+		qr/must be a widget/,
+		'plain hashref rejected at construction',
 	);
-	# Clean up the half-open layout state from the failed call.
-	Clay_EndLayout(0);
+};
+
+# -----------------------------------------------------------------------------
+# Non-blessed values inside the tree fail loud at render time without
+# leaving Clay's open-element stack unbalanced (no segfault on EndLayout).
+# -----------------------------------------------------------------------------
+
+subtest 'fail loud on bad child without segfault' => sub {
+	my $ui = make_ui(
+		TestWidget->new(
+			id       => 'parent',
+			children => [ { not => 'a widget' } ],
+		),
+	);
+	like(
+		dies { $ui->render },
+		qr/not a blessed widget/,
+		'plain hashref child rejected by walker',
+	);
+
+	# Survives a follow-up render with a healthy tree (proves Clay's
+	# internal stack was restored).
+	my $ui2 = make_ui( TestWidget->new(id => 'recover') );
+	my $cmds = $ui2->render;
+	ok( scalar(@$cmds) > 0, 'fresh render after a failed one still works' );
 };
 
 done_testing;

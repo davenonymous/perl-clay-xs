@@ -22,21 +22,27 @@ class ConflictWidget :does(Clay::UI::Role::Element) {
 }
 
 my @errors;
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => 400, height => 300 },
-	sub ($err, $userdata) { push @errors, $err },
-);
-Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+my $error_handler = sub ($err, $userdata) { push @errors, $err };
+my $measure_text  = sub ($text, $config, $userdata) {
 	return { width => length($text) * 8, height => 16 };
-});
+};
+
+sub make_ui ($root) {
+	return Clay::UI->new(
+		width         => 400,
+		height        => 300,
+		root          => $root,
+		error_handler => $error_handler,
+		measure_text  => $measure_text,
+	);
+}
 
 # -----------------------------------------------------------------------------
-# Walker injects refaddr as user_data; widget_for recovers the widget from
-# the render command.
+# Walker injects refaddr as user_data; render commands carry that back
+# so callers can recover the originating widget by refaddr lookup.
 # -----------------------------------------------------------------------------
 
-subtest 'round-trip widget back-reference' => sub {
+subtest 'render commands carry refaddr in userData' => sub {
 	@errors = ();
 
 	my $child_box = Clay::UI::Box->new(
@@ -53,16 +59,15 @@ subtest 'round-trip widget back-reference' => sub {
 		children         => [ $child_box, $text_leaf ],
 	);
 
-	Clay_BeginLayout();
-	Clay::UI::layout($root);
-	my $cmds = Clay_EndLayout(0);
+	my $ui   = make_ui($root);
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 
 	my %widgets_seen;
 	for my $cmd (@$cmds) {
 		next unless $cmd->{userData};
-		my $w = Clay::UI::widget_for($cmd->{userData});
+		my $w = $ui->widget_for($cmd->{userData});
 		next unless defined $w;
 		$widgets_seen{ refaddr $w } = $w;
 	}
@@ -70,6 +75,38 @@ subtest 'round-trip widget back-reference' => sub {
 	is( $widgets_seen{ refaddr $root },      $root,      'root widget recovered' );
 	is( $widgets_seen{ refaddr $child_box }, $child_box, 'child box recovered' );
 	is( $widgets_seen{ refaddr $text_leaf }, $text_leaf, 'text leaf recovered' );
+
+	is( $ui->widget_for(undef), undef, 'undef -> undef' );
+	is( $ui->widget_for(0),     undef, '0 -> undef (Clay default for non-user elements)' );
+	is( $ui->widget_for(999),   undef, 'unknown integer -> undef' );
+};
+
+# -----------------------------------------------------------------------------
+# get_hovered returns the widget objects under the pointer.
+# -----------------------------------------------------------------------------
+
+subtest 'get_hovered returns widget objects' => sub {
+	@errors = ();
+
+	my $child_box = Clay::UI::Box->new(
+		id               => 'child',
+		layout           => { sizing => { width => sizing_fixed(80), height => sizing_fixed(40) } },
+		background_color => [200, 100, 50, 255],
+	);
+	my $root = Clay::UI::Box->new(
+		id       => 'root',
+		layout   => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
+		children => [ $child_box ],
+	);
+
+	my $ui = make_ui($root);
+	$ui->render;  # warm-up frame
+	$ui->render( pointer_state => { x => 40, y => 20, down => 0 } );
+
+	my $hovered = $ui->get_hovered;
+	ok( scalar(@$hovered) >= 1, 'at least one hovered widget' );
+	my %by_addr = map { refaddr($_) => $_ } @$hovered;
+	ok( $by_addr{ refaddr $child_box }, 'child widget recovered via get_hovered' );
 };
 
 # -----------------------------------------------------------------------------
@@ -77,23 +114,12 @@ subtest 'round-trip widget back-reference' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'conflict on user-supplied user_data' => sub {
-	Clay_BeginLayout();
+	my $ui = make_ui( ConflictWidget->new(id => 'x') );
 	like(
-		dies { Clay::UI::layout( ConflictWidget->new(id => 'x') ) },
+		dies { $ui->render },
 		qr/set user_data in its config/,
 		'widget that sets user_data dies with a clear message',
 	);
-	Clay_EndLayout(0);
-};
-
-# -----------------------------------------------------------------------------
-# widget_for returns undef for unknown / falsy values.
-# -----------------------------------------------------------------------------
-
-subtest 'widget_for guards' => sub {
-	is( Clay::UI::widget_for(undef), undef, 'undef -> undef' );
-	is( Clay::UI::widget_for(0),     undef, '0 -> undef (Clay default for non-user elements)' );
-	is( Clay::UI::widget_for(999),   undef, 'unknown integer -> undef' );
 };
 
 done_testing;

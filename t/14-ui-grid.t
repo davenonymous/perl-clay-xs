@@ -17,14 +17,20 @@ my $GLYPH_W = 8;
 my $LINE_H  = 16;
 
 my @errors;
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => 800, height => 600 },
-	sub ($err, $userdata) { push @errors, $err },
-);
-Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+my $error_handler = sub ($err, $userdata) { push @errors, $err };
+my $measure_text  = sub ($text, $config, $userdata) {
 	return { width => length($text) * $GLYPH_W, height => $LINE_H };
-});
+};
+
+sub make_ui ($root) {
+	return Clay::UI->new(
+		width         => 800,
+		height        => 600,
+		root          => $root,
+		error_handler => $error_handler,
+		measure_text  => $measure_text,
+	);
+}
 
 # -----------------------------------------------------------------------------
 # Each column shrink-wraps to its widest cell across all rows. The widest
@@ -34,8 +40,7 @@ Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
 
 subtest 'columns auto-fit widest cell across rows' => sub {
 	@errors = ();
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		Clay::UI::Grid->new(
 			id   => 'grid',
 			rows => [
@@ -53,7 +58,7 @@ subtest 'columns auto-fit widest cell across rows' => sub {
 			row_gap  => 0,
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 	is( scalar(@errors), 0, 'no Clay errors' );
 
 	my $expected_col_w = [ 4 * $GLYPH_W, 7 * $GLYPH_W, 9 * $GLYPH_W ];

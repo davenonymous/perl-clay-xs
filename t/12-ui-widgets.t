@@ -13,14 +13,20 @@ use Clay::UI::Button;
 use Clay::UI::ScrollPanel;
 
 my @errors;
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => 400, height => 300 },
-	sub ($err, $userdata) { push @errors, $err },
-);
-Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+my $error_handler = sub ($err, $userdata) { push @errors, $err };
+my $measure_text  = sub ($text, $config, $userdata) {
 	return { width => length($text) * ($config->{fontSize} // 16), height => $config->{fontSize} // 16 };
-});
+};
+
+sub make_ui ($root) {
+	return Clay::UI->new(
+		width         => 400,
+		height        => 300,
+		root          => $root,
+		error_handler => $error_handler,
+		measure_text  => $measure_text,
+	);
+}
 
 # -----------------------------------------------------------------------------
 # Box composes every property mixin; declaration round-trips through Clay.
@@ -28,8 +34,7 @@ Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
 
 subtest 'Box with all styling slices' => sub {
 	@errors = ();
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		Clay::UI::Box->new(
 			id               => 'styled',
 			layout           => {
@@ -42,7 +47,7 @@ subtest 'Box with all styling slices' => sub {
 			corner_radius    => 4,
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 
@@ -62,8 +67,7 @@ subtest 'Box with all styling slices' => sub {
 
 subtest 'Text inside a Box' => sub {
 	@errors = ();
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		Clay::UI::Box->new(
 			id       => 'wrapper',
 			layout   => { sizing => { width => sizing_fixed(200), height => sizing_fixed(50) } },
@@ -76,7 +80,7 @@ subtest 'Text inside a Box' => sub {
 			],
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 
@@ -110,14 +114,13 @@ subtest 'ScrollPanel requires id' => sub {
 
 subtest 'ScrollPanel emits scroll container' => sub {
 	@errors = ();
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		Clay::UI::ScrollPanel->new(
 			id     => 'log',
 			layout => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 
@@ -143,41 +146,30 @@ subtest 'Button dispatches hover and click' => sub {
 	my @hover_calls;
 	my @click_calls;
 
-	my sub build_tree {
-		Clay::UI::layout(
-			Clay::UI::Button->new(
-				id               => 'btn',
-				layout           => { sizing => { width => sizing_fixed(100), height => sizing_fixed(40) } },
-				background_color => [70, 130, 200, 255],
-				on_hover         => sub ($id, $pointer, $ud) { push @hover_calls, $pointer->{position} },
-				on_click         => sub ($id, $pointer, $ud) { push @click_calls, $pointer->{position} },
-			),
-		);
-	}
+	my $button = Clay::UI::Button->new(
+		id               => 'btn',
+		layout           => { sizing => { width => sizing_fixed(100), height => sizing_fixed(40) } },
+		background_color => [70, 130, 200, 255],
+		on_hover         => sub ($id, $pointer, $ud) { push @hover_calls, $pointer->{position} },
+		on_click         => sub ($id, $pointer, $ud) { push @click_calls, $pointer->{position} },
+	);
+	my $ui = make_ui($button);
 
 	# Frame 1: build geometry (no pointer state yet).
-	Clay_BeginLayout();
-	build_tree();
-	Clay_EndLayout(0);
+	$ui->render;
 
 	# Warm-up: Clay's pointer state struct is zero-initialised, which
 	# means the FIRST Clay_SetPointerState call dispatches hover with
 	# state=PRESSED_THIS_FRAME (0) regardless of isPointerDown. Push one
 	# unpressed-and-out-of-bounds state to settle Clay into RELEASED
 	# before the real test frames begin.
-	Clay_SetPointerState({ x => -100, y => -100 }, 0);
-	Clay_BeginLayout();
-	build_tree();
-	Clay_EndLayout(0);
+	$ui->render( pointer_state => { x => -100, y => -100, down => 0 } );
 
 	@hover_calls = ();
 	@click_calls = ();
 
 	# Frame 2: pointer hovering, not pressed.
-	Clay_SetPointerState({ x => 50, y => 20 }, 0);
-	Clay_BeginLayout();
-	build_tree();
-	Clay_EndLayout(0);
+	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
 
 	is( scalar(@hover_calls), 1, 'on_hover fired while pointer over element' );
 	is( scalar(@click_calls), 0, 'on_click did not fire without press' );
@@ -185,19 +177,13 @@ subtest 'Button dispatches hover and click' => sub {
 	# Frame 3: button pressed. Clay's hover dispatch uses the CURRENT
 	# state (still RELEASED) and only transitions to PRESSED_THIS_FRAME
 	# after dispatching. So the press is observed on frame 4.
-	Clay_SetPointerState({ x => 50, y => 20 }, 1);
-	Clay_BeginLayout();
-	build_tree();
-	Clay_EndLayout(0);
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
 
 	is( scalar(@hover_calls), 2, 'on_hover fired again' );
 	is( scalar(@click_calls), 0, 'on_click pending: state transitioned to PRESSED_THIS_FRAME post-dispatch' );
 
 	# Frame 4: dispatch now sees PRESSED_THIS_FRAME.
-	Clay_SetPointerState({ x => 50, y => 20 }, 1);
-	Clay_BeginLayout();
-	build_tree();
-	Clay_EndLayout(0);
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
 
 	is( scalar(@click_calls), 1, 'on_click fired once the PRESSED_THIS_FRAME state was visible' );
 };
@@ -208,15 +194,14 @@ subtest 'Button dispatches hover and click' => sub {
 
 subtest 'bare Text at root' => sub {
 	@errors = ();
-	Clay_BeginLayout();
-	Clay::UI::layout(
+	my $ui = make_ui(
 		Clay::UI::Box->new(
 			id => 'root',
 			layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
 			children => [ Clay::UI::Text->new( text => 'standalone' ) ],
 		),
 	);
-	my $cmds = Clay_EndLayout(0);
+	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 	my ($txt) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$cmds;

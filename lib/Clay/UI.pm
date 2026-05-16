@@ -5,9 +5,21 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Scalar::Util qw(blessed refaddr weaken);
+use Object::Pad 0.800;
+
+use Scalar::Util qw(blessed refaddr weaken looks_like_number);
 
 use Clay::Layout qw(
+	Clay_Initialize
+	Clay_MinMemorySize
+	Clay_SetCurrentContext
+	Clay_SetLayoutDimensions
+	Clay_SetMeasureTextFunction
+	Clay_ResetMeasureTextCache
+	Clay_SetPointerState
+	Clay_GetPointerOverIds
+	Clay_BeginLayout
+	Clay_EndLayout
 	Clay_GetElementId
 	Clay__OpenElementWithId
 	Clay__ConfigureOpenElement
@@ -16,72 +28,233 @@ use Clay::Layout qw(
 );
 use Clay::UI::_keys qw(camelize_keys);
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
-my %widget_registry;
+class Clay::UI {
+	field $root   :param :reader;
+	field $width  :param;
+	field $height :param;
 
-sub layout ($root) {
-	%widget_registry = ();
-	_walk($root, []);
-	return;
-}
+	field $memory_size    :param = undef;
+	field $error_handler  :param = undef;
+	field $measure_text   :param = undef;
 
-sub widget_for ($user_data) {
-	return undef unless defined $user_data && $user_data;
-	return $widget_registry{$user_data};
-}
+	field $_ctx;
+	field %_widget_by_refaddr;
+	field %_widget_by_id;
+	field $_pending_by_refaddr;
+	field $_pending_by_id;
 
-sub _attach_back_reference ($config, $node) {
-	if (exists $config->{user_data} || exists $config->{userData}) {
-		die "Clay::UI: widget " . ref($node)
-			. " set user_data in its config; Clay::UI auto-injects a refaddr"
-			. " back-reference here. Use one mechanism or the other, not both.";
+	ADJUST {
+		unless (blessed $root
+			&& ($root->DOES('Clay::UI::Role::Element')
+			 || $root->DOES('Clay::UI::Role::TextNode'))) {
+			die "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Element or TextNode";
+		}
+		unless (looks_like_number($width) && $width > 0
+			&& looks_like_number($height) && $height > 0) {
+			die "Clay::UI: 'width' and 'height' must be positive numbers";
+		}
+
+		$memory_size   //= Clay_MinMemorySize();
+		$error_handler //= sub ($err, $userdata) {
+			die "Clay error: $err->{errorText}\n";
+		};
+		$measure_text //= sub ($text, $config, $userdata) {
+			my $fs = $config->{fontSize} || 16;
+			return { width => length($text) * $fs, height => $fs };
+		};
+
+		unless (ref $error_handler eq 'CODE') {
+			die "Clay::UI: 'error_handler' must be a coderef";
+		}
+		unless (ref $measure_text eq 'CODE') {
+			die "Clay::UI: 'measure_text' must be a coderef";
+		}
+
+		$_ctx = Clay_Initialize(
+			$memory_size,
+			{ width => $width, height => $height },
+			$error_handler,
+		);
+		Clay_SetCurrentContext($_ctx);
+		Clay_SetMeasureTextFunction($measure_text);
 	}
-	my $addr = refaddr($node);
-	$config->{user_data} = $addr;
-	$widget_registry{$addr} = $node;
-	weaken $widget_registry{$addr};
-	return;
-}
 
-sub _walk ($node, $path) {
-	unless (blessed $node) {
-		die "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
+	# Read with no args; write with one arg, propagating to Clay.
+	method width (@v) {
+		if (@v) {
+			my ($new) = @v;
+			die "Clay::UI: width must be a positive number"
+				unless looks_like_number($new) && $new > 0;
+			$width = $new;
+			Clay_SetCurrentContext($_ctx);
+			Clay_SetLayoutDimensions({ width => $width, height => $height });
+		}
+		return $width;
 	}
 
-	if ($node->DOES('Clay::UI::Role::TextNode')) {
-		my $text_config = $node->text_config;
-		_attach_back_reference($text_config, $node);
-		Clay__OpenTextElement($node->text, camelize_keys($text_config));
+	method height (@v) {
+		if (@v) {
+			my ($new) = @v;
+			die "Clay::UI: height must be a positive number"
+				unless looks_like_number($new) && $new > 0;
+			$height = $new;
+			Clay_SetCurrentContext($_ctx);
+			Clay_SetLayoutDimensions({ width => $width, height => $height });
+		}
+		return $height;
+	}
+
+	method measure_text (@v) {
+		if (@v) {
+			my ($new) = @v;
+			die "Clay::UI: measure_text must be a coderef"
+				unless ref $new eq 'CODE';
+			$measure_text = $new;
+			Clay_SetCurrentContext($_ctx);
+			Clay_SetMeasureTextFunction($measure_text);
+			Clay_ResetMeasureTextCache();
+		}
+		return $measure_text;
+	}
+
+	method render (%args) {
+		my %known = (pointer_state => 1, delta_time => 1);
+		my @unknown = grep { !$known{$_} } keys %args;
+		die "Clay::UI::render: unknown argument(s): @{[ sort @unknown ]}" if @unknown;
+
+		my $pointer    = $args{pointer_state};
+		my $delta_time = $args{delta_time} // 0;
+
+		Clay_SetCurrentContext($_ctx);
+
+		if ($pointer) {
+			Clay_SetPointerState(
+				{ x => $pointer->{x}, y => $pointer->{y} },
+				$pointer->{down} ? 1 : 0,
+			);
+		}
+
+		# Stage registry writes in shadow hashes; commit only on a successful
+		# walk so a mid-walk exception cannot leave get_hovered staring at a
+		# half-cleared registry from this frame.
+		my %staged_by_refaddr;
+		my %staged_by_id;
+		$_pending_by_refaddr = \%staged_by_refaddr;
+		$_pending_by_id      = \%staged_by_id;
+
+		Clay_BeginLayout();
+
+		my $walk_error;
+		{
+			local $@;
+			eval { $self->_walk($root, []); 1 } or $walk_error = $@ || 'unknown walker error';
+		}
+
+		my $cmds = Clay_EndLayout($delta_time);
+
+		$_pending_by_refaddr = undef;
+		$_pending_by_id      = undef;
+
+		die $walk_error if defined $walk_error;
+
+		%_widget_by_refaddr = %staged_by_refaddr;
+		%_widget_by_id      = %staged_by_id;
+		# Re-weaken refs after the hash copy (weakness is per-slot, not preserved by assignment).
+		weaken $_widget_by_refaddr{$_} for keys %_widget_by_refaddr;
+		weaken $_widget_by_id{$_}      for keys %_widget_by_id;
+
+		return $cmds;
+	}
+
+	method widget_for ($user_data) {
+		return undef unless defined $user_data && $user_data;
+		return $_widget_by_refaddr{$user_data};
+	}
+
+	method get_hovered () {
+		Clay_SetCurrentContext($_ctx);
+		my $ids = Clay_GetPointerOverIds();
+		my @widgets;
+		for my $id (@$ids) {
+			my $w = $_widget_by_id{ $id->{id} };
+			push @widgets, $w if defined $w;
+		}
+		return \@widgets;
+	}
+
+	method _attach_back_reference ($config, $node) {
+		if (exists $config->{user_data} || exists $config->{userData}) {
+			die "Clay::UI: widget " . ref($node)
+				. " set user_data in its config; Clay::UI auto-injects a refaddr"
+				. " back-reference here. Use one mechanism or the other, not both.";
+		}
+		my $addr = refaddr($node);
+		$config->{user_data} = $addr;
+		$_pending_by_refaddr->{$addr} = $node;
+		weaken $_pending_by_refaddr->{$addr};
 		return;
 	}
 
-	unless ($node->DOES('Clay::UI::Role::Element')) {
-		die "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Element or TextNode";
+	method _register_id_lookup ($element_id, $node) {
+		$_pending_by_id->{$element_id} = $node;
+		weaken $_pending_by_id->{$element_id};
+		return;
 	}
 
-	# Build and validate the config BEFORE opening the Clay element so a
-	# config-time exception cannot leave Clay's open-element stack
-	# unbalanced (which would SEGV at EndLayout).
-	my $config = $node->to_config;
-	_attach_back_reference($config, $node);
-	my $camelized = camelize_keys($config);
+	method _walk ($node, $path) {
+		unless (blessed $node) {
+			die "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
+		}
 
-	my $id      = $node->resolve_id($path);
-	my $element = Clay_GetElementId($id);
+		if ($node->DOES('Clay::UI::Role::TextNode')) {
+			my $text_config = $node->text_config;
+			$self->_attach_back_reference($text_config, $node);
+			Clay__OpenTextElement($node->text, camelize_keys($text_config));
+			return;
+		}
 
-	Clay__OpenElementWithId($element);
-	Clay__ConfigureOpenElement($camelized);
+		unless ($node->DOES('Clay::UI::Role::Element')) {
+			die "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Element or TextNode";
+		}
 
-	$node->install_hover_callback if $node->DOES('Clay::UI::Role::Hoverable');
+		# Build and validate the config BEFORE opening the Clay element so a
+		# config-time exception cannot leave Clay's open-element stack
+		# unbalanced (which would SEGV at EndLayout).
+		my $config = $node->to_config;
+		$self->_attach_back_reference($config, $node);
+		my $camelized = camelize_keys($config);
 
-	my $children = $node->children;
-	for my $index (0 .. $#$children) {
-		_walk($children->[$index], [ @$path, "$id/$index" ]);
+		my $id      = $node->resolve_id($path);
+		my $element = Clay_GetElementId($id);
+		$self->_register_id_lookup($element->{id}, $node);
+
+		Clay__OpenElementWithId($element);
+		Clay__ConfigureOpenElement($camelized);
+
+		$node->install_hover_callback if $node->DOES('Clay::UI::Role::Hoverable');
+
+		# Ensure CloseElement always runs to keep Clay's open-element
+		# stack balanced, even if a child walk dies; re-throw afterwards.
+		my $children = $node->children;
+		my $child_error;
+		for my $index (0 .. $#$children) {
+			local $@;
+			my $ok = eval {
+				$self->_walk($children->[$index], [ @$path, "$id/$index" ]);
+				1;
+			};
+			unless ($ok) {
+				$child_error = $@ || 'unknown walker error';
+				last;
+			}
+		}
+
+		Clay__CloseElement();
+		die $child_error if defined $child_error;
+		return;
 	}
-
-	Clay__CloseElement();
-	return;
 }
 
 1;
@@ -95,58 +268,152 @@ Clay::UI - Perl-idiomatic high-level layer over Clay::Layout
 =head1 SYNOPSIS
 
 	use Object::Pad;
-	use Clay::Layout qw(Clay_Initialize Clay_BeginLayout Clay_EndLayout);
 	use Clay::UI;
+	use Clay::UI::Box;
 
-	class My::Root :does(Clay::UI::Role::Element) {
-		method to_config { return { background_color => [40, 50, 60, 255] } }
-	}
+	my $root = Clay::UI::Box->new(
+		id               => 'root',
+		layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+		background_color => [40, 50, 60, 255],
+	);
 
-	my $ctx = Clay_Initialize(...);
-	Clay_BeginLayout();
-	Clay::UI::layout( My::Root->new(id => 'root') );
-	my $commands = Clay_EndLayout(0);
+	my $ui = Clay::UI->new(
+		width  => 800,
+		height => 600,
+		root   => $root,
+	);
+
+	my $commands = $ui->render(
+		pointer_state => { x => 120, y => 80, down => 0 },
+	);
+
+	my $hovered = $ui->get_hovered;  # arrayref of widget objects
 
 =head1 DESCRIPTION
 
-C<Clay::UI> sits on top of the low-level L<Clay::Layout> binding. Users
-build a declarative tree of widget objects (each consuming
-L<Clay::UI::Role::Element>) and the walker translates the tree into the
-open / configure / close call sequence Clay expects.
+C<Clay::UI> wraps the low-level L<Clay::Layout> binding in an
+Object::Pad class. The class owns the Clay context, the measure-text
+callback, and the widget back-reference registries, so callers never
+have to invoke C<Clay_*> functions directly.
 
 The low-level API is untouched and remains independently usable.
 
-=head1 FUNCTIONS
+=head1 CONSTRUCTOR
 
-=head2 layout($root)
+=head2 new(%params)
 
-Walks C<$root> and its children, emitting Clay open/configure/close calls
-for each node. Must be invoked between C<Clay_BeginLayout> and
-C<Clay_EndLayout>. Returns nothing.
+Required:
 
-Resets the internal widget-back-reference registry on entry (see
-L</widget_for>).
+=over 4
+
+=item C<root>
+
+The root widget. Must be a blessed object consuming
+L<Clay::UI::Role::Element> or L<Clay::UI::Role::TextNode>. Immutable
+after construction (the I<tree> below the root is still mutable through
+the widget's own child-mutation methods).
+
+=item C<width>, C<height>
+
+Positive numbers; the viewport dimensions. Mutable post-construction
+via the same-named accessor methods, which propagate the change to
+Clay automatically.
+
+=back
+
+Optional:
+
+=over 4
+
+=item C<memory_size>
+
+Bytes of arena memory to allocate. Defaults to C<Clay_MinMemorySize()>.
+
+=item C<error_handler>
+
+Coderef called with C<($error_hashref, $userdata)> when Clay reports an
+error. Default: C<die "Clay error: $err->{errorText}\n">.
+
+=item C<measure_text>
+
+Coderef called with C<($text, $config, $userdata)>, must return
+C<< { width => $w, height => $h } >>. Default: monospace estimate,
+C<width = length($text) * fontSize>, C<height = fontSize>.
+
+=back
+
+=head1 METHODS
+
+=head2 root
+
+Read-only accessor for the root widget passed at construction.
+
+=head2 width, width($new)
+
+Read or write the viewport width. Setting also issues
+C<Clay_SetLayoutDimensions> so the new size takes effect on the next
+C<render>.
+
+=head2 height, height($new)
+
+Mirror of C<width>.
+
+=head2 measure_text, measure_text($coderef)
+
+Read or replace the measure-text callback. On write, also calls
+C<Clay_ResetMeasureTextCache> so previously cached measurements made
+by the old callback are discarded.
+
+=head2 render(%args)
+
+Lays out the root widget tree and returns the render-command arrayref.
+
+Named arguments:
+
+=over 4
+
+=item C<pointer_state> (optional)
+
+Hashref C<< { x => $x, y => $y, down => $bool } >>. When omitted, the
+pointer state from the previous frame is reused.
+
+=item C<delta_time> (optional, default 0)
+
+Seconds since last frame; passed to C<Clay_EndLayout>.
+
+=back
 
 =head2 widget_for($user_data)
 
 Given the C<userData> integer carried on a render command, returns the
 widget object that produced it (or C<undef> if the widget has been
-garbage-collected since the last C<layout> call). The walker
-auto-injects C<refaddr($widget)> as each element's C<user_data> so
-renderers can recover the originating widget without threading
-explicit state.
+garbage-collected since the last C<render> call, or if C<$user_data> is
+falsy or unknown).
 
 	for my $cmd (@$render_commands) {
-		my $widget = Clay::UI::widget_for($cmd->{userData});
-		# dispatch on ref $widget, read fields, etc.
+		my $widget = $ui->widget_for($cmd->{userData});
+		next unless $widget;
+		# dispatch on ref $widget, read its fields, etc.
 	}
 
-Lifetime: registry entries are weak references. Keep the widget tree
-alive until you have finished consuming render commands, otherwise
-C<widget_for> will return C<undef> for collected widgets.
+=head2 get_hovered
 
-Conflict: a widget's C<to_config> (or C<text_config>) must NOT set
-C<user_data> itself; C<layout> dies if it sees one already present.
+Returns an arrayref of widget objects currently under the pointer (as
+reported by C<Clay_GetPointerOverIds>). Widgets that have been
+garbage-collected since the last C<render> are skipped.
+
+=head1 NOTES
+
+The walker auto-injects C<refaddr($widget)> as each element's
+C<user_data> so render commands carry a back-reference. A widget's
+C<to_config> (or C<text_config>) must therefore NOT set C<user_data>
+itself; C<render> dies with a clear message if it sees one already
+present.
+
+Registry entries are weak references. The widget tree is kept alive by
+the C<root> field on this object, so as long as the C<Clay::UI>
+instance is alive, every widget reachable from C<root> stays
+resolvable.
 
 =head1 SEE ALSO
 

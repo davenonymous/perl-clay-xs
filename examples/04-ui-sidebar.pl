@@ -32,17 +32,6 @@ sub sidebar_item ($index) {
 	);
 }
 
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => 1024, height => 768 },
-	sub ($err, $userdata) { warn "Clay error: $err->{errorText}\n" },
-);
-
-Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
-	my $fs = $config->{fontSize} || 16;
-	return { width => length($text) * $fs * 0.55, height => $fs };
-});
-
 sub build_tree () {
 	return Clay::UI::Box->new(
 		id => 'OuterContainer',
@@ -96,22 +85,28 @@ sub build_tree () {
 	);
 }
 
+my $ui = Clay::UI->new(
+	width         => 1024,
+	height        => 768,
+	root          => build_tree(),
+	measure_text  => sub ($text, $config, $userdata) {
+		my $fs = $config->{fontSize} || 16;
+		return { width => length($text) * $fs * 0.55, height => $fs };
+	},
+	error_handler => sub ($err, $userdata) { warn "Clay error: $err->{errorText}\n" },
+);
+
 # Frame 1: geometry.
-Clay_BeginLayout();
-Clay::UI::layout( build_tree() );
-my $frame1 = Clay_EndLayout(0);
+my $frame1 = $ui->render;
 printf "Frame 1: %d render commands\n", scalar @$frame1;
 
 # Frame 2: hover the third sidebar item.
-Clay_SetPointerState({ x => 160, y => 320 }, 0);
-Clay_BeginLayout();
-Clay::UI::layout( build_tree() );
-my $frame2 = Clay_EndLayout(0);
+my $frame2 = $ui->render( pointer_state => { x => 160, y => 320, down => 0 } );
 
-my @over = @{ Clay_GetPointerOverIds() };
-printf "Frame 2: %d elements under pointer\n", scalar @over;
-for my $id (@over) {
-	printf "  id=%u\n", $id->{id};
+my $hovered = $ui->get_hovered;
+printf "Frame 2: %d widgets under pointer\n", scalar @$hovered;
+for my $widget (@$hovered) {
+	printf "  %s\n", ref $widget;
 }
 
 my %by_type;

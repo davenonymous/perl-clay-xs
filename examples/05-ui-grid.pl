@@ -148,17 +148,6 @@ sub body_cell ($text, $r) {
 
 my ($W, $H) = (820, 320);
 
-my $ctx = Clay_Initialize(
-	Clay_MinMemorySize(),
-	{ width => $W, height => $H },
-	sub ($err, $userdata) { warn "Clay error: $err->{errorText}\n" },
-);
-
-Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
-	my $fs = $config->{fontSize} || 16;
-	return { width => length($text) * $fs * 0.55, height => $fs };
-});
-
 my @data = (
 	[ 'Region',           'Q1',     'Q2',     'Q3',     'Q4 forecast' ],
 	[ 'North America',    '$1.2M',  '$1.5M',  '$1.8M',  '$2.1M'       ],
@@ -199,7 +188,16 @@ sub build_tree () {
 	);
 }
 
-Clay_BeginLayout();
-Clay::UI::layout( build_tree() );
-my $commands = Clay_EndLayout(0);
+my $ui = Clay::UI->new(
+	width         => $W,
+	height        => $H,
+	root          => build_tree(),
+	measure_text  => sub ($text, $config, $userdata) {
+		my $fs = $config->{fontSize} || 16;
+		return { width => length($text) * $fs * 0.55, height => $fs };
+	},
+	error_handler => sub ($err, $userdata) { warn "Clay error: $err->{errorText}\n" },
+);
+
+my $commands = $ui->render;
 print render_to_svg($commands, $W, $H);
