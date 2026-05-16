@@ -101,13 +101,44 @@ Useful invocations:
 
 ## What is and is not done
 
-- Phases 1 to 12 of the implementation plan are complete: 79 tests pass
-  across 11 files, both example scripts run, fixtures are committed.
-- Phase 13 (Perl-idiomatic high-level layer with closure-based element
-  nesting and Object::Pad classes) is intentionally not started. A
-  separate plan will introduce it on top of the existing low-level
-  surface. Renderer bindings will ship as separate distributions
+- Phases 1 to 13 of the implementation plan are complete. Renderer
+  bindings will ship as separate distributions
   (`Clay::Layout::Renderer::*`).
+- Phase 13 added the high-level `Clay::UI` layer on top of `Clay::Layout`.
+  Source: `lib/Clay/UI.pm` (walker), `lib/Clay/UI/_keys.pm` (snake -> camel
+  translator), `lib/Clay/UI/Role/*.pm` (Element + Stateful + Hoverable +
+  TextNode archetype roles; `Has*` property mixin roles), and
+  `lib/Clay/UI/{Box,Text,Button,ScrollPanel}.pm` (reference widgets).
+  Tests: `t/10-ui-camelize.t`, `t/10b-ui-walker.t`, `t/11-ui-mixins.t`,
+  `t/12-ui-widgets.t`. Example: `examples/04-ui-sidebar.pl`.
+
+## Clay::UI invariants
+
+1. Widgets are Object::Pad classes; the `class` keyword opens a fresh
+   package, so `use Clay::Layout qw(...)` at file scope does NOT seed
+   helper subs inside the class block. Either qualify
+   (`Clay::Layout::sizing_fixed(...)`) or `use` again inside the body.
+2. `Clay::UI::Role::Element::to_config` discovers contributor methods
+   via `Object::Pad::MOP::Class`. Each mixin role provides one method
+   named `contribute_<slice>(\%config)`. Names must be unique across
+   composed roles (Object::Pad role composition errors on method
+   conflict).
+3. Widget classes that need to participate without making their own
+   role can also expose a `contribute_*` method directly on the class;
+   the walker iterates the class's `direct_methods` in addition to
+   roles' (see `Clay::UI::ScrollPanel`).
+4. Text leaves consume `Clay::UI::Role::TextNode`; the walker
+   dispatches them to `Clay__OpenTextElement` instead of the normal
+   open/configure/close trio and ignores their `children`.
+5. Hover-callback registration must re-run every frame (existing
+   runtime-invariant 6). The walker calls `install_hover_callback` on
+   every `Hoverable` widget per frame, so user widgets MUST register
+   inside that hook, not in `ADJUST`.
+6. Clay's pointer-state struct is zero-initialised, which equals
+   `CLAY_POINTER_DATA_PRESSED_THIS_FRAME`. The first `SetPointerState`
+   after `Clay_Initialize` will dispatch hover callbacks with that
+   ghost state regardless of `isPointerDown`. Tests of click behavior
+   need a warm-up frame to settle Clay into `RELEASED`.
 
 ## Pointers when something breaks
 

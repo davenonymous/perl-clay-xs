@@ -37,8 +37,9 @@ WriteMakefile(
         'ExtUtils::MakeMaker' => '7.12',
     },
     PREREQ_PM => {
-        'Exporter' => '5.57',
-        'XSLoader' => 0,
+        'Exporter'    => '5.57',
+        'XSLoader'    => 0,
+        'Object::Pad' => '0.800',
     },
     TEST_REQUIRES => {
         'Test2::V0' => 0,

@@ -62,6 +62,35 @@ See `examples/01-minimal.pl` and `examples/02-sidebar-demo.pl` for fuller
 illustrations, and `lib/Clay/Layout.pm`'s POD for the complete C-macro
 to Perl-helper mapping.
 
+## Quick taste (high-level `Clay::UI`)
+
+```perl
+use Clay::Layout qw(:all);
+use Clay::UI;
+use Clay::UI::Box;
+use Clay::UI::Text;
+
+Clay_BeginLayout();
+Clay::UI::layout(
+    Clay::UI::Box->new(
+        id               => 'root',
+        layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+        background_color => [240, 240, 240, 255],
+        children         => [
+            Clay::UI::Text->new( text => 'hello', font_size => 18, text_color => [0, 0, 0, 255] ),
+        ],
+    ),
+);
+my $cmds = Clay_EndLayout(0);
+```
+
+Widget classes (`Clay::UI::Box`, `Text`, `Button`, `ScrollPanel`) compose
+property mixin roles (`HasLayout`, `HasBackground`, `HasBorder`,
+`HasCornerRadius`, `HasClip`, `HasFloating`) and use `snake_case` keys
+throughout; the walker camelizes them before reaching the C binding.
+See `examples/04-ui-sidebar.pl` for a full port of the sidebar demo
+above.
+
 ## What's here
 
 | Layer                                                              | Status        |
@@ -78,7 +107,7 @@ to Perl-helper mapping.
 | Phase 10: transition handlers (single per-context handler set)       | Complete      |
 | Phase 11: golden-fixture regression harness                         | Complete      |
 | Phase 12: documentation and examples                                | Complete      |
-| Phase 13: Perl-idiomatic high-level layer (closures, snake_case)    | Future work   |
+| Phase 13: Perl-idiomatic high-level layer (`Clay::UI`, roles + widgets) | Complete  |
 
 ## Known limitations
 

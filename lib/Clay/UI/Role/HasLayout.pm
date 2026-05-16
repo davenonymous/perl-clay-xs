@@ -1,0 +1,51 @@
+package Clay::UI::Role::HasLayout;
+
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Object::Pad 0.800;
+
+our $VERSION = '0.01';
+
+role Clay::UI::Role::HasLayout {
+	field $layout :param :reader = undef;
+
+	method contribute_layout ($config) {
+		return unless defined $layout;
+		$config->{layout} = $layout;
+		return;
+	}
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+Clay::UI::Role::HasLayout - layout config mixin for Clay::UI widgets
+
+=head1 SYNOPSIS
+
+	class My::Box :does(Clay::UI::Role::Element)
+	              :does(Clay::UI::Role::HasLayout)
+	{}
+
+	My::Box->new(
+		layout => {
+			sizing           => { width => sizing_grow(), height => sizing_grow() },
+			padding          => { left => 10, right => 10, top => 5, bottom => 5 },
+			child_gap        => 4,
+			layout_direction => CLAY_TOP_TO_BOTTOM,
+		},
+	);
+
+=head1 DESCRIPTION
+
+Mixin role that contributes a C<layout> slice to the Clay element
+declaration. Pass any subset of Clay's layout fields; snake_case keys
+will be camelized by the walker before reaching the C binding.
+
+=cut

@@ -1,0 +1,44 @@
+package Clay::UI::Role::HasBackground;
+
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Object::Pad 0.800;
+
+our $VERSION = '0.01';
+
+role Clay::UI::Role::HasBackground {
+	field $background_color :param :reader = undef;
+
+	method contribute_background ($config) {
+		return unless defined $background_color;
+		$config->{background_color} = $background_color;
+		return;
+	}
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+Clay::UI::Role::HasBackground - background-color mixin for Clay::UI widgets
+
+=head1 SYNOPSIS
+
+	class My::Box :does(Clay::UI::Role::Element)
+	              :does(Clay::UI::Role::HasBackground)
+	{}
+
+	My::Box->new( background_color => [40, 50, 60, 255] );
+
+=head1 DESCRIPTION
+
+Mixin role that contributes a C<backgroundColor> slice to the Clay
+element declaration. Value is an arrayref of four 0-255 channel values
+C<[r, g, b, a]>.
+
+=cut
