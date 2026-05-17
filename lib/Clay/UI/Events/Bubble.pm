@@ -26,10 +26,10 @@ Clay::UI::Events::Bubble - bubble-policy enum for Clay::UI events
 
 =head1 SYNOPSIS
 
-	use Clay::UI::Events qw(BUBBLE_ALWAYS BUBBLE_IF_CONTINUE BUBBLE_NEVER);
+	use Clay::UI::Events::Bubble;
 
 	my $event = Clay::UI::Events::OnPress->new(
-		bubble_mode => BUBBLE_IF_CONTINUE,
+		bubble_mode => Clay::UI::Events::Bubble->IF_CONTINUE,
 	);
 
 =head1 DESCRIPTION
@@ -60,8 +60,6 @@ Fire on the originating widget only. Ancestors never see the event.
 
 =back
 
-The shortcut subs C<BUBBLE_ALWAYS>, C<BUBBLE_IF_CONTINUE>,
-C<BUBBLE_NEVER> exported by L<Clay::UI::Events> resolve to these
-singletons; comparison uses ordinary object identity (C<==>).
+Comparison uses ordinary object identity (C<==>).
 
 =cut

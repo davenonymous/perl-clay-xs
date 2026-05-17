@@ -137,25 +137,29 @@ A small DOM-style event system, split in two roles:
   `fire_event($event)`.
 
 ```perl
-use Clay::UI::Events qw(EVENT_HANDLED EVENT_CONTINUE BUBBLE_ALWAYS);
 use Clay::UI::Events::OnPress;
+use Clay::UI::Events::Result;
+use Clay::UI::Events::Bubble;
 
 $button->on('OnPress', sub ($event) {
     warn "pressed ", $event->target->id, " at (", $event->x, ",", $event->y, ")";
-    return EVENT_HANDLED;  # stop bubbling (only matters in BUBBLE_IF_CONTINUE mode)
+    return Clay::UI::Events::Result->HANDLED;  # stop bubbling (only matters in IF_CONTINUE mode)
 });
 
 # Fire manually (or let Button's hover callback fire it for you):
 $button->fire_event(
-    Clay::UI::Events::OnPress->new(x => 10, y => 20, bubble_mode => BUBBLE_ALWAYS),
+    Clay::UI::Events::OnPress->new(
+        x => 10, y => 20,
+        bubble_mode => Clay::UI::Events::Bubble->ALWAYS,
+    ),
 );
 ```
 
 Event objects are typed Object::Pad classes (`OnHoverStart`,
 `OnHoverStopped`, `OnPress`, `OnRelease`, `OnScroll`, plus the base
-`Event`); bubble
-policy is carried on the event (`BUBBLE_ALWAYS`, `BUBBLE_IF_CONTINUE`,
-`BUBBLE_NEVER`). Hover/press events are driven by the
+`Event`); bubble policy is carried on the event as a
+`Clay::UI::Events::Bubble` enum value (`ALWAYS`, `IF_CONTINUE`,
+`NEVER`). Hover/press events are driven by the
 `Clay::UI::Role::Hoverable` and `Clay::UI::Role::Pressable` roles -
 composing those gives a widget edge-triggered `OnHoverStart` /
 `OnHoverStopped` / `OnPress` events plus `is_hovered` / `is_pressed`

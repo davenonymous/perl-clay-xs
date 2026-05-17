@@ -176,11 +176,13 @@ Useful invocations:
    `method parent;` as a requirement and let the consuming widget
    supply it. The bubble walk uses the existing weak-parent chain.
    An event object is single-use: the first `fire_event` stamps
-   `target` and any subsequent dispatch dies. In `BUBBLE_IF_CONTINUE`
-   mode, the stop check is per-node (all handlers at a node always
-   run); after the list, only an all-`EVENT_CONTINUE` outcome keeps
-   bubbling. Bubble-mode and result constants are typed singletons
-   backed by `Object::PadX::Enum`; compare with `==`, never `eq`.
+   `target` and any subsequent dispatch dies. In
+   `Clay::UI::Events::Bubble->IF_CONTINUE` mode, the stop check is
+   per-node (all handlers at a node always run); after the list, only
+   an all-`Clay::UI::Events::Result->CONTINUE` outcome keeps bubbling.
+   Bubble-mode and result values are typed enum singletons backed by
+   `Object::PadX::Enum` (`Clay::UI::Events::Bubble` and
+   `Clay::UI::Events::Result`); compare with `==`, never `eq`.
 8. The walker injects `user_data => refaddr($widget)` into every
    element and text config and maintains a module-level weak registry
    so `Clay::UI::widget_for($cmd->{userData})` can recover the

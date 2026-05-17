@@ -37,6 +37,6 @@ Carries no payload beyond the inherited C<target> / C<current_target>;
 both expose the originating widget.
 
 C<name> defaults to C<'OnHoverStart'>; C<bubble_mode> defaults to
-C<BUBBLE_IF_CONTINUE> (inherited).
+C<< Clay::UI::Events::Bubble->IF_CONTINUE >> (inherited).
 
 =cut

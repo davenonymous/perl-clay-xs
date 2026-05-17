@@ -95,28 +95,29 @@ L<Clay::UI::Events::Listener>; it C<requires> the C<parent> and
 C<handlers_for> methods. Consumers that already have HasParent +
 Listener (every widget) satisfy both without a diamond.
 
-=head1 BUBBLE SEMANTICS
+=head1 BUBBLE MODES
 
-See L<Clay::UI::Events/EVENT FLOW> for the full table. Short version:
-all handlers registered at the current widget fire (in registration
+All handlers registered at the current widget fire (in registration
 order) before bubbling is reconsidered. The walk then chooses whether
-to step to C<< $node->parent >>:
+to step to C<< $node->parent >> based on C<< $event->bubble_mode >>
+(a L<Clay::UI::Events::Bubble> singleton):
 
 =over 4
 
-=item C<BUBBLE_ALWAYS>
+=item C<< Clay::UI::Events::Bubble->ALWAYS >>
 
 Steps to the next ancestor regardless of any return value.
 
-=item C<BUBBLE_IF_CONTINUE> (the default for new events)
+=item C<< Clay::UI::Events::Bubble->IF_CONTINUE >> (the default for new events)
 
 Steps to the next ancestor only when B<every> handler at the current
-node returned C<EVENT_CONTINUE>. A single handler returning C<undef>,
-C<EVENT_HANDLED>, or any unrelated value terminates the bubble walk
-B<after> the current node finishes. Sibling handlers at the same node
-still all run; the stop decision is per-node, not per-handler.
+node returned C<< Clay::UI::Events::Result->CONTINUE >>. A single
+handler returning C<undef>, C<< Clay::UI::Events::Result->HANDLED >>,
+or any unrelated value terminates the bubble walk B<after> the current
+node finishes. Sibling handlers at the same node still all run; the
+stop decision is per-node, not per-handler.
 
-=item C<BUBBLE_NEVER>
+=item C<< Clay::UI::Events::Bubble->NEVER >>
 
 Never steps. The originating widget is the only node that sees the
 event.

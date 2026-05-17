@@ -62,11 +62,11 @@ Clay::UI::Events::Event - base class for Clay::UI events
 =head1 SYNOPSIS
 
 	use Clay::UI::Events::Event;
-	use Clay::UI::Events qw(BUBBLE_ALWAYS);
+	use Clay::UI::Events::Bubble;
 
 	my $event = Clay::UI::Events::Event->new(
 		name        => 'MyCustom',
-		bubble_mode => BUBBLE_ALWAYS,
+		bubble_mode => Clay::UI::Events::Bubble->ALWAYS,
 	);
 
 =head1 DESCRIPTION
@@ -87,7 +87,7 @@ return their canonical name (C<'OnHover'>, C<'OnPress'>, ...).
 =item C<bubble_mode> (default C<BUBBLE_IF_CONTINUE>)
 
 A L<Clay::UI::Events::Bubble> singleton selecting the propagation
-policy. See L<Clay::UI::Events/EVENT FLOW>.
+policy. See L<Clay::UI::Events::Emitter/BUBBLE MODES>.
 
 =item C<target> (set by the emitter)
 

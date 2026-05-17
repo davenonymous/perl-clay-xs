@@ -7,10 +7,8 @@ use Test2::V0;
 
 use Clay::UI::Box;
 use Clay::UI::Text;
-use Clay::UI::Events qw(
-	EVENT_HANDLED EVENT_CONTINUE
-	BUBBLE_ALWAYS BUBBLE_IF_CONTINUE BUBBLE_NEVER
-);
+use Clay::UI::Events::Bubble;
+use Clay::UI::Events::Result;
 use Clay::UI::Events::Event;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
@@ -18,15 +16,21 @@ use Clay::UI::Events::OnPress;
 use Clay::UI::Events::OnRelease;
 use Clay::UI::Events::OnScroll;
 
+my $HANDLED     = Clay::UI::Events::Result->HANDLED;
+my $CONTINUE    = Clay::UI::Events::Result->CONTINUE;
+my $ALWAYS      = Clay::UI::Events::Bubble->ALWAYS;
+my $IF_CONTINUE = Clay::UI::Events::Bubble->IF_CONTINUE;
+my $NEVER       = Clay::UI::Events::Bubble->NEVER;
+
 # -----------------------------------------------------------------------------
 # Constants are singleton objects and compare with ==.
 # -----------------------------------------------------------------------------
 
 subtest 'constants are singletons' => sub {
-	ok( EVENT_HANDLED == EVENT_HANDLED,         'EVENT_HANDLED is a singleton' );
-	ok( EVENT_CONTINUE == EVENT_CONTINUE,       'EVENT_CONTINUE is a singleton' );
-	ok( EVENT_HANDLED != EVENT_CONTINUE,        'HANDLED and CONTINUE distinguishable' );
-	ok( BUBBLE_ALWAYS != BUBBLE_NEVER,          'bubble singletons distinguishable' );
+	ok( $HANDLED == Clay::UI::Events::Result->HANDLED,  'HANDLED is a singleton' );
+	ok( $CONTINUE == Clay::UI::Events::Result->CONTINUE,'CONTINUE is a singleton' );
+	ok( $HANDLED != $CONTINUE,                          'HANDLED and CONTINUE distinguishable' );
+	ok( $ALWAYS != $NEVER,                              'bubble singletons distinguishable' );
 };
 
 # -----------------------------------------------------------------------------
@@ -69,41 +73,41 @@ subtest 'handler fires with target == current_target on the firer' => sub {
 # Bubble: ALWAYS walks every ancestor regardless of return.
 # -----------------------------------------------------------------------------
 
-subtest 'BUBBLE_ALWAYS visits every ancestor' => sub {
+subtest 'ALWAYS visits every ancestor' => sub {
 	my $leaf  = Clay::UI::Box->new( id => 'leaf' );
 	my $mid   = Clay::UI::Box->new( id => 'mid',  children => [ $leaf ] );
 	my $root  = Clay::UI::Box->new( id => 'root', children => [ $mid  ] );
 
 	my @hit_ids;
-	$_->on('Ping', sub ($e) { push @hit_ids, $e->current_target->id; return EVENT_HANDLED })
+	$_->on('Ping', sub ($e) { push @hit_ids, $e->current_target->id; return $HANDLED })
 		for $leaf, $mid, $root;
 
 	$leaf->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_ALWAYS),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $ALWAYS),
 	);
 
 	is( \@hit_ids, [ 'leaf', 'mid', 'root' ], 'all three handlers fired in bubble order' );
 };
 
 # -----------------------------------------------------------------------------
-# Bubble: IF_CONTINUE stops on undef / EVENT_HANDLED.
+# Bubble: IF_CONTINUE stops on undef / HANDLED.
 # -----------------------------------------------------------------------------
 
 subtest 'all handlers on the firing node fire even when one returns HANDLED' => sub {
-	# Per-node, not per-handler: a sibling returning EVENT_HANDLED must
-	# not skip later handlers at the SAME node. The stop decision applies
-	# at the node boundary, after the handler list is exhausted.
+	# Per-node, not per-handler: a sibling returning HANDLED must not skip
+	# later handlers at the SAME node. The stop decision applies at the
+	# node boundary, after the handler list is exhausted.
 	my $leaf = Clay::UI::Box->new( id => 'leaf' );
 	my $root = Clay::UI::Box->new( id => 'root', children => [ $leaf ] );
 
 	my @order;
-	$leaf->on('Ping', sub ($e) { push @order, 'leaf-1'; return EVENT_CONTINUE });
-	$leaf->on('Ping', sub ($e) { push @order, 'leaf-2'; return EVENT_HANDLED });
-	$leaf->on('Ping', sub ($e) { push @order, 'leaf-3'; return EVENT_CONTINUE });
+	$leaf->on('Ping', sub ($e) { push @order, 'leaf-1'; return $CONTINUE });
+	$leaf->on('Ping', sub ($e) { push @order, 'leaf-2'; return $HANDLED });
+	$leaf->on('Ping', sub ($e) { push @order, 'leaf-3'; return $CONTINUE });
 	$root->on('Ping', sub ($e) { push @order, 'root'   });
 
 	$leaf->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_IF_CONTINUE),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $IF_CONTINUE),
 	);
 
 	is(
@@ -113,24 +117,24 @@ subtest 'all handlers on the firing node fire even when one returns HANDLED' => 
 	);
 };
 
-subtest 'BUBBLE_IF_CONTINUE stops on EVENT_HANDLED' => sub {
+subtest 'IF_CONTINUE stops on HANDLED' => sub {
 	my $leaf  = Clay::UI::Box->new( id => 'leaf' );
 	my $mid   = Clay::UI::Box->new( id => 'mid',  children => [ $leaf ] );
 	my $root  = Clay::UI::Box->new( id => 'root', children => [ $mid  ] );
 
 	my @hit_ids;
-	$leaf->on('Ping', sub ($e) { push @hit_ids, 'leaf'; return EVENT_CONTINUE });
-	$mid ->on('Ping', sub ($e) { push @hit_ids, 'mid';  return EVENT_HANDLED });
-	$root->on('Ping', sub ($e) { push @hit_ids, 'root'; return EVENT_CONTINUE });
+	$leaf->on('Ping', sub ($e) { push @hit_ids, 'leaf'; return $CONTINUE });
+	$mid ->on('Ping', sub ($e) { push @hit_ids, 'mid';  return $HANDLED });
+	$root->on('Ping', sub ($e) { push @hit_ids, 'root'; return $CONTINUE });
 
 	$leaf->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_IF_CONTINUE),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $IF_CONTINUE),
 	);
 
-	is( \@hit_ids, [ 'leaf', 'mid' ], 'bubble stops once mid returns EVENT_HANDLED' );
+	is( \@hit_ids, [ 'leaf', 'mid' ], 'bubble stops once mid returns HANDLED' );
 };
 
-subtest 'BUBBLE_IF_CONTINUE: undef return halts as EVENT_HANDLED' => sub {
+subtest 'IF_CONTINUE: undef return halts as HANDLED' => sub {
 	my $leaf = Clay::UI::Box->new( id => 'leaf' );
 	my $root = Clay::UI::Box->new( id => 'root', children => [ $leaf ] );
 
@@ -147,16 +151,16 @@ subtest 'BUBBLE_IF_CONTINUE: undef return halts as EVENT_HANDLED' => sub {
 # Bubble: NEVER never reaches ancestors.
 # -----------------------------------------------------------------------------
 
-subtest 'BUBBLE_NEVER stays on firer' => sub {
+subtest 'NEVER stays on firer' => sub {
 	my $leaf = Clay::UI::Box->new( id => 'leaf' );
 	my $root = Clay::UI::Box->new( id => 'root', children => [ $leaf ] );
 
 	my @hits;
-	$leaf->on('Ping', sub ($e) { push @hits, 'leaf'; return EVENT_CONTINUE });
+	$leaf->on('Ping', sub ($e) { push @hits, 'leaf'; return $CONTINUE });
 	$root->on('Ping', sub ($e) { push @hits, 'root' });
 
 	$leaf->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_NEVER),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $NEVER),
 	);
 
 	is( \@hits, [ 'leaf' ], 'ancestor handler never fired' );
@@ -173,15 +177,15 @@ subtest 'current_target updates per hop; target is immutable' => sub {
 	my @observations;
 	$leaf->on('Ping', sub ($e) {
 		push @observations, [ $e->target->id, $e->current_target->id ];
-		return EVENT_CONTINUE;
+		return $CONTINUE;
 	});
 	$root->on('Ping', sub ($e) {
 		push @observations, [ $e->target->id, $e->current_target->id ];
-		return EVENT_CONTINUE;
+		return $CONTINUE;
 	});
 
 	$leaf->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_ALWAYS),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $ALWAYS),
 	);
 
 	is( \@observations, [ [ 'leaf', 'leaf' ], [ 'leaf', 'root' ] ],
@@ -257,7 +261,7 @@ subtest 'Listener/Emitter split: Text listens, Box emits' => sub {
 	my @hits;
 	$outer->on('Ping', sub ($e) { push @hits, 'outer' });
 	$inner->fire_event(
-		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => BUBBLE_ALWAYS),
+		Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $ALWAYS),
 	);
 	is( \@hits, [ 'outer' ], 'event from inner Box reached listener on outer Box' );
 };

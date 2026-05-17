@@ -68,6 +68,6 @@ Opaque payload forwarded from the originating callback.
 =back
 
 C<name> defaults to C<'OnRelease'>; C<bubble_mode> defaults to
-C<BUBBLE_IF_CONTINUE>.
+C<< Clay::UI::Events::Bubble->IF_CONTINUE >>.
 
 =cut
