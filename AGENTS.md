@@ -141,27 +141,29 @@ Useful invocations:
    after `Clay_Initialize` will dispatch hover callbacks with that
    ghost state regardless of `isPointerDown`. Tests of click behavior
    need a warm-up frame to settle Clay into `RELEASED`.
-7. The event system is split in two: `Clay::UI::Role::Events::Listener`
-   (the `on($name, $sub)` / `handlers_for($name)` half) is composed
-   transitively into every widget through `Role::Element` and
-   `Role::TextNode`, so anything can register a handler and be a
-   bubble target. `Clay::UI::Role::Events::Emitter` (the `fire_event($event)`
-   half) is composed into widgets that originate events: directly on
-   `Box`, transitively via `Role::Hoverable` (which itself composes
-   Emitter) on `Button` and anything else that goes through
-   Hoverable/Pressable. Neither role composes
-   `Role::HasParent` itself (would form a diamond); both declare
-   `method parent;` as a requirement and let the consuming widget
-   supply it. The bubble walk uses the existing weak-parent chain.
-   An event object is single-use: the first `fire_event` stamps
-   `target` and any subsequent dispatch dies. In
-   `Clay::UI::Enum::Bubble->IF_CONTINUE` mode, the stop check is
-   per-node (all handlers at a node always run); after the list, only
-   an all-`Clay::UI::Enum::Result->CONTINUE` outcome keeps bubbling.
-   Bubble-mode and result values are typed enum singletons backed by
-   `Object::PadX::Enum` (`Clay::UI::Enum::Bubble` and
-   `Clay::UI::Enum::Result`); compare with `==`, never `eq`.
-8. The walker injects `user_data => refaddr($widget)` into every
+7. **Clay::UI stamps itself onto the root widget at construction time
+   (`HasParent::_set_ui_controller`).** Every widget reaches its
+   controller via `$widget->ui`, which walks `parent` to the topmost
+   node and returns the stamped weak reference. The slot is write-once
+   per root - a root cannot be re-bound to a second Clay::UI. This is
+   the only widget-to-controller back-channel; nothing else in the
+   walker carries it.
+8. **Focus events (`OnFocus` / `OnBlur`) fire from
+   `Clay::UI::set_focused_widget`, NOT from the walker.** They are
+   driven by programmatic / input-handler focus changes, never by the
+   layout pass. Setting focus to the already-focused widget is a no-op
+   (no events refire). Undef-to-undef is also a no-op.
+9. **HasFocusOrder delegation walks up from the currently focused
+   widget; the *nearest* ancestor (including the focused widget
+   itself) that composes the role takes over.** Its
+   `get_next_focus` / `get_previous_focus` is called with no
+   arguments and must return either a Focusable widget belonging to
+   the same tree (validated) or undef. The `default_next_focus` /
+   `default_previous_focus` helpers on the role re-enter Clay::UI's
+   default depth-first chain, bypassing the HasFocusOrder
+   consultation - this is how custom orders defer to default for
+   parts of their subtree.
+10. The walker injects `user_data => refaddr($widget)` into every
    element and text config and maintains a module-level weak registry
    so `Clay::UI::widget_for($cmd->{userData})` can recover the
    originating widget from a render command. A widget's `to_config`

@@ -100,7 +100,7 @@ Clay::UI::Role::Interaction::Hoverable - stateful hover-tracking + edge-triggere
 
 =head1 DESCRIPTION
 
-Real stateful role (no longer a marker). Composing widgets get:
+Stateful role. Composing widgets get:
 
 =over 4
 

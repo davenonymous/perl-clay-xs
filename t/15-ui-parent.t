@@ -8,6 +8,7 @@ use Scalar::Util qw(refaddr);
 
 sub same ($a, $b, $name) { is(refaddr($a), refaddr($b), $name) }
 
+use Clay::UI;
 use Clay::UI::Box;
 use Clay::UI::Text;
 
@@ -135,6 +136,37 @@ subtest 'non-widget children are rejected at both call sites' => sub {
 		dies { $p->add_child('not a widget') },
 		qr/not a widget/,
 		'add_child rejects non-widgets',
+	);
+};
+
+# -----------------------------------------------------------------------------
+# Clay::UI back-reference: every widget reachable from the root can find
+# its Clay::UI controller via $self->ui.
+# -----------------------------------------------------------------------------
+
+subtest 'unattached widget ui() is undef' => sub {
+	my $w = Clay::UI::Box->new;
+	is($w->ui, undef, 'no ui controller before Clay::UI->new');
+};
+
+subtest 'Clay::UI stamps itself on the root; descendants reach it via ui()' => sub {
+	my $leaf = Clay::UI::Box->new(id => 'leaf');
+	my $mid  = Clay::UI::Box->new(id => 'mid',  children => [$leaf]);
+	my $root = Clay::UI::Box->new(id => 'root', children => [$mid]);
+	my $ui   = Clay::UI->new(root => $root, width => 100, height => 100);
+
+	same($root->ui, $ui, 'root sees its Clay::UI');
+	same($mid->ui,  $ui, 'descendant sees Clay::UI through root walk');
+	same($leaf->ui, $ui, 'deep descendant sees Clay::UI');
+};
+
+subtest 'second Clay::UI on the same root dies' => sub {
+	my $root = Clay::UI::Box->new;
+	my $ui   = Clay::UI->new(root => $root, width => 100, height => 100);
+	like(
+		dies { Clay::UI->new(root => $root, width => 50, height => 50) },
+		qr/already bound/,
+		'cannot re-attach root to a second Clay::UI',
 	);
 };
 

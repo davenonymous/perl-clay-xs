@@ -28,6 +28,9 @@ use Clay::XS qw(
 );
 use Clay::UI::_keys qw(camelize_keys);
 
+use Clay::UI::Events::OnFocus;
+use Clay::UI::Events::OnBlur;
+
 our $VERSION = '0.02';
 
 class Clay::UI {
@@ -44,6 +47,7 @@ class Clay::UI {
 	field %_widget_by_id;
 	field $_pending_by_refaddr;
 	field $_pending_by_id;
+	field $_focused = undef;
 
 	ADJUST {
 		unless (blessed $root
@@ -79,6 +83,8 @@ class Clay::UI {
 		);
 		Clay_SetCurrentContext($_ctx);
 		Clay_SetMeasureTextFunction($measure_text);
+
+		$root->_set_ui_controller($self);
 	}
 
 	# Read with no args; write with one arg, propagating to Clay.
@@ -182,6 +188,130 @@ class Clay::UI {
 			push @widgets, $w if defined $w;
 		}
 		return \@widgets;
+	}
+
+	method get_focused_widget () {
+		return $_focused;
+	}
+
+	method set_focused_widget ($widget) {
+		# Pass undef to blur. Setting to the currently focused widget is
+		# a no-op (no events refire).
+		if (defined $_focused && defined $widget && refaddr($_focused) == refaddr($widget)) {
+			return;
+		}
+		if (!defined $_focused && !defined $widget) {
+			return;
+		}
+
+		if (defined $widget) {
+			die "Clay::UI: set_focused_widget target must be a blessed widget"
+				unless blessed $widget;
+			die "Clay::UI: set_focused_widget target must consume Clay::UI::Role::Interaction::Focusable"
+				unless $widget->DOES('Clay::UI::Role::Interaction::Focusable');
+			die "Clay::UI: set_focused_widget target does not belong to this Clay::UI"
+				unless defined($widget->ui) && refaddr($widget->ui) == refaddr($self);
+			die "Clay::UI: set_focused_widget target is not currently focusable (can_focus returned false)"
+				unless $widget->can_focus;
+		}
+
+		my $previous = $_focused;
+		$_focused = $widget;
+		weaken $_focused if defined $_focused;
+
+		if (defined $previous) {
+			$previous->fire_event(Clay::UI::Events::OnBlur->new);
+		}
+		if (defined $widget) {
+			$widget->fire_event(Clay::UI::Events::OnFocus->new);
+		}
+		return;
+	}
+
+	method focus_next () {
+		my $next = $self->_compute_next_focus($_focused);
+		return unless defined $next;
+		$self->set_focused_widget($next);
+		return;
+	}
+
+	method focus_previous () {
+		my $prev = $self->_compute_previous_focus($_focused);
+		return unless defined $prev;
+		$self->set_focused_widget($prev);
+		return;
+	}
+
+	method _compute_next_focus ($from) {
+		return $self->_delegate_or_default($from, 'get_next_focus', '_compute_default_next_focus');
+	}
+
+	method _compute_previous_focus ($from) {
+		return $self->_delegate_or_default($from, 'get_previous_focus', '_compute_default_previous_focus');
+	}
+
+	method _delegate_or_default ($from, $custom_method, $default_method) {
+		# Walk up from $from looking for the nearest HasFocusOrder ancestor
+		# (including $from itself). That ancestor takes over.
+		my $node = $from;
+		while (defined $node) {
+			if ($node->DOES('Clay::UI::Role::Interaction::HasFocusOrder')) {
+				my $next = $node->$custom_method;
+				return $self->_validate_focus_target($next);
+			}
+			$node = $node->parent;
+		}
+		return $self->$default_method($from);
+	}
+
+	method _validate_focus_target ($widget) {
+		return undef unless defined $widget;
+		return undef unless blessed($widget)
+			&& $widget->DOES('Clay::UI::Role::Interaction::Focusable')
+			&& $widget->can_focus;
+		return undef unless defined($widget->ui) && refaddr($widget->ui) == refaddr($self);
+		return $widget;
+	}
+
+	method _default_focus_chain () {
+		my @chain;
+		my @stack = ($root);
+		while (@stack) {
+			my $node = shift @stack;
+			if ($node->DOES('Clay::UI::Role::Interaction::Focusable') && $node->can_focus) {
+				push @chain, $node;
+			}
+			if ($node->DOES('Clay::UI::Role::Core::Element')) {
+				my $kids = $node->children;
+				unshift @stack, @$kids;
+			}
+		}
+		return @chain;
+	}
+
+	method _compute_default_next_focus ($from) {
+		my @chain = $self->_default_focus_chain;
+		return undef unless @chain;
+		return $chain[0] unless defined $from;
+		my $from_addr = refaddr($from);
+		for my $i (0 .. $#chain) {
+			next unless refaddr($chain[$i]) == $from_addr;
+			return $chain[($i + 1) % @chain];
+		}
+		# Current focus not in chain (e.g. became disabled) - start at first.
+		return $chain[0];
+	}
+
+	method _compute_default_previous_focus ($from) {
+		my @chain = $self->_default_focus_chain;
+		return undef unless @chain;
+		return $chain[-1] unless defined $from;
+		my $from_addr = refaddr($from);
+		for my $i (0 .. $#chain) {
+			next unless refaddr($chain[$i]) == $from_addr;
+			return $chain[($i - 1) % @chain];
+		}
+		return $chain[-1];
 	}
 
 	method _attach_back_reference ($config, $node) {
@@ -401,6 +531,58 @@ falsy or unknown).
 Returns an arrayref of widget objects currently under the pointer (as
 reported by C<Clay_GetPointerOverIds>). Widgets that have been
 garbage-collected since the last C<render> are skipped.
+
+=head2 get_focused_widget
+
+Returns the widget currently holding focus, or C<undef> if no widget
+is focused (or the previously focused widget has been
+garbage-collected). The reference is held weakly.
+
+=head2 set_focused_widget($widget)
+
+Sets focus to C<$widget>. Pass C<undef> to clear focus (blur).
+
+Validates loudly:
+
+=over 4
+
+=item *
+
+Dies if C<$widget> is not blessed.
+
+=item *
+
+Dies if C<$widget> does not consume
+L<Clay::UI::Role::Interaction::Focusable>.
+
+=item *
+
+Dies if C<< $widget->can_focus >> returns false.
+
+=item *
+
+Dies if C<$widget> belongs to a different Clay::UI tree.
+
+=back
+
+Fires L<Clay::UI::Events::OnBlur> on the previously focused widget
+(if any) and L<Clay::UI::Events::OnFocus> on the new one (if any).
+Setting focus to the already-focused widget is a no-op (no events
+fire).
+
+=head2 focus_next, focus_previous
+
+Move focus to the next / previous focusable widget. Traversal order
+is the default depth-first walk of the tree, unless an ancestor of
+the currently focused widget composes
+L<Clay::UI::Role::Interaction::HasFocusOrder>; in that case the
+nearest such ancestor's C<get_next_focus> / C<get_previous_focus> is
+called and its return value (if a valid Focusable belonging to this
+tree) is used.
+
+Both methods wrap from end to beginning (and vice versa). With no
+currently focused widget, C<focus_next> focuses the first widget in
+the default chain and C<focus_previous> focuses the last.
 
 =head1 NOTES
 

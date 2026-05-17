@@ -10,18 +10,13 @@ use Scalar::Util qw(blessed);
 
 use Clay::UI::Enum::Bubble;
 use Clay::UI::Enum::Result;
+use Clay::UI::Role::Layout::HasParent;
+use Clay::UI::Role::Events::Listener;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Events::Emitter {
-	# Listener half (handlers_for) is composed separately into every
-	# widget through Role::Element / Role::TextNode; the bubble walk
-	# below calls handlers_for on every ancestor regardless of whether
-	# that ancestor is itself an Emitter. We just require both methods
-	# so anything composing Emitter clearly states its expectations.
-	method parent;
-	method handlers_for;
-
+role Clay::UI::Role::Events::Emitter :does(Clay::UI::Role::Layout::HasParent)
+                                     :does(Clay::UI::Role::Events::Listener) {
 	method fire_event ($event) {
 		die "Clay::UI::Role::Events::Emitter: fire_event needs a Clay::UI::Events::Event instance"
 			unless blessed($event) && $event->isa('Clay::UI::Events::Event');
@@ -73,13 +68,18 @@ Clay::UI::Role::Events::Emitter - mixin role giving a widget fire_event()
 
 =head1 DESCRIPTION
 
-The I<send> half of the Clay::UI event system. Composed only into widget
+The I<send> half of the Clay::UI event system. Composed into widget
 classes that originate events (currently L<Clay::UI::Box> and
 L<Clay::UI::Button>; future widgets like a scroll-aware container would
 add it too). The complementary I<receive> half lives in
-L<Clay::UI::Role::Events::Listener> and is composed transitively into every
-widget via the structural roles, so any widget - emitter or not - can be
-a bubble target.
+L<Clay::UI::Role::Events::Listener> and is composed transitively into
+every widget via the structural roles, so any widget - emitter or not -
+can be a bubble target.
+
+Emitter itself composes L<Clay::UI::Role::Layout::HasParent> and
+L<Clay::UI::Role::Events::Listener> so the C<parent> chain walk and
+C<handlers_for> lookup it relies on are always available, regardless
+of what else the consuming widget composes.
 
 =head1 METHODS
 
@@ -89,11 +89,6 @@ Dispatches a L<Clay::UI::Events::Event> instance. Stamps
 C<< $event->target >> with C<$self> (raises if the event was already
 dispatched), then walks handlers at the originating widget and,
 according to C<< $event->bubble_mode >>, up the C<parent> chain.
-
-The role itself does NOT compose L<Clay::UI::Role::Layout::HasParent> or
-L<Clay::UI::Role::Events::Listener>; it C<requires> the C<parent> and
-C<handlers_for> methods. Consumers that already have HasParent +
-Listener (every widget) satisfy both without a diamond.
 
 =head1 BUBBLE MODES
 

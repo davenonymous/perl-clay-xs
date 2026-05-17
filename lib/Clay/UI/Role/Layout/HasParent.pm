@@ -12,6 +12,7 @@ our $VERSION = '0.01';
 
 role Clay::UI::Role::Layout::HasParent {
 	field $parent :reader = undef;
+	field $_ui_controller = undef;
 
 	method _set_parent ($new_parent) {
 		die "Clay::UI: parent must be a blessed widget"
@@ -29,6 +30,23 @@ role Clay::UI::Role::Layout::HasParent {
 			$node = $next;
 		}
 		return $node;
+	}
+
+	method _set_ui_controller ($ui) {
+		die "Clay::UI: ui controller must be a Clay::UI instance"
+			unless blessed($ui) && $ui->isa('Clay::UI');
+		die "Clay::UI: widget already bound to a Clay::UI controller"
+			if defined $_ui_controller;
+		$_ui_controller = $ui;
+		weaken $_ui_controller;
+		return;
+	}
+
+	method _local_ui_controller () { $_ui_controller }
+
+	method ui () {
+		my $top = $self->root;
+		return $top->_local_ui_controller;
 	}
 }
 
@@ -118,5 +136,15 @@ still-alive ancestor on the surviving prefix of the chain.
 
 Each call walks the chain; the result is not cached. Trees are shallow
 enough in practice that the walk cost is negligible.
+
+=head2 ui
+
+Returns the L<Clay::UI> controller that owns this widget's tree, or
+C<undef> if the widget is not yet attached to a Clay::UI. Walks up to
+the root widget and returns the controller stamped there by
+C<< Clay::UI->new(root => $root) >>.
+
+The Clay::UI back-reference is held weakly; if the controller has been
+garbage-collected, C<ui> returns C<undef>.
 
 =cut
