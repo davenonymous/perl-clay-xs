@@ -52,6 +52,8 @@ role Clay::UI::Role::Interaction::Pressable :does(Clay::UI::Role::Interaction::H
 		});
 
 		$self->_register_transition_hook(sub ($was_over) {
+			my $was_pressed = $is_pressed;
+
 			if (!$was_over) {
 				# Pointer not over this widget this frame: no callback
 				# fired, so we can't be pressed on this element.
@@ -63,6 +65,12 @@ role Clay::UI::Role::Interaction::Pressable :does(Clay::UI::Role::Interaction::H
 					 || $st == CLAY_POINTER_DATA_PRESSED_THIS_FRAME)) ? 1 : 0;
 			}
 			$_press_state_this_frame = undef;
+
+			if ($is_pressed && !$was_pressed) {
+				$self->add_state('pressed');
+			} elsif (!$is_pressed && $was_pressed) {
+				$self->remove_state('pressed');
+			}
 		});
 	}
 }

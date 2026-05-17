@@ -10,12 +10,14 @@ use Object::Pad 0.800;
 use Clay::XS qw(Clay_OnHover);
 
 use Clay::UI::Role::Events::Emitter;
+use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitter) {
+role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitter)
+                                            :does(Clay::UI::Role::Style::HasStates) {
 	field $is_hovered :reader = 0;
 
 	# Set to 1 by the Clay_OnHover trampoline whenever it fires for this
@@ -55,9 +57,11 @@ role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitte
 
 		if ($was_over && !$is_hovered) {
 			$is_hovered = 1;
+			$self->add_state('hovered');
 			$self->fire_event(Clay::UI::Events::OnHoverStart->new);
 		} elsif (!$was_over && $is_hovered) {
 			$is_hovered = 0;
+			$self->remove_state('hovered');
 			$self->fire_event(Clay::UI::Events::OnHoverStopped->new);
 		}
 

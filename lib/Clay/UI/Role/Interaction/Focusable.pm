@@ -10,11 +10,13 @@ use Scalar::Util qw(blessed refaddr);
 
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Emitter;
+use Clay::UI::Role::Style::HasStates;
 
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasParent)
-                                            :does(Clay::UI::Role::Events::Emitter) {
+                                            :does(Clay::UI::Role::Events::Emitter)
+                                            :does(Clay::UI::Role::Style::HasStates) {
 	field $can_focus :param :accessor = 1;
 
 	method is_focused () {

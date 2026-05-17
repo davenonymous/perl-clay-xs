@@ -220,9 +220,11 @@ class Clay::UI {
 		weaken $_focused if defined $_focused;
 
 		if (defined $previous) {
+			$previous->remove_state('focused');
 			$previous->fire_event(Clay::UI::Events::OnBlur->new);
 		}
 		if (defined $widget) {
+			$widget->add_state('focused');
 			$widget->fire_event(Clay::UI::Events::OnFocus->new);
 		}
 		return;
