@@ -3,7 +3,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # Smallest possible layout: one fixed-size root with a background colour.
 

@@ -65,10 +65,10 @@ horizontal-only.
 Scroll containers need the caller to drive scroll updates each frame.
 After processing input events, call
 
-	Clay::Layout::Clay_UpdateScrollContainers($enable_drag_scrolling, $scroll_delta, $delta_time);
+	Clay::XS::Clay_UpdateScrollContainers($enable_drag_scrolling, $scroll_delta, $delta_time);
 
 and, if you want programmatic scroll-offset queries, install a
-C<Clay::Layout::Clay_SetQueryScrollOffsetFunction>. The widget itself
+C<Clay::XS::Clay_SetQueryScrollOffsetFunction>. The widget itself
 only contributes the C<clip> config; per-frame scroll plumbing lives
 on the caller (see F<AGENTS.md> invariant 3).
 

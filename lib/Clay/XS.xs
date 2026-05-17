@@ -1,5 +1,5 @@
 /*
- * Layout.xs - The XS surface for Clay::Layout.
+ * XS.xs - The XS surface for Clay::XS.
  *
  * Every public and internal Clay v0.14 function is exposed under its
  * exact C name. The Perl-side module re-exports these and adds a handful
@@ -35,14 +35,14 @@
 #include <string.h>
 
 /* ===========================================================================
- * BOOT helper: install integer constants under Clay::Layout::.
+ * BOOT helper: install integer constants under Clay::XS::.
  * ======================================================================== */
 
 static void install_iv_const(pTHX_ const char *name, IV value)
 {
     char buf[128];
-    snprintf(buf, sizeof(buf), "Clay::Layout::%s", name);
-    newCONSTSUB(gv_stashpv("Clay::Layout", GV_ADD), name, newSViv(value));
+    snprintf(buf, sizeof(buf), "Clay::XS::%s", name);
+    newCONSTSUB(gv_stashpv("Clay::XS", GV_ADD), name, newSViv(value));
     (void) buf;
 }
 
@@ -66,12 +66,12 @@ static clay_perl_context *clay_perl_current_ctx = NULL;
 static clay_perl_context *get_current_ctx(pTHX)
 {
     if (!clay_perl_current_ctx) {
-        croak("Clay::Layout: no current context; call Clay_Initialize first");
+        croak("Clay::XS: no current context; call Clay_Initialize first");
     }
     return clay_perl_current_ctx;
 }
 
-MODULE = Clay::Layout    PACKAGE = Clay::Layout    PREFIX = xs_
+MODULE = Clay::XS    PACKAGE = Clay::XS    PREFIX = xs_
 
 PROTOTYPES: DISABLE
 
@@ -839,7 +839,7 @@ xs_corner_radius_all(radius)
 # Lifecycle: explicit free hook for the context.
 # =============================================================================
 
-MODULE = Clay::Layout    PACKAGE = Clay::Layout::Context    PREFIX = xs_ctx_
+MODULE = Clay::XS    PACKAGE = Clay::XS::Context    PREFIX = xs_ctx_
 
 void
 xs_ctx_DESTROY(self_sv)

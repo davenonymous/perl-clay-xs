@@ -16,7 +16,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # ---------------------------------------------------------------------------
 # SVG renderer

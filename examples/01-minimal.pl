@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# 01-minimal.pl - The smallest useful Clay::Layout demo.
+# 01-minimal.pl - The smallest useful Clay::XS demo.
 #
 # Builds a single layout, dumps the resulting render commands as
 # JSON to stdout. Run with:
@@ -12,7 +12,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 use JSON::PP;
 
 my $ctx = Clay_Initialize(
@@ -51,7 +51,7 @@ Clay__ConfigureOpenElement({
         cornerRadius    => corner_radius_all(4),
     });
         Clay__OpenTextElement(
-            "Clay::Layout demo",
+            "Clay::XS demo",
             { fontSize => 18, textColor => [255, 255, 255, 255] },
         );
     Clay__CloseElement();

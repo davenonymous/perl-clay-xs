@@ -3,7 +3,7 @@
 # 02-sidebar-demo.pl - Port of the README's sidebar example.
 #
 # Reproduces the layout shown in clay's README using only the low-level
-# Clay::Layout primitives. Demonstrates loops, helper subs, hover state,
+# Clay::XS primitives. Demonstrates loops, helper subs, hover state,
 # and a complete two-pass interactive pipeline.
 #
 # Run with:
@@ -15,7 +15,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 use JSON::PP;
 
 my $COLOR_LIGHT  = [224, 215, 210, 255];

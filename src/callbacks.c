@@ -66,7 +66,7 @@ static void surface_trampoline_error(pTHX_ const char *where)
     if (!SvTRUE(ERRSV)) return;
     STRLEN len;
     const char *msg = SvPV(ERRSV, len);
-    Perl_warn(aTHX_ "Clay::Layout: %s callback threw: %.*s",
+    Perl_warn(aTHX_ "Clay::XS: %s callback threw: %.*s",
               where, (int) len, msg);
     sv_setpvs(ERRSV, "");
 }

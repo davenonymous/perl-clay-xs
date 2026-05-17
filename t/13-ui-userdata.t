@@ -7,7 +7,7 @@ use Test2::V0;
 
 use Scalar::Util qw(refaddr);
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Box;
 use Clay::UI::Text;

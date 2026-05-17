@@ -1,5 +1,5 @@
 /*
- * clay_perl.h - Shared types and prototypes for the Clay::Layout XS binding.
+ * clay_perl.h - Shared types and prototypes for the Clay::XS XS binding.
  *
  * This header is included by the XS file and by every helper .c file under
  * src/. It pulls in Perl's API headers and the Clay v0.14 header (without
@@ -60,7 +60,7 @@
  * Per-Perl-context state.
  *
  * One of these is allocated per call to clay_perl_context_new() (which wraps
- * Clay_Initialize). A blessed Clay::Layout::Context scalar ref in Perl
+ * Clay_Initialize). A blessed Clay::XS::Context scalar ref in Perl
  * holds a pointer to one of these. Cleanup happens in DESTROY.
  * ------------------------------------------------------------------------ */
 
@@ -118,11 +118,11 @@ typedef struct clay_perl_context {
 clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity);
 void               clay_perl_context_free(pTHX_ clay_perl_context *self);
 
-/* Bless the given pointer as a Clay::Layout::Context. Returns a new mortal SV. */
+/* Bless the given pointer as a Clay::XS::Context. Returns a new mortal SV. */
 SV *clay_perl_context_to_sv(pTHX_ clay_perl_context *self);
 
 /* Recover a clay_perl_context * from a blessed SV. Croaks if the SV is not a
- * Clay::Layout::Context. */
+ * Clay::XS::Context. */
 clay_perl_context *clay_perl_context_from_sv(pTHX_ SV *sv);
 
 /* ---------------------------------------------------------------------------

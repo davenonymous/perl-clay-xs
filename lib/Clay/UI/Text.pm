@@ -63,7 +63,7 @@ consumes L<Clay::UI::Role::TextNode> so the walker can detect text
 nodes via C<DOES>.
 
 The text-measurement callback installed via
-C<Clay::Layout::Clay_SetMeasureTextFunction> is responsible for
+C<Clay::XS::Clay_SetMeasureTextFunction> is responsible for
 returning the rendered width / height for the C<font_id> + C<font_size>
 combination.
 
@@ -88,6 +88,6 @@ combination.
 =back
 
 All keys are snake_case; the walker camelizes before handing them to
-L<Clay::Layout>.
+L<Clay::XS>.
 
 =cut

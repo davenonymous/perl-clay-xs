@@ -5,7 +5,7 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
 # Phase 8: scrolling containers.

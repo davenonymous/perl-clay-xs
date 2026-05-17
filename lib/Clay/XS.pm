@@ -1,4 +1,4 @@
-package Clay::Layout;
+package Clay::XS;
 
 use v5.22;
 use warnings;
@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Exporter 5.57 'import';
 use XSLoader;
 
-our $VERSION = '0.001';
+our $VERSION = '0.02';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -143,11 +143,11 @@ __END__
 
 =head1 NAME
 
-Clay::Layout - Perl XS bindings for the Clay (C Layout) UI library
+Clay::XS - Perl XS bindings for the Clay (C Layout) UI library
 
 =head1 SYNOPSIS
 
-    use Clay::Layout qw(:all);
+    use Clay::XS qw(:all);
 
     my $ctx = Clay_Initialize(
         Clay_MinMemorySize(),
@@ -178,7 +178,7 @@ Clay::Layout - Perl XS bindings for the Clay (C Layout) UI library
 
 =head1 DESCRIPTION
 
-C<Clay::Layout> is a thin, name-preserving XS binding to Clay v0.14
+C<Clay::XS> is a thin, name-preserving XS binding to Clay v0.14
 L<https://github.com/nicbarker/clay>, a header-only C UI layout library.
 Every public C<Clay_*> and internal C<Clay__*> function in F<clay.h> is
 exposed under its exact C name; the macros (C<CLAY()>, C<CLAY_TEXT()>,
@@ -234,7 +234,7 @@ the callback arguments.
 
 =item *
 
-C<Clay::Layout> is single-interpreter and single-threaded, matching
+C<Clay::XS> is single-interpreter and single-threaded, matching
 Clay's own design. Multi-context use is supported via
 C<Clay_SetCurrentContext>; multi-thread use is not.
 

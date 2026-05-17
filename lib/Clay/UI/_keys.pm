@@ -64,7 +64,7 @@ Clay::UI::_keys - internal snake_case to camelCase translator
 Pure helper used by the L<Clay::UI> high-level layer. Recursively rewrites
 hash keys from C<snake_case> to C<camelCase> so user-facing widget
 declarations can use Perl-idiomatic naming while the underlying
-L<Clay::Layout> binding receives the C-style field names it expects.
+L<Clay::XS> binding receives the C-style field names it expects.
 
 This module is internal. The API is not part of the public contract.
 

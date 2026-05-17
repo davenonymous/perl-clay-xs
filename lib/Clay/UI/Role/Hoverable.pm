@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::Layout qw(Clay_OnHover);
+use Clay::XS qw(Clay_OnHover);
 
 use Clay::UI::Events::Emitter;
 use Clay::UI::Events::OnHoverStart;

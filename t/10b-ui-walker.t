@@ -6,7 +6,7 @@ no warnings 'experimental::signatures';
 use Test2::V0;
 
 use Object::Pad;
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Role::Element;
 
@@ -22,8 +22,8 @@ class TestWidget :does(Clay::UI::Role::Element) {
 		$cfg->{background_color} = $bg;
 		$cfg->{layout} = {
 			sizing => {
-				width  => Clay::Layout::sizing_fixed(100),
-				height => Clay::Layout::sizing_fixed(50),
+				width  => Clay::XS::sizing_fixed(100),
+				height => Clay::XS::sizing_fixed(50),
 			},
 		};
 		return;

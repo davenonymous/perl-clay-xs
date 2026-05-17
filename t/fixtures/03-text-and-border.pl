@@ -3,7 +3,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # A bordered card with a text element. Exercises text measurement
 # callbacks and BORDER render commands. The measurer is deterministic

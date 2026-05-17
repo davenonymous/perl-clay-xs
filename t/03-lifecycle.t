@@ -5,7 +5,7 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
 # Phase 4: full Init -> BeginLayout -> Element -> EndLayout cycle.
@@ -22,7 +22,7 @@ my $ctx = Clay_Initialize(
 );
 
 ok( defined $ctx, 'Clay_Initialize returned a context' );
-isa_ok( $ctx, ['Clay::Layout::Context'], 'context is blessed' );
+isa_ok( $ctx, ['Clay::XS::Context'], 'context is blessed' );
 
 Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
     # Cheap monospace approximation. Sufficient for our test, which

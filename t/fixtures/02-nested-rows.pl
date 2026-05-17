@@ -3,7 +3,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # Three rows stacked top-to-bottom with even gaps. Exercises padding,
 # childGap, and TOP_TO_BOTTOM layout direction.

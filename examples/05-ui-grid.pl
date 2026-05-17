@@ -16,7 +16,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Box;
 use Clay::UI::Grid::Cell;

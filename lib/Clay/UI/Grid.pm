@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::Layout qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
+use Clay::XS qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
 use Clay::UI::Box;
 use Clay::UI::Grid::Cell;
 use Clay::UI::Role::Element;

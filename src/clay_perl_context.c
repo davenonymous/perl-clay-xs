@@ -1,7 +1,7 @@
 /*
  * clay_perl_context.c - Per-Perl-context state and the per-frame string arena.
  *
- * Each Clay::Layout::Context Perl object owns one clay_perl_context. The
+ * Each Clay::XS::Context Perl object owns one clay_perl_context. The
  * Perl object is a blessed scalar ref whose IV slot holds a pointer to
  * this struct. DESTROY frees it.
  */
@@ -77,15 +77,15 @@ SV *clay_perl_context_to_sv(pTHX_ clay_perl_context *self)
 {
     SV *iv  = newSViv(PTR2IV(self));
     SV *ref = newRV_noinc(iv);
-    sv_bless(ref, gv_stashpv("Clay::Layout::Context", GV_ADD));
+    sv_bless(ref, gv_stashpv("Clay::XS::Context", GV_ADD));
     return ref;
 }
 
 clay_perl_context *clay_perl_context_from_sv(pTHX_ SV *sv)
 {
     if (!sv || !SvROK(sv) ||
-        !sv_derived_from(sv, "Clay::Layout::Context")) {
-        croak("Argument is not a Clay::Layout::Context");
+        !sv_derived_from(sv, "Clay::XS::Context")) {
+        croak("Argument is not a Clay::XS::Context");
     }
     return INT2PTR(clay_perl_context *, SvIV(SvRV(sv)));
 }
@@ -128,7 +128,7 @@ Clay_String clay_perl_arena_copy_bytes(clay_perl_context *self,
      * almost certainly a bug. */
     if (len > (size_t) INT32_MAX) {
         dTHX;
-        croak("Clay::Layout: string length %zu exceeds INT32_MAX", len);
+        croak("Clay::XS: string length %zu exceeds INT32_MAX", len);
     }
 
     size_t needed = self->string_arena_used + len;

@@ -12,7 +12,7 @@
  * The diagnostic suppression below silences three categories of warning
  * that Clay v0.14 emits under -Wall -Wextra. They are upstream issues
  * (unused locals, sign mismatch in a comparison) and are not bugs in
- * the binding. Suppressing them here keeps Clay::Layout's own diagnostic
+ * the binding. Suppressing them here keeps Clay::XS's own diagnostic
  * output clean for users running tests under default flags.
  */
 

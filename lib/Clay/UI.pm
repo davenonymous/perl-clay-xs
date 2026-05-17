@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 use Scalar::Util qw(blessed refaddr weaken looks_like_number);
 
-use Clay::Layout qw(
+use Clay::XS qw(
 	Clay_Initialize
 	Clay_MinMemorySize
 	Clay_SetCurrentContext
@@ -263,7 +263,7 @@ __END__
 
 =head1 NAME
 
-Clay::UI - Perl-idiomatic high-level layer over Clay::Layout
+Clay::UI - Perl-idiomatic high-level layer over Clay::XS
 
 =head1 SYNOPSIS
 
@@ -291,7 +291,7 @@ Clay::UI - Perl-idiomatic high-level layer over Clay::Layout
 
 =head1 DESCRIPTION
 
-C<Clay::UI> wraps the low-level L<Clay::Layout> binding in an
+C<Clay::UI> wraps the low-level L<Clay::XS> binding in an
 Object::Pad class. The class owns the Clay context, the measure-text
 callback, and the widget back-reference registries, so callers never
 have to invoke C<Clay_*> functions directly.
@@ -417,6 +417,6 @@ resolvable.
 
 =head1 SEE ALSO
 
-L<Clay::UI::Role::Element>, L<Clay::Layout>.
+L<Clay::UI::Role::Element>, L<Clay::XS>.
 
 =cut

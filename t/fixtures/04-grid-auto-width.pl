@@ -3,7 +3,7 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # A 2x3 grid where columns auto-fit their widest cell. Uses low-level
 # Clay primitives so the fixture has no dependency on the Clay::UI layer;

@@ -9,7 +9,7 @@ use File::Spec;
 use File::Basename qw(dirname);
 use FindBin;
 
-use Clay::Layout qw(:all);
+use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
 # Phase 11: golden-fixture comparison tests.
@@ -20,7 +20,7 @@ use Clay::Layout qw(:all);
 # after a small normalisation pass (floats truncated to 4 decimal
 # places to absorb harmless precision wobble between platforms).
 #
-# Set CLAY_LAYOUT_UPDATE_FIXTURES=1 to overwrite the .json files with
+# Set CLAY_UI_UPDATE_FIXTURES=1 to overwrite the .json files with
 # the current render output. Useful when intentionally changing a
 # layout; commit the regenerated file.
 # -----------------------------------------------------------------------------
@@ -65,7 +65,7 @@ for my $script (@scripts) {
         my $cmds = $builder->();
         my $got  = canonicalise($cmds);
 
-        if ($ENV{CLAY_LAYOUT_UPDATE_FIXTURES}) {
+        if ($ENV{CLAY_UI_UPDATE_FIXTURES}) {
             open my $fh, '>:encoding(UTF-8)', $goldenf
                 or die "open $goldenf: $!";
             print $fh $json->encode($got);
@@ -76,7 +76,7 @@ for my $script (@scripts) {
         }
 
         if (!-f $goldenf) {
-            fail "missing golden file $goldenf - run with CLAY_LAYOUT_UPDATE_FIXTURES=1 to create it";
+            fail "missing golden file $goldenf - run with CLAY_UI_UPDATE_FIXTURES=1 to create it";
             return;
         }
 

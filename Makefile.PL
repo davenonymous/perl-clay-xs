@@ -26,9 +26,26 @@ if ($ENV{PERL_CLAY_DISABLE_SIMD}) {
 my $ccflags = join(' ', @ccflags);
 
 WriteMakefile(
-    NAME           => 'Clay::Layout',
-    VERSION_FROM   => 'lib/Clay/Layout.pm',
-    ABSTRACT_FROM  => 'lib/Clay/Layout.pm',
+    NAME           => 'Clay::UI',
+    VERSION_FROM   => 'lib/Clay/UI.pm',
+    ABSTRACT_FROM  => 'lib/Clay/UI.pm',
+
+    # The dist is Clay-UI, but the single XS module loads as Clay::XS
+    # (see lib/Clay/XS.pm). XSMULTI places lib/Clay/XS.xs at the canonical
+    # blib/arch/auto/Clay/XS/XS.so where XSLoader::load(__PACKAGE__) finds it.
+    XSMULTI        => 1,
+    XSBUILD        => {
+        xs => {
+            'lib/Clay/XS' => {
+                OBJECT => 'lib/Clay/XS$(OBJ_EXT) '
+                        . 'src/clay_impl$(OBJ_EXT) '
+                        . 'src/clay_perl_context$(OBJ_EXT) '
+                        . 'src/marshal$(OBJ_EXT) '
+                        . 'src/callbacks$(OBJ_EXT)',
+                INC    => '-I. -Isrc',
+            },
+        },
+    },
     AUTHOR         => 'Dave',
     LICENSE        => 'zlib',
     MIN_PERL_VERSION => '5.022',
@@ -47,22 +64,17 @@ WriteMakefile(
         'JSON::PP'  => 0,
     },
 
-    # XS configuration.
-    XS         => { 'Layout.xs' => 'Layout.c' },
-    C          => [ 'Layout.c',
-                    'src/clay_impl.c',
+    C          => [ 'src/clay_impl.c',
                     'src/clay_perl_context.c',
                     'src/marshal.c',
                     'src/callbacks.c' ],
     H          => [ 'src/clay_perl.h',
                     'src/clay/clay.h.orig' ],
-    OBJECT     => '$(O_FILES)',
 
-    INC        => '-I. -Isrc',
     CCFLAGS    => "$Config{ccflags} $ccflags",
 
     # Sanity: clean intermediate objects.
-    clean      => { FILES => 'Layout.c Layout.o src/*.o src/clay/clay.h src/clay/.patched' },
+    clean      => { FILES => 'lib/Clay/XS.c lib/Clay/XS.o src/*.o src/clay/clay.h src/clay/.patched' },
 
     META_MERGE => {
         'meta-spec' => { version => 2 },
@@ -98,10 +110,10 @@ src/clay_impl$(OBJ_EXT) : src/clay/clay.h
 src/marshal$(OBJ_EXT) : src/clay/clay.h
 src/callbacks$(OBJ_EXT) : src/clay/clay.h
 src/clay_perl_context$(OBJ_EXT) : src/clay/clay.h
-Layout$(OBJ_EXT) : src/clay/clay.h
+lib/Clay/XS$(OBJ_EXT) : src/clay/clay.h
 
 src/%$(OBJ_EXT) : src/%.c
-	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) -o $@ $<
+	$(CCCMD) $(CCCDLFLAGS) -I. -Isrc "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) -o $@ $<
 
 POSTAMBLE
 }
