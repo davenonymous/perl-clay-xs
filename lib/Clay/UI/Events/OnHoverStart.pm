@@ -31,12 +31,12 @@ Clay::UI::Events::OnHoverStart - edge-triggered hover-entry event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI::Role::Hoverable> on the frame the pointer first
+Fired by L<Clay::UI::Role::Interaction::Hoverable> on the frame the pointer first
 moves over the widget. Pairs with L<Clay::UI::Events::OnHoverStopped>.
 Carries no payload beyond the inherited C<target> / C<current_target>;
 both expose the originating widget.
 
 C<name> defaults to C<'OnHoverStart'>; C<bubble_mode> defaults to
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >> (inherited).
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> (inherited).
 
 =cut

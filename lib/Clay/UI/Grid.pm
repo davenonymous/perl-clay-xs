@@ -10,11 +10,11 @@ use Object::Pad 0.800;
 use Clay::XS qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
 use Clay::UI::Box;
 use Clay::UI::Grid::Cell;
-use Clay::UI::Role::Element;
-use Clay::UI::Role::HasLayout;
-use Clay::UI::Role::HasBackground;
-use Clay::UI::Role::HasBorder;
-use Clay::UI::Role::HasCornerRadius;
+use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+use Clay::UI::Role::Style::HasBorder;
+use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
@@ -24,11 +24,11 @@ our $VERSION = '0.01';
 my $NEXT_GROUP_BASE = 1;
 
 class Clay::UI::Grid
-	:does(Clay::UI::Role::Element)
-	:does(Clay::UI::Role::HasLayout)
-	:does(Clay::UI::Role::HasBackground)
-	:does(Clay::UI::Role::HasBorder)
-	:does(Clay::UI::Role::HasCornerRadius)
+	:does(Clay::UI::Role::Core::Element)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasBackground)
+	:does(Clay::UI::Role::Style::HasBorder)
+	:does(Clay::UI::Role::Style::HasCornerRadius)
 {
 	field $rows :param :reader;
 	field $cell_gap :param = 0;

@@ -1,4 +1,4 @@
-package Clay::UI::Events::Result;
+package Clay::UI::Enum::Result;
 
 use v5.22;
 use warnings;
@@ -10,7 +10,7 @@ use Object::PadX::Enum;
 
 our $VERSION = '0.01';
 
-enum Clay::UI::Events::Result {
+enum Clay::UI::Enum::Result {
 	item HANDLED;
 	item CONTINUE;
 }
@@ -21,15 +21,15 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Events::Result - handler-return-value enum for Clay::UI events
+Clay::UI::Enum::Result - handler-return-value enum for Clay::UI events
 
 =head1 SYNOPSIS
 
-	use Clay::UI::Events::Result;
+	use Clay::UI::Enum::Result;
 
 	$widget->on('OnPress', sub ($event) {
 		do_thing();
-		return Clay::UI::Events::Result->HANDLED;  # stop bubbling (only matters for IF_CONTINUE)
+		return Clay::UI::Enum::Result->HANDLED;  # stop bubbling (only matters for IF_CONTINUE)
 	});
 
 =head1 DESCRIPTION
@@ -38,13 +38,13 @@ Two singleton values handlers may return:
 
 =over 4
 
-=item C<< Clay::UI::Events::Result->HANDLED >>
+=item C<< Clay::UI::Enum::Result->HANDLED >>
 
 Equivalent to returning C<undef> from a handler. In
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >> mode this stops further
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> mode this stops further
 propagation. In C<ALWAYS> or C<NEVER> mode the return value is ignored.
 
-=item C<< Clay::UI::Events::Result->CONTINUE >>
+=item C<< Clay::UI::Enum::Result->CONTINUE >>
 
 Tells C<IF_CONTINUE> mode to keep walking up the parent chain even
 after this handler.

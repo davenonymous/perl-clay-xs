@@ -47,9 +47,9 @@ class Clay::UI {
 
 	ADJUST {
 		unless (blessed $root
-			&& ($root->DOES('Clay::UI::Role::Element')
-			 || $root->DOES('Clay::UI::Role::TextNode'))) {
-			die "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Element or TextNode";
+			&& ($root->DOES('Clay::UI::Role::Core::Element')
+			 || $root->DOES('Clay::UI::Role::Core::TextNode'))) {
+			die "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode";
 		}
 		unless (looks_like_number($width) && $width > 0
 			&& looks_like_number($height) && $height > 0) {
@@ -208,15 +208,15 @@ class Clay::UI {
 			die "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
 		}
 
-		if ($node->DOES('Clay::UI::Role::TextNode')) {
+		if ($node->DOES('Clay::UI::Role::Core::TextNode')) {
 			my $text_config = $node->text_config;
 			$self->_attach_back_reference($text_config, $node);
 			Clay__OpenTextElement($node->text, camelize_keys($text_config));
 			return;
 		}
 
-		unless ($node->DOES('Clay::UI::Role::Element')) {
-			die "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Element or TextNode";
+		unless ($node->DOES('Clay::UI::Role::Core::Element')) {
+			die "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Core::Element or TextNode";
 		}
 
 		# Build and validate the config BEFORE opening the Clay element so a
@@ -233,7 +233,7 @@ class Clay::UI {
 		Clay__OpenElementWithId($element);
 		Clay__ConfigureOpenElement($camelized);
 
-		$node->install_hover_callback if $node->DOES('Clay::UI::Role::Hoverable');
+		$node->install_hover_callback if $node->DOES('Clay::UI::Role::Interaction::Hoverable');
 
 		# Ensure CloseElement always runs to keep Clay's open-element
 		# stack balanced, even if a child walk dies; re-throw afterwards.
@@ -309,7 +309,7 @@ Required:
 =item C<root>
 
 The root widget. Must be a blessed object consuming
-L<Clay::UI::Role::Element> or L<Clay::UI::Role::TextNode>. Immutable
+L<Clay::UI::Role::Core::Element> or L<Clay::UI::Role::Core::TextNode>. Immutable
 after construction (the I<tree> below the root is still mutable through
 the widget's own child-mutation methods).
 
@@ -417,6 +417,6 @@ resolvable.
 
 =head1 SEE ALSO
 
-L<Clay::UI::Role::Element>, L<Clay::XS>.
+L<Clay::UI::Role::Core::Element>, L<Clay::XS>.
 
 =cut

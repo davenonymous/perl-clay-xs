@@ -7,8 +7,8 @@ use Test2::V0;
 
 use Clay::UI::Box;
 use Clay::UI::Text;
-use Clay::UI::Events::Bubble;
-use Clay::UI::Events::Result;
+use Clay::UI::Enum::Bubble;
+use Clay::UI::Enum::Result;
 use Clay::UI::Events::Event;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
@@ -16,19 +16,19 @@ use Clay::UI::Events::OnPress;
 use Clay::UI::Events::OnRelease;
 use Clay::UI::Events::OnScroll;
 
-my $HANDLED     = Clay::UI::Events::Result->HANDLED;
-my $CONTINUE    = Clay::UI::Events::Result->CONTINUE;
-my $ALWAYS      = Clay::UI::Events::Bubble->ALWAYS;
-my $IF_CONTINUE = Clay::UI::Events::Bubble->IF_CONTINUE;
-my $NEVER       = Clay::UI::Events::Bubble->NEVER;
+my $HANDLED     = Clay::UI::Enum::Result->HANDLED;
+my $CONTINUE    = Clay::UI::Enum::Result->CONTINUE;
+my $ALWAYS      = Clay::UI::Enum::Bubble->ALWAYS;
+my $IF_CONTINUE = Clay::UI::Enum::Bubble->IF_CONTINUE;
+my $NEVER       = Clay::UI::Enum::Bubble->NEVER;
 
 # -----------------------------------------------------------------------------
 # Constants are singleton objects and compare with ==.
 # -----------------------------------------------------------------------------
 
 subtest 'constants are singletons' => sub {
-	ok( $HANDLED == Clay::UI::Events::Result->HANDLED,  'HANDLED is a singleton' );
-	ok( $CONTINUE == Clay::UI::Events::Result->CONTINUE,'CONTINUE is a singleton' );
+	ok( $HANDLED == Clay::UI::Enum::Result->HANDLED,  'HANDLED is a singleton' );
+	ok( $CONTINUE == Clay::UI::Enum::Result->CONTINUE,'CONTINUE is a singleton' );
 	ok( $HANDLED != $CONTINUE,                          'HANDLED and CONTINUE distinguishable' );
 	ok( $ALWAYS != $NEVER,                              'bubble singletons distinguishable' );
 };

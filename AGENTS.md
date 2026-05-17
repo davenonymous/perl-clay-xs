@@ -113,26 +113,6 @@ Useful invocations:
   constants-loaded check.
 - Render commands are returned as plain `AoH`
 
-## What is and is not done
-
-- Phases 1 to 13 of the implementation plan are complete.
-- Phase 13 added the high-level `Clay::UI` layer on top of `Clay::XS`.
-  Source: `lib/Clay/UI.pm` (walker), `lib/Clay/UI/_keys.pm` (snake -> camel
-  translator), `lib/Clay/UI/Role/*.pm` (Element + Stateful + Hoverable +
-  TextNode archetype roles; `Has*` property mixin roles), and
-  `lib/Clay/UI/{Box,Text,Button,ScrollPanel}.pm` (reference widgets).
-  Tests: `t/10-ui-camelize.t`, `t/10b-ui-walker.t`, `t/11-ui-mixins.t`,
-  `t/12-ui-widgets.t`. Example: `examples/04-ui-sidebar.pl`.
-- Phase 14 added the Clay-level sizing-group feature (vendored patch),
-  the Perl-side `HasSizingGroup` mixin (composed transitively into every
-  widget via `Role::Element`), and the `Clay::UI::Grid` + `Clay::UI::Grid::Cell` widgets
-  for auto-sized grid layouts. The Grid wraps each cell in a `Cell`
-  carrying the per-column / per-row group ids, so each column shrink-
-  wraps to its widest cell and each row to its tallest, in a single
-  layout pass. Cross-tree alignment is also available: any widget can
-  pass `width_group => N` / `height_group => M` to align with unrelated
-  widgets elsewhere in the tree. Tests: `t/14-ui-grid.t`. Fixture:
-  `t/fixtures/04-grid-auto-width.{pl,json}`. Example: `examples/05-ui-grid.pl`.
 
 ## Clay::UI invariants
 
@@ -140,7 +120,7 @@ Useful invocations:
    package, so `use Clay::XS qw(...)` at file scope does NOT seed
    helper subs inside the class block. Either qualify
    (`Clay::XS::sizing_fixed(...)`) or `use` again inside the body.
-2. `Clay::UI::Role::Element::to_config` discovers contributor methods
+2. `Clay::UI::Role::Core::Element::to_config` discovers contributor methods
    via `Object::Pad::MOP::Class`. Each mixin role provides one method
    named `contribute_<slice>(\%config)`. Names must be unique across
    composed roles (Object::Pad role composition errors on method
@@ -149,7 +129,7 @@ Useful invocations:
    role can also expose a `contribute_*` method directly on the class;
    the walker iterates the class's `direct_methods` in addition to
    roles' (see `Clay::UI::ScrollPanel`).
-4. Text leaves consume `Clay::UI::Role::TextNode`; the walker
+4. Text leaves consume `Clay::UI::Role::Core::TextNode`; the walker
    dispatches them to `Clay__OpenTextElement` instead of the normal
    open/configure/close trio and ignores their `children`.
 5. Hover-callback registration must re-run every frame (existing
@@ -161,11 +141,11 @@ Useful invocations:
    after `Clay_Initialize` will dispatch hover callbacks with that
    ghost state regardless of `isPointerDown`. Tests of click behavior
    need a warm-up frame to settle Clay into `RELEASED`.
-7. The event system is split in two: `Clay::UI::Events::Listener`
+7. The event system is split in two: `Clay::UI::Role::Events::Listener`
    (the `on($name, $sub)` / `handlers_for($name)` half) is composed
    transitively into every widget through `Role::Element` and
    `Role::TextNode`, so anything can register a handler and be a
-   bubble target. `Clay::UI::Events::Emitter` (the `fire_event($event)`
+   bubble target. `Clay::UI::Role::Events::Emitter` (the `fire_event($event)`
    half) is composed into widgets that originate events: directly on
    `Box`, transitively via `Role::Hoverable` (which itself composes
    Emitter) on `Button` and anything else that goes through
@@ -175,12 +155,12 @@ Useful invocations:
    supply it. The bubble walk uses the existing weak-parent chain.
    An event object is single-use: the first `fire_event` stamps
    `target` and any subsequent dispatch dies. In
-   `Clay::UI::Events::Bubble->IF_CONTINUE` mode, the stop check is
+   `Clay::UI::Enum::Bubble->IF_CONTINUE` mode, the stop check is
    per-node (all handlers at a node always run); after the list, only
-   an all-`Clay::UI::Events::Result->CONTINUE` outcome keeps bubbling.
+   an all-`Clay::UI::Enum::Result->CONTINUE` outcome keeps bubbling.
    Bubble-mode and result values are typed enum singletons backed by
-   `Object::PadX::Enum` (`Clay::UI::Events::Bubble` and
-   `Clay::UI::Events::Result`); compare with `==`, never `eq`.
+   `Object::PadX::Enum` (`Clay::UI::Enum::Bubble` and
+   `Clay::UI::Enum::Result`); compare with `==`, never `eq`.
 8. The walker injects `user_data => refaddr($widget)` into every
    element and text config and maintains a module-level weak registry
    so `Clay::UI::widget_for($cmd->{userData})` can recover the

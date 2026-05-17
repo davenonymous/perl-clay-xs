@@ -6,13 +6,13 @@ no warnings 'experimental::signatures';
 use Test2::V0;
 
 use Object::Pad;
-use Clay::UI::Role::Element;
-use Clay::UI::Role::HasLayout;
-use Clay::UI::Role::HasBackground;
-use Clay::UI::Role::HasBorder;
-use Clay::UI::Role::HasCornerRadius;
-use Clay::UI::Role::HasClip;
-use Clay::UI::Role::HasFloating;
+use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+use Clay::UI::Role::Style::HasBorder;
+use Clay::UI::Role::Style::HasCornerRadius;
+use Clay::UI::Role::Layout::HasClip;
+use Clay::UI::Role::Layout::HasFloating;
 
 # -----------------------------------------------------------------------------
 # A widget composing every mixin. The Element role's to_config walks
@@ -20,13 +20,13 @@ use Clay::UI::Role::HasFloating;
 # does not have to wire them up by hand.
 # -----------------------------------------------------------------------------
 
-class TestKitchenSink :does(Clay::UI::Role::Element)
-                      :does(Clay::UI::Role::HasLayout)
-                      :does(Clay::UI::Role::HasBackground)
-                      :does(Clay::UI::Role::HasBorder)
-                      :does(Clay::UI::Role::HasCornerRadius)
-                      :does(Clay::UI::Role::HasClip)
-                      :does(Clay::UI::Role::HasFloating)
+class TestKitchenSink :does(Clay::UI::Role::Core::Element)
+                      :does(Clay::UI::Role::Layout::HasLayout)
+                      :does(Clay::UI::Role::Style::HasBackground)
+                      :does(Clay::UI::Role::Style::HasBorder)
+                      :does(Clay::UI::Role::Style::HasCornerRadius)
+                      :does(Clay::UI::Role::Layout::HasClip)
+                      :does(Clay::UI::Role::Layout::HasFloating)
 {}
 
 # -----------------------------------------------------------------------------
@@ -34,19 +34,19 @@ class TestKitchenSink :does(Clay::UI::Role::Element)
 # -----------------------------------------------------------------------------
 
 subtest 'HasLayout alone' => sub {
-	class TL :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasLayout) {}
+	class TL :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Layout::HasLayout) {}
 	my $cfg = TL->new( layout => { padding => { left => 8, right => 8, top => 0, bottom => 0 } } )->to_config;
 	is( $cfg, { layout => { padding => { left => 8, right => 8, top => 0, bottom => 0 } } }, 'layout slice only' );
 };
 
 subtest 'HasBackground alone' => sub {
-	class TB :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasBackground) {}
+	class TB :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Style::HasBackground) {}
 	my $cfg = TB->new( background_color => [10, 20, 30, 255] )->to_config;
 	is( $cfg, { background_color => [10, 20, 30, 255] }, 'background slice only' );
 };
 
 subtest 'HasBorder scalar shorthand expands' => sub {
-	class TBd :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasBorder) {}
+	class TBd :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Style::HasBorder) {}
 	my $cfg = TBd->new( border_color => [100, 100, 100, 255], border_width => 2 )->to_config;
 	is(
 		$cfg,
@@ -61,7 +61,7 @@ subtest 'HasBorder scalar shorthand expands' => sub {
 };
 
 subtest 'HasBorder hashref width passes through' => sub {
-	class TBd2 :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasBorder) {}
+	class TBd2 :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Style::HasBorder) {}
 	my $cfg = TBd2->new(
 		border_color => [50, 50, 50, 255],
 		border_width => { left => 1, right => 0, top => 1, bottom => 0, between_children => 0 },
@@ -71,7 +71,7 @@ subtest 'HasBorder hashref width passes through' => sub {
 };
 
 subtest 'HasCornerRadius scalar shorthand expands' => sub {
-	class TC :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasCornerRadius) {}
+	class TC :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Style::HasCornerRadius) {}
 	my $cfg = TC->new( corner_radius => 6 )->to_config;
 	is(
 		$cfg,
@@ -81,7 +81,7 @@ subtest 'HasCornerRadius scalar shorthand expands' => sub {
 };
 
 subtest 'HasClip alone' => sub {
-	class TCl :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasClip) {}
+	class TCl :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Layout::HasClip) {}
 	my $cfg = TCl->new(
 		clip => { horizontal => 1, vertical => 1, child_offset => { x => 0, y => 0 } },
 	)->to_config;
@@ -89,7 +89,7 @@ subtest 'HasClip alone' => sub {
 };
 
 subtest 'HasFloating alone' => sub {
-	class TF :does(Clay::UI::Role::Element) :does(Clay::UI::Role::HasFloating) {}
+	class TF :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Layout::HasFloating) {}
 	my $cfg = TF->new( floating => { attach_to => 1 } )->to_config;
 	is( $cfg, { floating => { attach_to => 1 } }, 'floating slice only' );
 };

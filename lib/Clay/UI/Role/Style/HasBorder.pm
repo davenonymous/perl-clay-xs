@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasBorder;
+package Clay::UI::Role::Style::HasBorder;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasBorder {
+role Clay::UI::Role::Style::HasBorder {
 	field $border_color :param :reader = undef;
 	field $border_width :param :reader = undef;
 
@@ -36,12 +36,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasBorder - border mixin for Clay::UI widgets
+Clay::UI::Role::Style::HasBorder - border mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Box :does(Clay::UI::Role::Element)
-	              :does(Clay::UI::Role::HasBorder)
+	class My::Box :does(Clay::UI::Role::Core::Element)
+	              :does(Clay::UI::Role::Style::HasBorder)
 	{}
 
 	# Uniform width on all four sides:

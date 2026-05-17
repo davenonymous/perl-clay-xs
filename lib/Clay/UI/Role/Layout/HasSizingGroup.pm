@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasSizingGroup;
+package Clay::UI::Role::Layout::HasSizingGroup;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasSizingGroup {
+role Clay::UI::Role::Layout::HasSizingGroup {
 	field $width_group  :param :accessor = 0;
 	field $height_group :param :accessor = 0;
 
@@ -29,11 +29,11 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasSizingGroup - cross-tree sizing constraint mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasSizingGroup - cross-tree sizing constraint mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	# Implicit: composed into Clay::UI::Role::Element, so every widget
+	# Implicit: composed into Clay::UI::Role::Core::Element, so every widget
 	# already accepts width_group / height_group.
 	Clay::UI::Box->new(
 		layout       => { sizing => { width => sizing_fit() } },
@@ -47,7 +47,7 @@ Clay::UI::Role::HasSizingGroup - cross-tree sizing constraint mixin for Clay::UI
 =head1 DESCRIPTION
 
 Mixin role composed automatically into every Clay::UI widget (via
-L<Clay::UI::Role::Element>) that exposes two integer constraint-group
+L<Clay::UI::Role::Core::Element>) that exposes two integer constraint-group
 ids. After Clay's per-axis fit-sizing pass, all elements sharing a
 non-zero group id on the same axis are equalized to the per-group max
 fit-size before grow distribution. The Clay-side machinery is provided

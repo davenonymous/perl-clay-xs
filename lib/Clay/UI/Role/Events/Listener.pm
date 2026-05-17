@@ -1,4 +1,4 @@
-package Clay::UI::Events::Listener;
+package Clay::UI::Role::Events::Listener;
 
 use v5.22;
 use warnings;
@@ -9,13 +9,13 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Events::Listener {
+role Clay::UI::Role::Events::Listener {
 	field %_handlers;
 
 	method on ($event_name, $handler) {
-		die "Clay::UI::Events::Listener: event name must be a non-empty string"
+		die "Clay::UI::Role::Events::Listener: event name must be a non-empty string"
 			unless defined $event_name && length $event_name;
-		die "Clay::UI::Events::Listener: handler must be a coderef"
+		die "Clay::UI::Role::Events::Listener: handler must be a coderef"
 			unless ref $handler eq 'CODE';
 		push @{ $_handlers{$event_name} }, $handler;
 		return $self;
@@ -33,7 +33,7 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Events::Listener - mixin role giving every Clay::UI widget on()
+Clay::UI::Role::Events::Listener - mixin role giving every Clay::UI widget on()
 
 =head1 SYNOPSIS
 
@@ -47,12 +47,12 @@ Clay::UI::Events::Listener - mixin role giving every Clay::UI widget on()
 =head1 DESCRIPTION
 
 Mixin role composed transitively into every Clay::UI widget (through
-L<Clay::UI::Role::Element> and L<Clay::UI::Role::TextNode>). Provides
+L<Clay::UI::Role::Core::Element> and L<Clay::UI::Role::Core::TextNode>). Provides
 the I<receive> half of the event system - registration of handlers and
 read-back of the per-widget handler list.
 
 The complementary I<send> half (C<fire_event>) lives in
-L<Clay::UI::Events::Emitter> and is composed only into widgets that
+L<Clay::UI::Role::Events::Emitter> and is composed only into widgets that
 originate events (e.g. L<Clay::UI::Box>, L<Clay::UI::Button>).
 A non-emitting widget can still be a bubble target: when an Emitter
 fires an event, the dispatcher walks up the parent chain and calls
@@ -72,6 +72,6 @@ registration order. Returns C<$self> for chaining.
 
 Returns an arrayref (a fresh shallow copy) of registered handlers for
 C<$event_name>. Useful for introspection and tests, and called by
-L<Clay::UI::Events::Emitter/fire_event> during the bubble walk.
+L<Clay::UI::Role::Events::Emitter/fire_event> during the bubble walk.
 
 =cut

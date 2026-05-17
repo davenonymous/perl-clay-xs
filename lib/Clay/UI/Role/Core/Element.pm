@@ -1,4 +1,4 @@
-package Clay::UI::Role::Element;
+package Clay::UI::Role::Core::Element;
 
 use v5.22;
 use warnings;
@@ -10,15 +10,15 @@ use Object::Pad::MOP::Class;
 use Scalar::Util qw(blessed);
 no warnings 'experimental';
 
-use Clay::UI::Role::HasSizingGroup;
-use Clay::UI::Role::HasParent;
-use Clay::UI::Events::Listener;
+use Clay::UI::Role::Layout::HasSizingGroup;
+use Clay::UI::Role::Layout::HasParent;
+use Clay::UI::Role::Events::Listener;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup)
-                              :does(Clay::UI::Role::HasParent)
-                              :does(Clay::UI::Events::Listener) {
+role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
+                              :does(Clay::UI::Role::Layout::HasParent)
+                              :does(Clay::UI::Role::Events::Listener) {
 	no warnings 'experimental';
 
 	field $id       :param :reader = undef;
@@ -45,8 +45,8 @@ role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup)
 
 	sub _validate_child ($kid) {
 		return if blessed($kid)
-			&& ( $kid->DOES('Clay::UI::Role::Element')
-			  || $kid->DOES('Clay::UI::Role::TextNode') );
+			&& ( $kid->DOES('Clay::UI::Role::Core::Element')
+			  || $kid->DOES('Clay::UI::Role::Core::TextNode') );
 		die "Clay::UI: child is not a widget (got "
 			. (ref($kid) || 'non-ref') . ")";
 	}
@@ -58,7 +58,7 @@ role Clay::UI::Role::Element :does(Clay::UI::Role::HasSizingGroup)
 
 	method remove_child ($target_id) {
 		@$children = grep {
-			!( $_->DOES('Clay::UI::Role::Element')
+			!( $_->DOES('Clay::UI::Role::Core::Element')
 				&& defined $_->id
 				&& $_->id eq $target_id )
 		} @$children;
@@ -94,14 +94,14 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Element - base role for high-level Clay widget nodes
+Clay::UI::Role::Core::Element - base role for high-level Clay widget nodes
 
 =head1 SYNOPSIS
 
 	use Object::Pad;
 
-	class My::Widget :does(Clay::UI::Role::Element)
-	                 :does(Clay::UI::Role::HasBackground)
+	class My::Widget :does(Clay::UI::Role::Core::Element)
+	                 :does(Clay::UI::Role::Style::HasBackground)
 	{
 		# to_config is inherited from Element; it collects every
 		# contribute_* method from composed roles automatically.
@@ -118,7 +118,7 @@ Object::Pad role consumed by every L<Clay::UI> widget class. Provides the
 two structural fields the walker needs (an optional C<id>, and a
 C<children> arrayref) and a default C<to_config> that auto-discovers
 contribution methods from composed mixin roles (see
-L<Clay::UI::Role::HasLayout>, L<Clay::UI::Role::HasBackground>, ...).
+L<Clay::UI::Role::Layout::HasLayout>, L<Clay::UI::Role::Style::HasBackground>, ...).
 
 =head1 FIELDS
 
@@ -131,7 +131,7 @@ L</resolve_id>.
 =head2 children (optional, default C<[]>)
 
 Arrayref of nested widget instances. Each element must consume
-C<Clay::UI::Role::Element> or C<Clay::UI::Role::TextNode>. Children
+C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>. Children
 passed at construction are validated and parent-stamped identically to
 L</add_child>, so the same no-reparenting rule applies to widgets
 handed to the constructor.
@@ -159,17 +159,17 @@ C<Clay_GetElementId>, which hashes the string into a stable Clay id.
 =head2 add_child(@kids)
 
 Appends one or more widgets to C<children>. Each argument must be a
-blessed instance consuming C<Clay::UI::Role::Element> or
-C<Clay::UI::Role::TextNode>; anything else dies with a descriptive
+blessed instance consuming C<Clay::UI::Role::Core::Element> or
+C<Clay::UI::Role::Core::TextNode>; anything else dies with a descriptive
 error. Returns C<$self> so calls chain:
 
 	$root->add_child($header)->add_child($body, $footer);
 
-Stamps the parent reference (see L<Clay::UI::Role::HasParent>) on every
+Stamps the parent reference (see L<Clay::UI::Role::Layout::HasParent>) on every
 kid. Dies if a kid already has a parent: a widget can be attached
 exactly once, and that includes re-adding it under the same parent
 (idempotent-builder patterns must construct fresh widgets per call).
-See L<Clay::UI::Role::HasParent/NO REPARENTING> for the full contract.
+See L<Clay::UI::Role::Layout::HasParent/NO REPARENTING> for the full contract.
 
 =head2 clear_children
 

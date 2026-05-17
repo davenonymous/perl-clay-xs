@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasParent;
+package Clay::UI::Role::Layout::HasParent;
 
 use v5.22;
 use warnings;
@@ -10,7 +10,7 @@ use Scalar::Util qw(blessed weaken);
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasParent {
+role Clay::UI::Role::Layout::HasParent {
 	field $parent :reader = undef;
 
 	method _set_parent ($new_parent) {
@@ -38,12 +38,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasParent - parent back-reference mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasParent - parent back-reference mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
 	# Composed automatically into every Clay::UI widget via
-	# Clay::UI::Role::Element and Clay::UI::Role::TextNode.
+	# Clay::UI::Role::Core::Element and Clay::UI::Role::Core::TextNode.
 	my $child = $box->children->[0];
 	my $owner = $child->parent;   # the Box
 	my $top   = $child->root;     # walks the parent chain to the topmost widget
@@ -74,7 +74,7 @@ C<children> arrayrefs, not by children referring back up.
 =head1 NO REPARENTING
 
 B<A widget's parent slot is set exactly once for its lifetime.>
-L<Clay::UI::Role::Element/add_child> stamps the parent on each kid the
+L<Clay::UI::Role::Core::Element/add_child> stamps the parent on each kid the
 first time it is attached and dies on any further attempt, including:
 
 =over 4

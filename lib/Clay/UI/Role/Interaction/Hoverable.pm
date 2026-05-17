@@ -1,4 +1,4 @@
-package Clay::UI::Role::Hoverable;
+package Clay::UI::Role::Interaction::Hoverable;
 
 use v5.22;
 use warnings;
@@ -9,13 +9,13 @@ use Object::Pad 0.800;
 
 use Clay::XS qw(Clay_OnHover);
 
-use Clay::UI::Events::Emitter;
+use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Hoverable :does(Clay::UI::Events::Emitter) {
+role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitter) {
 	field $is_hovered :reader = 0;
 
 	# Set to 1 by the Clay_OnHover trampoline whenever it fires for this
@@ -79,17 +79,17 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Hoverable - stateful hover-tracking + edge-triggered events
+Clay::UI::Role::Interaction::Hoverable - stateful hover-tracking + edge-triggered events
 
 =head1 SYNOPSIS
 
 	use Object::Pad;
-	use Clay::UI::Role::Element;
-	use Clay::UI::Role::Hoverable;
+	use Clay::UI::Role::Core::Element;
+	use Clay::UI::Role::Interaction::Hoverable;
 
 	class My::HoverBox
-		:does(Clay::UI::Role::Element)
-		:does(Clay::UI::Role::Hoverable)
+		:does(Clay::UI::Role::Core::Element)
+		:does(Clay::UI::Role::Interaction::Hoverable)
 	{}
 
 	my $box = My::HoverBox->new(id => 'tile');
@@ -119,14 +119,14 @@ frame (per L<AGENTS.md> invariant 6).
 
 =back
 
-Hoverable composes L<Clay::UI::Events::Emitter> transitively, so the
+Hoverable composes L<Clay::UI::Role::Events::Emitter> transitively, so the
 consuming widget gets C<fire_event> for free; just compose Hoverable
 and you can both listen for events (every widget can - see
-L<Clay::UI::Events::Listener>) and fire your own.
+L<Clay::UI::Role::Events::Listener>) and fire your own.
 
 =head1 EXTENSION POINTS
 
-Sub-roles (e.g. L<Clay::UI::Role::Pressable>) layer additional pointer
+Sub-roles (e.g. L<Clay::UI::Role::Interaction::Pressable>) layer additional pointer
 state on top of Hoverable without registering their own C<Clay_OnHover>
 (the registry only keeps one entry per element). Two hooks are
 available:

@@ -8,13 +8,13 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Scalar::Util qw(blessed weaken);
 
-use Clay::UI::Events::Bubble;
+use Clay::UI::Enum::Bubble;
 
 our $VERSION = '0.01';
 
 class Clay::UI::Events::Event {
 	field $name        :param :reader = undef;
-	field $bubble_mode :param :reader = Clay::UI::Events::Bubble->IF_CONTINUE;
+	field $bubble_mode :param :reader = Clay::UI::Enum::Bubble->IF_CONTINUE;
 
 	field $target         :reader = undef;
 	field $current_target :reader = undef;
@@ -28,11 +28,11 @@ class Clay::UI::Events::Event {
 		$name //= (ref $self)->event_name;
 		die "Clay::UI::Events::Event: 'name' must be a non-empty string"
 			unless defined $name && length $name;
-		die "Clay::UI::Events::Event: 'bubble_mode' must be a Clay::UI::Events::Bubble value"
-			unless blessed($bubble_mode) && $bubble_mode->isa('Clay::UI::Events::Bubble');
+		die "Clay::UI::Events::Event: 'bubble_mode' must be a Clay::UI::Enum::Bubble value"
+			unless blessed($bubble_mode) && $bubble_mode->isa('Clay::UI::Enum::Bubble');
 	}
 
-	# Set by Clay::UI::Events::Emitter at the start of dispatch. Refuses to
+	# Set by Clay::UI::Role::Events::Emitter at the start of dispatch. Refuses to
 	# overwrite an already-set target so a single event object cannot be
 	# silently re-fired with a different originator.
 	method _set_target ($widget) {
@@ -62,11 +62,11 @@ Clay::UI::Events::Event - base class for Clay::UI events
 =head1 SYNOPSIS
 
 	use Clay::UI::Events::Event;
-	use Clay::UI::Events::Bubble;
+	use Clay::UI::Enum::Bubble;
 
 	my $event = Clay::UI::Events::Event->new(
 		name        => 'MyCustom',
-		bubble_mode => Clay::UI::Events::Bubble->ALWAYS,
+		bubble_mode => Clay::UI::Enum::Bubble->ALWAYS,
 	);
 
 =head1 DESCRIPTION
@@ -86,8 +86,8 @@ return their canonical name (C<'OnHover'>, C<'OnPress'>, ...).
 
 =item C<bubble_mode> (default C<BUBBLE_IF_CONTINUE>)
 
-A L<Clay::UI::Events::Bubble> singleton selecting the propagation
-policy. See L<Clay::UI::Events::Emitter/BUBBLE MODES>.
+A L<Clay::UI::Enum::Bubble> singleton selecting the propagation
+policy. See L<Clay::UI::Role::Events::Emitter/BUBBLE MODES>.
 
 =item C<target> (set by the emitter)
 

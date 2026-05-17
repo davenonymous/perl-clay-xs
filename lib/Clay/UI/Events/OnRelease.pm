@@ -38,7 +38,7 @@ Clay::UI::Events::OnRelease - pointer-released-over-widget event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI::Role::Pressable> on the frame the pointer
+Fired by L<Clay::UI::Role::Interaction::Pressable> on the frame the pointer
 transitions from pressed to released B<while still over the widget>
 (Clay's C<CLAY_POINTER_DATA_RELEASED_THIS_FRAME>). Pairs with
 L<Clay::UI::Events::OnPress>.
@@ -68,6 +68,6 @@ Opaque payload forwarded from the originating callback.
 =back
 
 C<name> defaults to C<'OnRelease'>; C<bubble_mode> defaults to
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >>.
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >>.
 
 =cut

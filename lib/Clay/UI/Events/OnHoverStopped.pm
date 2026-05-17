@@ -31,12 +31,12 @@ Clay::UI::Events::OnHoverStopped - edge-triggered hover-exit event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI::Role::Hoverable> on the frame the pointer first
+Fired by L<Clay::UI::Role::Interaction::Hoverable> on the frame the pointer first
 leaves the widget after having been over it. Pairs with
 L<Clay::UI::Events::OnHoverStart>. Carries no payload beyond the
 inherited C<target> / C<current_target>.
 
 C<name> defaults to C<'OnHoverStopped'>; C<bubble_mode> defaults to
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >> (inherited).
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> (inherited).
 
 =cut

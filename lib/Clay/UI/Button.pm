@@ -7,22 +7,22 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::Stateful;
-use Clay::UI::Role::Pressable;
-use Clay::UI::Role::HasLayout;
-use Clay::UI::Role::HasBackground;
-use Clay::UI::Role::HasBorder;
-use Clay::UI::Role::HasCornerRadius;
+use Clay::UI::Role::Core::Stateful;
+use Clay::UI::Role::Interaction::Pressable;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+use Clay::UI::Role::Style::HasBorder;
+use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
 class Clay::UI::Button
-	:does(Clay::UI::Role::Stateful)
-	:does(Clay::UI::Role::Pressable)
-	:does(Clay::UI::Role::HasLayout)
-	:does(Clay::UI::Role::HasBackground)
-	:does(Clay::UI::Role::HasBorder)
-	:does(Clay::UI::Role::HasCornerRadius)
+	:does(Clay::UI::Role::Core::Stateful)
+	:does(Clay::UI::Role::Interaction::Pressable)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasBackground)
+	:does(Clay::UI::Role::Style::HasBorder)
+	:does(Clay::UI::Role::Style::HasCornerRadius)
 {}
 
 1;
@@ -59,8 +59,8 @@ Clay::UI::Button - clickable, hover-aware widget driven by the event system
 =head1 DESCRIPTION
 
 A stateful widget combining the visual mixins (layout, background,
-border, corner-radius) with the event-driven L<Clay::UI::Role::Pressable>
-(which itself composes L<Clay::UI::Role::Hoverable>). Has no extra
+border, corner-radius) with the event-driven L<Clay::UI::Role::Interaction::Pressable>
+(which itself composes L<Clay::UI::Role::Interaction::Hoverable>). Has no extra
 fields of its own: all behaviour comes from the composed roles. To
 listen for interaction, register handlers via the event system.
 

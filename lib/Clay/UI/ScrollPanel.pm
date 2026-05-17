@@ -7,18 +7,18 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::Stateful;
-use Clay::UI::Role::HasLayout;
-use Clay::UI::Role::HasBackground;
-use Clay::UI::Role::HasCornerRadius;
+use Clay::UI::Role::Core::Stateful;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
 class Clay::UI::ScrollPanel
-	:does(Clay::UI::Role::Stateful)
-	:does(Clay::UI::Role::HasLayout)
-	:does(Clay::UI::Role::HasBackground)
-	:does(Clay::UI::Role::HasCornerRadius)
+	:does(Clay::UI::Role::Core::Stateful)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasBackground)
+	:does(Clay::UI::Role::Style::HasCornerRadius)
 {
 	field $horizontal   :param :reader = 0;
 	field $vertical     :param :reader = 1;

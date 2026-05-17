@@ -7,20 +7,20 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::Element;
-use Clay::UI::Role::HasLayout;
-use Clay::UI::Role::HasBackground;
-use Clay::UI::Role::HasBorder;
-use Clay::UI::Role::HasCornerRadius;
+use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+use Clay::UI::Role::Style::HasBorder;
+use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
 class Clay::UI::Grid::Cell
-	:does(Clay::UI::Role::Element)
-	:does(Clay::UI::Role::HasLayout)
-	:does(Clay::UI::Role::HasBackground)
-	:does(Clay::UI::Role::HasBorder)
-	:does(Clay::UI::Role::HasCornerRadius)
+	:does(Clay::UI::Role::Core::Element)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasBackground)
+	:does(Clay::UI::Role::Style::HasBorder)
+	:does(Clay::UI::Role::Style::HasCornerRadius)
 {}
 
 1;
@@ -86,8 +86,8 @@ cell takes the equalized dimensions but has no visible styling.
 The mixin composition gives Cell all of HasLayout, HasBackground,
 HasBorder, HasCornerRadius. Pass any of their parameters to the
 constructor. Sizing-group ids are inherited via
-L<Clay::UI::Role::HasSizingGroup> (composed transitively through
-L<Clay::UI::Role::Element>) and are normally set by the enclosing Grid
+L<Clay::UI::Role::Layout::HasSizingGroup> (composed transitively through
+L<Clay::UI::Role::Core::Element>) and are normally set by the enclosing Grid
 rather than the caller.
 
 =cut

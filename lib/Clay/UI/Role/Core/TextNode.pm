@@ -1,4 +1,4 @@
-package Clay::UI::Role::TextNode;
+package Clay::UI::Role::Core::TextNode;
 
 use v5.22;
 use warnings;
@@ -7,13 +7,13 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::HasParent;
-use Clay::UI::Events::Listener;
+use Clay::UI::Role::Layout::HasParent;
+use Clay::UI::Role::Events::Listener;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::TextNode :does(Clay::UI::Role::HasParent)
-                              :does(Clay::UI::Events::Listener) {
+role Clay::UI::Role::Core::TextNode :does(Clay::UI::Role::Layout::HasParent)
+                              :does(Clay::UI::Role::Events::Listener) {
 	method text;
 	method text_config;
 }
@@ -24,12 +24,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::TextNode - marker role for Clay::UI text-leaf widgets
+Clay::UI::Role::Core::TextNode - marker role for Clay::UI text-leaf widgets
 
 =head1 DESCRIPTION
 
 Marker role consumed by L<Clay::UI::Text> (and any user-defined text
-widget). The walker checks C<< $node->DOES('Clay::UI::Role::TextNode') >>
+widget). The walker checks C<< $node->DOES('Clay::UI::Role::Core::TextNode') >>
 and, if true, calls C<< $node->text >> + C<< $node->text_config >> and
 dispatches to C<Clay__OpenTextElement> instead of the normal open /
 configure / close flow.

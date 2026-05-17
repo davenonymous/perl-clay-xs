@@ -54,6 +54,6 @@ Opaque payload forwarded from the originating callback.
 =back
 
 C<name> defaults to C<'OnPress'>; C<bubble_mode> defaults to
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >>.
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >>.
 
 =cut

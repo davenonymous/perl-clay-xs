@@ -13,9 +13,9 @@ use Clay::UI::Box;
 use Clay::UI::Text;
 
 use Object::Pad;
-use Clay::UI::Role::Element;
+use Clay::UI::Role::Core::Element;
 
-class ConflictWidget :does(Clay::UI::Role::Element) {
+class ConflictWidget :does(Clay::UI::Role::Core::Element) {
 	method contribute_user ($cfg) {
 		$cfg->{user_data} = 42;
 	}
@@ -73,7 +73,7 @@ subtest 'render commands carry refaddr in userData' => sub {
 	}
 
 	# Identity compare via refaddr: widgets now back-reference their
-	# parents (Clay::UI::Role::HasParent), creating a cycle that Test2's
+	# parents (Clay::UI::Role::Layout::HasParent), creating a cycle that Test2's
 	# deep `is` cannot traverse.
 	is( refaddr $widgets_seen{ refaddr $root },      refaddr $root,      'root widget recovered' );
 	is( refaddr $widgets_seen{ refaddr $child_box }, refaddr $child_box, 'child box recovered' );

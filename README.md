@@ -130,28 +130,28 @@ equal-height buttons, etc., independent of the Grid widget. See
 
 A small DOM-style event system, split in two roles:
 
-- `Clay::UI::Events::Listener` is composed transitively into every
+- `Clay::UI::Role::Events::Listener` is composed transitively into every
   widget (via `Role::Element` and `Role::TextNode`), giving everything
   `on($name, $sub)` and the ability to receive bubbled events.
-- `Clay::UI::Events::Emitter` is composed only into widgets that
+- `Clay::UI::Role::Events::Emitter` is composed only into widgets that
   originate events (currently `Box` and `Button`), adding
   `fire_event($event)`.
 
 ```perl
 use Clay::UI::Events::OnPress;
-use Clay::UI::Events::Result;
-use Clay::UI::Events::Bubble;
+use Clay::UI::Enum::Result;
+use Clay::UI::Enum::Bubble;
 
 $button->on('OnPress', sub ($event) {
     warn "pressed ", $event->target->id, " at (", $event->x, ",", $event->y, ")";
-    return Clay::UI::Events::Result->HANDLED;  # stop bubbling (only matters in IF_CONTINUE mode)
+    return Clay::UI::Enum::Result->HANDLED;  # stop bubbling (only matters in IF_CONTINUE mode)
 });
 
 # Fire manually (or let Button's hover callback fire it for you):
 $button->fire_event(
     Clay::UI::Events::OnPress->new(
         x => 10, y => 20,
-        bubble_mode => Clay::UI::Events::Bubble->ALWAYS,
+        bubble_mode => Clay::UI::Enum::Bubble->ALWAYS,
     ),
 );
 ```
@@ -159,9 +159,9 @@ $button->fire_event(
 Event objects are typed Object::Pad classes (`OnHoverStart`,
 `OnHoverStopped`, `OnPress`, `OnRelease`, `OnScroll`, plus the base
 `Event`); bubble policy is carried on the event as a
-`Clay::UI::Events::Bubble` enum value (`ALWAYS`, `IF_CONTINUE`,
+`Clay::UI::Enum::Bubble` enum value (`ALWAYS`, `IF_CONTINUE`,
 `NEVER`). Hover/press events are driven by the
-`Clay::UI::Role::Hoverable` and `Clay::UI::Role::Pressable` roles -
+`Clay::UI::Role::Interaction::Hoverable` and `Clay::UI::Role::Interaction::Pressable` roles -
 composing those gives a widget edge-triggered `OnHoverStart` /
 `OnHoverStopped` / `OnPress` events plus `is_hovered` / `is_pressed`
 state readers without any custom callback wiring. `Clay::UI::Button`

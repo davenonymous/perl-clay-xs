@@ -8,14 +8,14 @@ use Test2::V0;
 use Object::Pad;
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Role::Element;
+use Clay::UI::Role::Core::Element;
 
 # -----------------------------------------------------------------------------
 # Minimal widget class consuming the Element role. Exercises the Phase 1
 # walker without needing the Phase 2 mixin machinery.
 # -----------------------------------------------------------------------------
 
-class TestWidget :does(Clay::UI::Role::Element) {
+class TestWidget :does(Clay::UI::Role::Core::Element) {
 	field $bg :param :reader = [40, 50, 60, 200];
 
 	method contribute_test ($cfg) {

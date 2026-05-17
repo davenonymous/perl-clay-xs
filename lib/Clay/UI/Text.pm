@@ -7,11 +7,11 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::TextNode;
+use Clay::UI::Role::Core::TextNode;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Text :does(Clay::UI::Role::TextNode) {
+class Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 	field $text :param :reader;
 
 	field $font_id         :param :reader = 0;
@@ -59,7 +59,7 @@ Clay::UI::Text - text-leaf widget for Clay::UI
 Text widgets are leaves: the walker calls Clay's
 C<Clay__OpenTextElement> rather than the normal open / configure /
 close trio, and text nodes cannot have children. C<Clay::UI::Text>
-consumes L<Clay::UI::Role::TextNode> so the walker can detect text
+consumes L<Clay::UI::Role::Core::TextNode> so the walker can detect text
 nodes via C<DOES>.
 
 The text-measurement callback installed via

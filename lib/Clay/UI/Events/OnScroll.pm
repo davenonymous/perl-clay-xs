@@ -48,6 +48,6 @@ Opaque payload.
 =back
 
 C<name> defaults to C<'OnScroll'>; C<bubble_mode> defaults to
-C<< Clay::UI::Events::Bubble->IF_CONTINUE >>.
+C<< Clay::UI::Enum::Bubble->IF_CONTINUE >>.
 
 =cut

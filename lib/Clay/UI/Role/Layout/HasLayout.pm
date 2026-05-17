@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasLayout;
+package Clay::UI::Role::Layout::HasLayout;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasLayout {
+role Clay::UI::Role::Layout::HasLayout {
 	field $layout :param :reader = undef;
 
 	method contribute_layout ($config) {
@@ -25,12 +25,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasLayout - layout config mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasLayout - layout config mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Box :does(Clay::UI::Role::Element)
-	              :does(Clay::UI::Role::HasLayout)
+	class My::Box :does(Clay::UI::Role::Core::Element)
+	              :does(Clay::UI::Role::Layout::HasLayout)
 	{}
 
 	My::Box->new(

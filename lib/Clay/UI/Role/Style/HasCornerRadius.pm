@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasCornerRadius;
+package Clay::UI::Role::Style::HasCornerRadius;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasCornerRadius {
+role Clay::UI::Role::Style::HasCornerRadius {
 	field $corner_radius :param :reader = undef;
 
 	method contribute_corner_radius ($config) {
@@ -28,12 +28,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasCornerRadius - corner-radius mixin for Clay::UI widgets
+Clay::UI::Role::Style::HasCornerRadius - corner-radius mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Box :does(Clay::UI::Role::Element)
-	              :does(Clay::UI::Role::HasCornerRadius)
+	class My::Box :does(Clay::UI::Role::Core::Element)
+	              :does(Clay::UI::Role::Style::HasCornerRadius)
 	{}
 
 	# Same radius on all four corners:

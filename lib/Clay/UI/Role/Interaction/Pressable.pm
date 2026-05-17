@@ -1,4 +1,4 @@
-package Clay::UI::Role::Pressable;
+package Clay::UI::Role::Interaction::Pressable;
 
 use v5.22;
 use warnings;
@@ -13,13 +13,13 @@ use Clay::XS qw(
 	CLAY_POINTER_DATA_RELEASED_THIS_FRAME
 );
 
-use Clay::UI::Role::Hoverable;
+use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Events::OnPress;
 use Clay::UI::Events::OnRelease;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Pressable :does(Clay::UI::Role::Hoverable) {
+role Clay::UI::Role::Interaction::Pressable :does(Clay::UI::Role::Interaction::Hoverable) {
 	field $is_pressed :reader = 0;
 
 	# Last pointer.state observed during this frame's Clay_OnHover
@@ -73,17 +73,17 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Pressable - stateful press-tracking + OnPress event
+Clay::UI::Role::Interaction::Pressable - stateful press-tracking + OnPress event
 
 =head1 SYNOPSIS
 
 	use Object::Pad;
-	use Clay::UI::Role::Element;
-	use Clay::UI::Role::Pressable;
+	use Clay::UI::Role::Core::Element;
+	use Clay::UI::Role::Interaction::Pressable;
 
 	class My::Button
-		:does(Clay::UI::Role::Element)
-		:does(Clay::UI::Role::Pressable)
+		:does(Clay::UI::Role::Core::Element)
+		:does(Clay::UI::Role::Interaction::Pressable)
 	{}
 
 	my $btn = My::Button->new(id => 'go');
@@ -93,7 +93,7 @@ Clay::UI::Role::Pressable - stateful press-tracking + OnPress event
 
 =head1 DESCRIPTION
 
-Composed with L<Clay::UI::Role::Hoverable> (so press-trackable widgets
+Composed with L<Clay::UI::Role::Interaction::Hoverable> (so press-trackable widgets
 are also hover-trackable). Adds:
 
 =over 4

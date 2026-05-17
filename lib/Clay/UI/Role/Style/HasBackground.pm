@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasBackground;
+package Clay::UI::Role::Style::HasBackground;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasBackground {
+role Clay::UI::Role::Style::HasBackground {
 	field $background_color :param :reader = undef;
 
 	method contribute_background ($config) {
@@ -25,12 +25,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasBackground - background-color mixin for Clay::UI widgets
+Clay::UI::Role::Style::HasBackground - background-color mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Box :does(Clay::UI::Role::Element)
-	              :does(Clay::UI::Role::HasBackground)
+	class My::Box :does(Clay::UI::Role::Core::Element)
+	              :does(Clay::UI::Role::Style::HasBackground)
 	{}
 
 	My::Box->new( background_color => [40, 50, 60, 255] );

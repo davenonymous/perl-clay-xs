@@ -1,4 +1,4 @@
-package Clay::UI::Role::HasFloating;
+package Clay::UI::Role::Layout::HasFloating;
 
 use v5.22;
 use warnings;
@@ -9,7 +9,7 @@ use Object::Pad 0.800;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::HasFloating {
+role Clay::UI::Role::Layout::HasFloating {
 	field $floating :param :reader = undef;
 
 	method contribute_floating ($config) {
@@ -25,12 +25,12 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::HasFloating - floating-element mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasFloating - floating-element mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Tooltip :does(Clay::UI::Role::Element)
-	                  :does(Clay::UI::Role::HasFloating)
+	class My::Tooltip :does(Clay::UI::Role::Core::Element)
+	                  :does(Clay::UI::Role::Layout::HasFloating)
 	{}
 
 	My::Tooltip->new(
