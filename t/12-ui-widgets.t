@@ -9,8 +9,24 @@ use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Box;
 use Clay::UI::Text;
-use Clay::UI::Button;
-use Clay::UI::ScrollPanel;
+
+use Object::Pad;
+use Clay::UI::Role::Core::Stateful;
+use Clay::UI::Role::Interaction::Pressable;
+use Clay::UI::Role::Layout::HasScroll;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Style::HasBackground;
+
+class TestScrollBox :does(Clay::UI::Role::Layout::HasScroll)
+                    :does(Clay::UI::Role::Layout::HasLayout)
+{}
+
+class TestButton
+	:does(Clay::UI::Role::Core::Stateful)
+	:does(Clay::UI::Role::Interaction::Pressable)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasBackground)
+{}
 
 my @errors;
 my $error_handler = sub ($err, $userdata) { push @errors, $err };
@@ -90,17 +106,17 @@ subtest 'Text inside a Box' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Stateful: ScrollPanel demands an id.
+# Stateful: HasScroll demands an id.
 # -----------------------------------------------------------------------------
 
-subtest 'ScrollPanel requires id' => sub {
+subtest 'HasScroll requires id' => sub {
 	like(
-		dies { Clay::UI::ScrollPanel->new },
+		dies { TestScrollBox->new },
 		qr/requires an explicit 'id'/,
 		'missing id fails loud',
 	);
 
-	my $panel = Clay::UI::ScrollPanel->new(
+	my $panel = TestScrollBox->new(
 		id     => 'log',
 		layout => { sizing => { width => sizing_grow(), height => sizing_fixed(100) } },
 	);
@@ -108,13 +124,13 @@ subtest 'ScrollPanel requires id' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# ScrollPanel emits a clip slice via its custom contribute_scroll method.
+# HasScroll emits a clip slice via its contribute_clip method.
 # -----------------------------------------------------------------------------
 
-subtest 'ScrollPanel emits scroll container' => sub {
+subtest 'HasScroll emits scroll container' => sub {
 	@errors = ();
 	my $ui = make_ui(
-		Clay::UI::ScrollPanel->new(
+		TestScrollBox->new(
 			id     => 'log',
 			layout => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
 		),
@@ -136,10 +152,10 @@ subtest 'ScrollPanel emits scroll container' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Button hover + click callback dispatch.
+# Pressable role: hover + click callback dispatch on a stateful widget.
 # -----------------------------------------------------------------------------
 
-subtest 'Button: hover-edge events, press events, live state readers' => sub {
+subtest 'Pressable: hover-edge events, press events, live state readers' => sub {
 	@errors = ();
 
 	my @hover_start;
@@ -147,7 +163,7 @@ subtest 'Button: hover-edge events, press events, live state readers' => sub {
 	my @press;
 	my @release;
 
-	my $button = Clay::UI::Button->new(
+	my $button = TestButton->new(
 		id               => 'btn',
 		layout           => { sizing => { width => sizing_fixed(100), height => sizing_fixed(40) } },
 		background_color => [70, 130, 200, 255],

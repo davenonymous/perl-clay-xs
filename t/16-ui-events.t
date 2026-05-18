@@ -256,7 +256,7 @@ subtest 'fire_event() rejects non-event arg' => sub {
 subtest 'Listener/Emitter split: Text listens, Box emits' => sub {
 	# Listener half is composed into every widget (Text included);
 	# Emitter half is composed only into widgets that originate events
-	# (Box, Button). A Box firing an event bubbling up the tree reaches
+	# (Box). A Box firing an event bubbling up the tree reaches
 	# Text listeners on its ancestors - but a Text leaf cannot fire one.
 	my $inner = Clay::UI::Box->new(id => 'inner');
 	my $outer = Clay::UI::Box->new(id => 'outer');

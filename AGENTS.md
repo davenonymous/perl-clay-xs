@@ -128,7 +128,7 @@ Useful invocations:
 3. Widget classes that need to participate without making their own
    role can also expose a `contribute_*` method directly on the class;
    the walker iterates the class's `direct_methods` in addition to
-   roles' (see `Clay::UI::ScrollPanel`).
+   roles' (see `Clay::UI::Grid`'s `contribute_grid_defaults`).
 4. Text leaves consume `Clay::UI::Role::Core::TextNode`; the walker
    dispatches them to `Clay__OpenTextElement` instead of the normal
    open/configure/close trio and ignores their `children`.

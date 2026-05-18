@@ -11,7 +11,6 @@ use Clay::UI::Role::Layout::HasLayout;
 use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
-use Clay::UI::Role::Layout::HasClip;
 use Clay::UI::Role::Layout::HasFloating;
 
 # -----------------------------------------------------------------------------
@@ -25,7 +24,6 @@ class TestKitchenSink :does(Clay::UI::Role::Core::Element)
                       :does(Clay::UI::Role::Style::HasBackground)
                       :does(Clay::UI::Role::Style::HasBorder)
                       :does(Clay::UI::Role::Style::HasCornerRadius)
-                      :does(Clay::UI::Role::Layout::HasClip)
                       :does(Clay::UI::Role::Layout::HasFloating)
 {}
 
@@ -80,14 +78,6 @@ subtest 'HasCornerRadius scalar shorthand expands' => sub {
 	);
 };
 
-subtest 'HasClip alone' => sub {
-	class TCl :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Layout::HasClip) {}
-	my $cfg = TCl->new(
-		clip => { horizontal => 1, vertical => 1, child_offset => { x => 0, y => 0 } },
-	)->to_config;
-	is( $cfg->{clip}{horizontal}, 1, 'clip slice only' );
-};
-
 subtest 'HasFloating alone' => sub {
 	class TF :does(Clay::UI::Role::Core::Element) :does(Clay::UI::Role::Layout::HasFloating) {}
 	my $cfg = TF->new( floating => { attach_to => 1 } )->to_config;
@@ -105,7 +95,6 @@ subtest 'kitchen sink composes all slices' => sub {
 		border_color     => [50, 50, 50, 255],
 		border_width     => 1,
 		corner_radius    => 4,
-		clip             => { horizontal => 1, vertical => 0, child_offset => { x => 0, y => 0 } },
 		floating         => { attach_to => 0 },
 	)->to_config;
 
@@ -113,7 +102,6 @@ subtest 'kitchen sink composes all slices' => sub {
 	ok( exists $cfg->{background_color}, 'background slice present' );
 	ok( exists $cfg->{border},           'border slice present' );
 	ok( exists $cfg->{corner_radius},    'corner_radius slice present' );
-	ok( exists $cfg->{clip},             'clip slice present' );
 	ok( exists $cfg->{floating},         'floating slice present' );
 };
 

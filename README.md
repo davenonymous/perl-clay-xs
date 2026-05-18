@@ -87,9 +87,9 @@ Clay::UI::layout($root);
 my $cmds = Clay_EndLayout(0);
 ```
 
-Widget classes (`Clay::UI::Box`, `Text`, `Button`, `ScrollPanel`) compose
-property mixin roles (`HasLayout`, `HasBackground`, `HasBorder`,
-`HasCornerRadius`, `HasClip`, `HasFloating`) and use `snake_case` keys
+Widget classes (`Clay::UI::Box`, `Text`) compose property mixin roles
+(`HasLayout`, `HasBackground`, `HasBorder`, `HasCornerRadius`,
+`HasScroll`, `HasFloating`) and use `snake_case` keys
 throughout; the walker camelizes them before reaching the C binding.
 See `examples/04-ui-sidebar.pl` for a full port of the sidebar demo
 above.
@@ -129,8 +129,7 @@ A small DOM-style event system, split in two roles:
   widget (via `Role::Element` and `Role::TextNode`), giving everything
   `on($name, $sub)` and the ability to receive bubbled events.
 - `Clay::UI::Role::Events::Emitter` is composed only into widgets that
-  originate events (currently `Box` and `Button`), adding
-  `fire_event($event)`.
+  originate events (currently `Box`), adding `fire_event($event)`.
 
 ```perl
 use Clay::UI::Events::OnPress;
@@ -142,7 +141,7 @@ $button->on('OnPress', sub ($event) {
     return Clay::UI::Enum::Result->HANDLED;  # stop bubbling (only matters in IF_CONTINUE mode)
 });
 
-# Fire manually (or let Button's hover callback fire it for you):
+# Fire manually (or let the Pressable hover callback fire it for you):
 $button->fire_event(
     Clay::UI::Events::OnPress->new(
         x => 10, y => 20,
@@ -159,8 +158,8 @@ Event objects are typed Object::Pad classes (`OnHoverStart`,
 `Clay::UI::Role::Interaction::Hoverable` and `Clay::UI::Role::Interaction::Pressable` roles -
 composing those gives a widget edge-triggered `OnHoverStart` /
 `OnHoverStopped` / `OnPress` events plus `is_hovered` / `is_pressed`
-state readers without any custom callback wiring. `Clay::UI::Button`
-is just `Stateful + Pressable + the visual mixins`.
+state readers without any custom callback wiring. To build a button,
+compose `Stateful + Pressable + the visual mixins` on your own widget.
 
 ## What's here
 

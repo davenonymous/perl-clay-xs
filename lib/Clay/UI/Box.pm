@@ -12,7 +12,6 @@ use Clay::UI::Role::Layout::HasLayout;
 use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
-use Clay::UI::Role::Layout::HasClip;
 use Clay::UI::Role::Layout::HasFloating;
 use Clay::UI::Role::Events::Emitter;
 
@@ -24,7 +23,6 @@ class Clay::UI::Box
 	:does(Clay::UI::Role::Style::HasBackground)
 	:does(Clay::UI::Role::Style::HasBorder)
 	:does(Clay::UI::Role::Style::HasCornerRadius)
-	:does(Clay::UI::Role::Layout::HasClip)
 	:does(Clay::UI::Role::Layout::HasFloating)
 	:does(Clay::UI::Role::Events::Emitter)
 {}
@@ -58,7 +56,6 @@ with every property mixin: L<HasLayout|Clay::UI::Role::Layout::HasLayout>,
 L<HasBackground|Clay::UI::Role::Style::HasBackground>,
 L<HasBorder|Clay::UI::Role::Style::HasBorder>,
 L<HasCornerRadius|Clay::UI::Role::Style::HasCornerRadius>,
-L<HasClip|Clay::UI::Role::Layout::HasClip>,
 L<HasFloating|Clay::UI::Role::Layout::HasFloating>. Pass any combination of
 the mixin parameters to the constructor; the inherited C<to_config>
 collects every active slice.

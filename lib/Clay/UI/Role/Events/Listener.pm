@@ -53,7 +53,7 @@ read-back of the per-widget handler list.
 
 The complementary I<send> half (C<fire_event>) lives in
 L<Clay::UI::Role::Events::Emitter> and is composed only into widgets that
-originate events (e.g. L<Clay::UI::Box>, L<Clay::UI::Button>).
+originate events (e.g. L<Clay::UI::Box>).
 A non-emitting widget can still be a bubble target: when an Emitter
 fires an event, the dispatcher walks up the parent chain and calls
 C<handlers_for> on every ancestor, regardless of whether each ancestor
