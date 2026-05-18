@@ -18,10 +18,43 @@ use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
-# Per-process counter that hands out a unique non-zero base id to each Grid
-# instance so its column/row group ids never collide with another grid's.
-# Each grid claims a contiguous range [base .. base + col_count + row_count).
-my $NEXT_GROUP_BASE = 1;
+# Group-id encoding: (grid_id << 20) | local_index.
+#   - grid_id in 1..4095     -> 12 bits, one slot per live Grid instance
+#   - local  in 1..1048575   -> 20 bits, one slot per axis-bucket within a Grid
+# Width-axis and height-axis ids share the local space because Clay equalizes
+# per-axis only (width vs height live in separate equality buckets).
+use constant {
+	_GRID_ID_BITS  => 12,
+	_LOCAL_BITS    => 20,
+	_GRID_ID_MAX   => (1 << 12) - 1,   # 4095
+	_LOCAL_MAX     => (1 << 20) - 1,   # 1048575
+};
+
+# Process-global pool of 12-bit grid-ids. Monotonic counter for fresh ids;
+# free-list receives ids released by DESTROY so long-running programs that
+# churn grids do not exhaust the namespace.
+my @_FREE_GRID_IDS;
+my $_NEXT_GRID_ID = 1;
+
+sub _claim_grid_id {
+	return shift @_FREE_GRID_IDS if @_FREE_GRID_IDS;
+	die "Clay::UI::Grid: grid-id pool exhausted (max " . _GRID_ID_MAX . " live grids)"
+		if $_NEXT_GRID_ID > _GRID_ID_MAX;
+	return $_NEXT_GRID_ID++;
+}
+
+sub _release_grid_id ($id) {
+	push @_FREE_GRID_IDS, $id;
+	return;
+}
+
+sub _pack_group_id ($grid_id, $local) {
+	die "Clay::UI::Grid: grid_id $grid_id out of range 1.." . _GRID_ID_MAX
+		unless $grid_id >= 1 && $grid_id <= _GRID_ID_MAX;
+	die "Clay::UI::Grid: local index $local out of range 1.." . _LOCAL_MAX
+		unless $local >= 1 && $local <= _LOCAL_MAX;
+	return ($grid_id << _LOCAL_BITS) | $local;
+}
 
 class Clay::UI::Grid
 	:does(Clay::UI::Role::Core::Element)
@@ -33,6 +66,7 @@ class Clay::UI::Grid
 	field $rows :param :reader;
 	field $cell_gap :param = 0;
 	field $row_gap  :param = 0;
+
 	# Per-cell wrappers ([row][col]). For each input cell: if it is already a
 	# Clay::UI::Grid::Cell, it is used directly (so the caller's styling
 	# becomes the visible cell); otherwise the Grid wraps it in an unstyled
@@ -40,53 +74,194 @@ class Clay::UI::Grid
 	# its rendered box is exactly the equalized column-width x row-height.
 	field $cell_wrappers :reader = [];
 
+	# Per-Grid id allocation state.
+	field $_grid_id;
+	field $_next_width_local  = 1;
+	field $_next_height_local = 1;
+	field $_col_width_ids     = [];   # column index -> packed width-axis group id
+	field $_row_height_ids    = [];   # row    index -> packed height-axis group id
+
 	ADJUST {
 		die "Clay::UI::Grid: 'rows' must be an arrayref"
 			unless ref $rows eq 'ARRAY';
 
-		my $row_count = scalar @$rows;
-		my $col_count = 0;
-		for my $row (@$rows) {
-			die "Clay::UI::Grid: each row must be an arrayref"
-				unless ref $row eq 'ARRAY';
-			$col_count = scalar @$row if scalar @$row > $col_count;
-		}
-
-		my $col_base = $NEXT_GROUP_BASE;
-		my $row_base = $col_base + $col_count;
-		$NEXT_GROUP_BASE = $row_base + $row_count;
+		$_grid_id = _claim_grid_id();
 
 		my @row_boxes;
-		for my $r (0 .. $row_count - 1) {
+		for my $r (0 .. $#$rows) {
 			my $row = $rows->[$r];
-			my @wrapped_cells;
-			my @wrapper_row;
-			for my $c (0 .. $#$row) {
-				my $cell    = $row->[$c];
-				my $wrapper = $cell->isa('Clay::UI::Grid::Cell')
-					? $cell
-					: Clay::UI::Grid::Cell->new(
-						layout   => { sizing => { width => sizing_fit(), height => sizing_fit() } },
-						children => [ $cell ],
-					);
-				$wrapper->width_group($col_base + $c)  if $wrapper->width_group  == 0;
-				$wrapper->height_group($row_base + $r) if $wrapper->height_group == 0;
-				push @wrapped_cells, $wrapper;
-				push @wrapper_row,   $wrapper;
-			}
-			push @{ $cell_wrappers }, \@wrapper_row;
-			push @row_boxes, Clay::UI::Box->new(
-				layout => {
-					sizing           => { width => sizing_fit(), height => sizing_fit() },
-					layout_direction => CLAY_LEFT_TO_RIGHT,
-					child_gap        => $cell_gap,
-				},
-				children => \@wrapped_cells,
-			);
+			die "Clay::UI::Grid: each row must be an arrayref"
+				unless ref $row eq 'ARRAY';
+			push @row_boxes, $self->_build_row_box($r, $row);
 		}
 
 		$self->clear_children;
-		$self->add_child(@row_boxes);
+		$self->add_child(@row_boxes) if @row_boxes;
+	}
+
+	method DESTROY {
+		return if ${^GLOBAL_PHASE} eq 'DESTRUCT';
+		return unless defined $_grid_id;
+		_release_grid_id($_grid_id);
+		$_grid_id = undef;
+		return;
+	}
+
+	# Ensure $_col_width_ids covers at least $width columns; claim new ids
+	# lazily for any column past the current cache length.
+	method _ensure_col_width ($width) {
+		while (scalar(@$_col_width_ids) < $width) {
+			push @$_col_width_ids, _pack_group_id($_grid_id, $_next_width_local++);
+		}
+		return;
+	}
+
+	# Claim a fresh height-axis id for a new row.
+	method _claim_row_height_id () {
+		return _pack_group_id($_grid_id, $_next_height_local++);
+	}
+
+	# Wrap one input cell into a Clay::UI::Grid::Cell and stamp its
+	# (column, row) group ids. Mirrors the constructor's wrap-or-use rule:
+	# a Cell instance is used directly; anything else is wrapped unstyled.
+	# If the wrapper already has a non-zero group on an axis (user-set for
+	# cross-grid alignment), that axis is left alone.
+	method _wrap_cell ($cell, $col_idx, $row_height_id) {
+		my $wrapper = $cell->isa('Clay::UI::Grid::Cell')
+			? $cell
+			: Clay::UI::Grid::Cell->new(
+				layout   => { sizing => { width => sizing_fit(), height => sizing_fit() } },
+				children => [ $cell ],
+			);
+		$wrapper->width_group($_col_width_ids->[$col_idx]) if $wrapper->width_group  == 0;
+		$wrapper->height_group($row_height_id)             if $wrapper->height_group == 0;
+		return $wrapper;
+	}
+
+	# Build a row-Box for a row of input cells at row index $r. Updates
+	# $cell_wrappers and $_row_height_ids; widens $_col_width_ids if needed.
+	# Returns the new row-Box (unparented; caller is responsible for attaching).
+	method _build_row_box ($r, $row_cells) {
+		$self->_ensure_col_width(scalar @$row_cells);
+		my $row_height_id = $self->_claim_row_height_id();
+		$_row_height_ids->[$r] = $row_height_id;
+
+		my @wrappers;
+		for my $c (0 .. $#$row_cells) {
+			push @wrappers, $self->_wrap_cell($row_cells->[$c], $c, $row_height_id);
+		}
+		$cell_wrappers->[$r] = \@wrappers;
+
+		return Clay::UI::Box->new(
+			layout => {
+				sizing           => { width => sizing_fit(), height => sizing_fit() },
+				layout_direction => CLAY_LEFT_TO_RIGHT,
+				child_gap        => $cell_gap,
+			},
+			children => \@wrappers,
+		);
+	}
+
+	method row_count () { return scalar @$cell_wrappers; }
+
+	method set_cell ($r, $c, $widget) {
+		my $row_count = scalar @$cell_wrappers;
+		die "Clay::UI::Grid: row index $r out of range 0.." . ($row_count - 1)
+			unless $r >= 0 && $r < $row_count;
+		my $current_row_len = scalar @{ $cell_wrappers->[$r] };
+		die "Clay::UI::Grid: col index $c out of range 0.." . $current_row_len
+			unless $c >= 0 && $c <= $current_row_len;
+
+		$self->_ensure_col_width($c + 1);
+		my $wrapper = $self->_wrap_cell($widget, $c, $_row_height_ids->[$r]);
+		$cell_wrappers->[$r][$c] = $wrapper;
+
+		my $row_box      = $self->children->[$r];
+		my $row_children = $row_box->children;
+		if ($c < scalar @$row_children) {
+			$row_children->[$c] = $wrapper;
+		}
+		else {
+			push @$row_children, $wrapper;
+		}
+		$wrapper->_set_parent($row_box);
+		return $self;
+	}
+
+	method append_row ($row_cells) {
+		die "Clay::UI::Grid: row must be an arrayref"
+			unless ref $row_cells eq 'ARRAY';
+		my $r = scalar @$cell_wrappers;
+		my $row_box = $self->_build_row_box($r, $row_cells);
+		$self->add_child($row_box);
+		return $self;
+	}
+
+	method insert_row ($index, $row_cells) {
+		die "Clay::UI::Grid: row must be an arrayref"
+			unless ref $row_cells eq 'ARRAY';
+		my $row_count = scalar @$cell_wrappers;
+		die "Clay::UI::Grid: insert index $index out of range 0..$row_count"
+			unless $index >= 0 && $index <= $row_count;
+
+		# Build at the eventual index so $cell_wrappers / $_row_height_ids
+		# get the right slot.
+		$self->_ensure_col_width(scalar @$row_cells);
+		my $row_height_id = $self->_claim_row_height_id();
+
+		my @wrappers;
+		for my $c (0 .. $#$row_cells) {
+			push @wrappers, $self->_wrap_cell($row_cells->[$c], $c, $row_height_id);
+		}
+
+		my $row_box = Clay::UI::Box->new(
+			layout => {
+				sizing           => { width => sizing_fit(), height => sizing_fit() },
+				layout_direction => CLAY_LEFT_TO_RIGHT,
+				child_gap        => $cell_gap,
+			},
+			children => \@wrappers,
+		);
+
+		splice @$cell_wrappers,   $index, 0, \@wrappers;
+		splice @$_row_height_ids, $index, 0, $row_height_id;
+		splice @{ $self->children }, $index, 0, $row_box;
+		$row_box->_set_parent($self);
+		return $self;
+	}
+
+	method remove_row ($index) {
+		my $row_count = scalar @$cell_wrappers;
+		die "Clay::UI::Grid: row index $index out of range 0.." . ($row_count - 1)
+			unless $index >= 0 && $index < $row_count;
+		splice @$cell_wrappers,   $index, 1;
+		splice @$_row_height_ids, $index, 1;
+		splice @{ $self->children }, $index, 1;
+		return $self;
+	}
+
+	method replace_row ($index, $row_cells) {
+		die "Clay::UI::Grid: row must be an arrayref"
+			unless ref $row_cells eq 'ARRAY';
+		my $row_count = scalar @$cell_wrappers;
+		die "Clay::UI::Grid: row index $index out of range 0.." . ($row_count - 1)
+			unless $index >= 0 && $index < $row_count;
+
+		$self->_ensure_col_width(scalar @$row_cells);
+		my $row_height_id = $_row_height_ids->[$index];
+
+		my @wrappers;
+		for my $c (0 .. $#$row_cells) {
+			push @wrappers, $self->_wrap_cell($row_cells->[$c], $c, $row_height_id);
+		}
+		$cell_wrappers->[$index] = \@wrappers;
+
+		my $row_box = $self->children->[$index];
+		my $row_children = $row_box->children;
+		@$row_children = ();
+		push @$row_children, @wrappers;
+		$_->_set_parent($row_box) for @wrappers;
+		return $self;
 	}
 
 	method contribute_grid_defaults ($config) {
@@ -127,13 +302,19 @@ Clay::UI::Grid - auto-sized grid/table widget for Clay::UI
 			[ Clay::UI::Text->new(text => 'Alice'),
 			  Clay::UI::Text->new(text => 'alice@example.com'),
 			  Clay::UI::Text->new(text => 'Admin') ],
-			[ Clay::UI::Text->new(text => 'Bob'),
-			  Clay::UI::Text->new(text => 'bob@example.com'),
-			  Clay::UI::Text->new(text => 'User') ],
 		],
 		cell_gap => 8,
 		row_gap  => 4,
 	);
+
+	# Mutate after construction:
+	$grid->append_row([
+		Clay::UI::Text->new(text => 'Bob'),
+		Clay::UI::Text->new(text => 'bob@example.com'),
+		Clay::UI::Text->new(text => 'User'),
+	]);
+	$grid->set_cell(0, 2, Clay::UI::Text->new(text => 'Title'));
+	$grid->remove_row(1);
 
 =head1 DESCRIPTION
 
@@ -181,17 +362,77 @@ automatically; the wrapper still gets the sizing-group ids, but has no
 visible styling. Use this when you only care about layout, not
 appearance.
 
+=head1 MUTATION
+
+The grid's content can be edited after construction. All mutators
+preserve column/row equalization: cells in the same column continue to
+share a C<width_group>, cells in the same row a C<height_group>.
+
+=head2 set_cell ($row, $col, $widget)
+
+Replace the cell at C<($row, $col)>. Same wrap-or-use rule as the
+constructor: a C<Clay::UI::Grid::Cell> is used directly, anything else
+is wrapped unstyled. C<$col> may equal the current row length to extend
+the row; C<$row> must reference an existing row.
+
+=head2 append_row (\@cells)
+
+Add a new row at the bottom. Allocates one new C<height_group>; widens
+the column-id cache if the new row is longer than any previous row.
+
+=head2 insert_row ($index, \@cells)
+
+Insert a new row at C<$index> (C<0..row_count> inclusive at the upper
+end). Same id-allocation as C<append_row>.
+
+=head2 remove_row ($index)
+
+Splice out the row at C<$index>. The row's C<height_group> id is
+abandoned (not recycled into the local counter); the 20-bit local space
+makes this harmless in practice.
+
+=head2 replace_row ($index, \@cells)
+
+Replace the row at C<$index> in place, reusing the row's existing
+C<height_group> id. Widens the column-id cache if the new row is longer.
+
+=head2 No widget reuse
+
+Per L<Clay::UI::Role::Layout::HasParent/NO REPARENTING>, a widget's
+parent is set exactly once. All mutators above expect freshly built
+widgets; passing a widget that has already been attached anywhere
+(including to this same grid) will die. Likewise, widgets removed via
+C<remove_row> / C<replace_row> cannot be reattached.
+
 =head1 ID NAMESPACING
 
-Each Grid instance claims a unique contiguous range of sizing-group ids
-from a process-global counter (starting at 1). Column ids occupy
-C<[base .. base + col_count)>; row ids occupy
-C<[base + col_count .. base + col_count + row_count)>. Different Grid
-instances therefore never collide, including nested grids.
+Each Grid instance claims one 12-bit grid-id from a process-global pool
+on construction. Cell C<width_group> and C<height_group> values are
+packed as C<< (grid_id << 20) | local_index >>, where C<local_index> is
+allocated lazily per axis from a per-Grid counter. This guarantees:
 
-Note that the counter is process-local and not stable across runs.
-This is fine for layout (Clay only inspects group equality within a
-single frame) but means group ids should not be serialized.
+=over 4
+
+=item *
+
+Different Grid instances never collide, including nested grids.
+
+=item *
+
+The grid never needs to renumber its cells when it grows: a new column
+or row claims the next local index in its axis.
+
+=back
+
+The pool supports up to 4095 concurrent grids. Destroying a Grid (via
+normal Perl refcount destruction) returns its grid-id to a free-list,
+so long-running programs that churn grids do not exhaust the namespace.
+If the pool is genuinely full when a new Grid is constructed, the
+constructor dies with a clear message.
+
+Group ids are process-local and not stable across runs. This is fine for
+layout (Clay only inspects group equality within a single frame) but
+means group ids should not be serialized.
 
 =head1 OVERRIDING GROUP IDS
 
@@ -201,5 +442,9 @@ every widget), the Grid leaves that axis's id alone. This allows
 participation in cross-grid alignment groups: place a cell in your
 grid and also assign it a global C<width_group> shared with another
 widget elsewhere in the UI.
+
+Grid-assigned ids occupy values C<E<gt>= 2**20>, so any user-supplied
+id below that bound is guaranteed not to collide with an id the Grid
+itself would pick.
 
 =cut

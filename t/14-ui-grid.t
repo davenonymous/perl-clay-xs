@@ -137,4 +137,184 @@ subtest 'nested grids use disjoint group-id ranges' => sub {
 	}
 };
 
+# -----------------------------------------------------------------------------
+# Mutation: set_cell, append_row, insert_row, remove_row, replace_row all
+# preserve per-column width_group / per-row height_group sharing.
+# -----------------------------------------------------------------------------
+
+subtest 'set_cell preserves column/row sizing groups' => sub {
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-set',
+		rows => [
+			[ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ],
+			[ Clay::UI::Text->new(text => 'c'), Clay::UI::Text->new(text => 'd') ],
+		],
+	);
+	my $w = $grid->cell_wrappers;
+	my $col0_w = $w->[0][0]->width_group;
+	my $row0_h = $w->[0][0]->height_group;
+
+	$grid->set_cell(0, 0, Clay::UI::Text->new(text => 'A'));
+	is( $grid->cell_wrappers->[0][0]->width_group,  $col0_w, 'replaced cell keeps column width_group' );
+	is( $grid->cell_wrappers->[0][0]->height_group, $row0_h, 'replaced cell keeps row height_group' );
+	is(
+		$grid->cell_wrappers->[0][0]->width_group,
+		$grid->cell_wrappers->[1][0]->width_group,
+		'col 0 still equalized after set_cell',
+	);
+};
+
+subtest 'append_row extends with fresh height_group and reuses column ids' => sub {
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-append',
+		rows => [
+			[ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ],
+		],
+	);
+	my $col0_w = $grid->cell_wrappers->[0][0]->width_group;
+	my $row0_h = $grid->cell_wrappers->[0][0]->height_group;
+
+	$grid->append_row([
+		Clay::UI::Text->new(text => 'x'),
+		Clay::UI::Text->new(text => 'y'),
+	]);
+	is( scalar @{ $grid->cell_wrappers }, 2, 'two rows after append' );
+	is( $grid->cell_wrappers->[1][0]->width_group, $col0_w, 'new row column 0 reuses width id' );
+	isnt( $grid->cell_wrappers->[1][0]->height_group, $row0_h, 'new row has fresh height id' );
+	is(
+		$grid->cell_wrappers->[1][0]->height_group,
+		$grid->cell_wrappers->[1][1]->height_group,
+		'new row cells share the same height id',
+	);
+};
+
+subtest 'append_row widens column-id cache when new row is longer' => sub {
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-wide',
+		rows => [ [ Clay::UI::Text->new(text => 'a') ] ],
+	);
+	$grid->append_row([
+		Clay::UI::Text->new(text => 'p'),
+		Clay::UI::Text->new(text => 'q'),
+		Clay::UI::Text->new(text => 'r'),
+	]);
+	my $w = $grid->cell_wrappers->[1];
+	isnt( $w->[0]->width_group, $w->[1]->width_group, 'distinct columns get distinct width ids' );
+	isnt( $w->[1]->width_group, $w->[2]->width_group, 'distinct columns get distinct width ids' );
+};
+
+subtest 'remove_row drops row and keeps remaining ids intact' => sub {
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-remove',
+		rows => [
+			[ Clay::UI::Text->new(text => 'a') ],
+			[ Clay::UI::Text->new(text => 'b') ],
+			[ Clay::UI::Text->new(text => 'c') ],
+		],
+	);
+	my $row0_h = $grid->cell_wrappers->[0][0]->height_group;
+	my $row2_h = $grid->cell_wrappers->[2][0]->height_group;
+
+	$grid->remove_row(1);
+	is( scalar @{ $grid->cell_wrappers }, 2, 'two rows after remove' );
+	is( $grid->cell_wrappers->[0][0]->height_group, $row0_h, 'row 0 height id unchanged' );
+	is( $grid->cell_wrappers->[1][0]->height_group, $row2_h, 'former row 2 height id unchanged' );
+};
+
+subtest 'replace_row reuses existing height_group' => sub {
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-replace',
+		rows => [
+			[ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ],
+			[ Clay::UI::Text->new(text => 'c'), Clay::UI::Text->new(text => 'd') ],
+		],
+	);
+	my $row1_h = $grid->cell_wrappers->[1][0]->height_group;
+	$grid->replace_row(1, [
+		Clay::UI::Text->new(text => 'X'),
+		Clay::UI::Text->new(text => 'Y'),
+	]);
+	is( $grid->cell_wrappers->[1][0]->height_group, $row1_h, 'row 1 height id preserved on replace' );
+	is(
+		$grid->cell_wrappers->[1][0]->width_group,
+		$grid->cell_wrappers->[0][0]->width_group,
+		'column 0 still equalized',
+	);
+};
+
+subtest 'mutated grid renders correctly' => sub {
+	@errors = ();
+	my $grid = Clay::UI::Grid->new(
+		id   => 'mut-render',
+		rows => [
+			[ Clay::UI::Text->new(text => 'A'),    Clay::UI::Text->new(text => 'BB') ],
+			[ Clay::UI::Text->new(text => 'CCC'),  Clay::UI::Text->new(text => 'D') ],
+		],
+		cell_gap => 0,
+		row_gap  => 0,
+	);
+	$grid->append_row([
+		Clay::UI::Text->new(text => 'EEEEE'),    # 5ch, widens col 0
+		Clay::UI::Text->new(text => 'FF'),
+	]);
+	my $ui   = make_ui($grid);
+	my $cmds = $ui->render;
+	is( scalar(@errors), 0, 'no Clay errors after mutation' );
+
+	my @texts = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$cmds;
+	is( scalar(@texts), 6, 'six text commands after append (3 rows x 2 cols)' );
+
+	# Column 0 should be 5 chars wide (widest is 'EEEEE'). Column 1 starts at x = 5 * GLYPH_W.
+	my $expected_col1_x = 5 * $GLYPH_W;
+	for my $r (0 .. 2) {
+		is( $texts[$r * 2 + 1]{boundingBox}{x}, $expected_col1_x,
+			"row $r col 1 starts at widened col 0 boundary" );
+	}
+};
+
+# -----------------------------------------------------------------------------
+# Grid-id pool: destruction recycles ids; exhaustion dies with a clear message.
+# -----------------------------------------------------------------------------
+
+subtest 'grid-id is recycled on destruction' => sub {
+	# Hold references so the grids do not get GC'd prematurely.
+	my @grids;
+	push @grids, Clay::UI::Grid->new(id => "g$_", rows => [[ Clay::UI::Text->new(text => 'x') ]])
+		for 1 .. 10;
+	# Destroying a grid should free its grid-id back to the pool.
+	my $before = $grids[5]->cell_wrappers->[0][0]->width_group;
+	$grids[5] = undef;   # release one slot
+	my $fresh = Clay::UI::Grid->new(id => 'replacement', rows => [[ Clay::UI::Text->new(text => 'y') ]]);
+	ok( defined $fresh, 'allocated a grid after releasing one' );
+	# The freed grid-id is the most recently freed, so the free-list pops it
+	# for the next claim. Confirm by comparing the high bits of the new
+	# grid's width_group to the freed one's.
+	my $high_bits = sub { $_[0] >> 20 };
+	is(
+		$high_bits->($fresh->cell_wrappers->[0][0]->width_group),
+		$high_bits->($before),
+		'recycled grid-id was reused for the next grid',
+	);
+};
+
+subtest 'grid-id pool exhaustion dies loudly' => sub {
+	# Drain the pool synthetically by calling the internal claim until it
+	# fails. This is intrusive but the cleanest way to exercise the die.
+	my @held_ids;
+	my $err;
+	{
+		local $@;
+		eval {
+			while (1) {
+				push @held_ids, Clay::UI::Grid::_claim_grid_id();
+			}
+			1;
+		};
+		$err = $@;
+	}
+	like( $err, qr/grid-id pool exhausted/, 'die message mentions exhaustion' );
+	# Restore the pool so later tests (and other test files) are unaffected.
+	Clay::UI::Grid::_release_grid_id($_) for @held_ids;
+};
+
 done_testing;
