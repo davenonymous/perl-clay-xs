@@ -37,24 +37,22 @@ Clay::UI::Grid::Cell - styled single-cell container for Clay::UI::Grid
 	use Clay::UI::Grid::Cell;
 	use Clay::UI::Text;
 
-	my $grid = Clay::UI::Grid->new(
-		id   => 'report',
-		rows => [
-			[
-				Clay::UI::Grid::Cell->new(
-					layout           => { padding => padding_all(8) },
-					background_color => [55, 90, 140, 255],
-					children         => [ Clay::UI::Text->new(text => 'Header') ],
-				),
-				Clay::UI::Grid::Cell->new(
-					layout           => { padding => padding_all(8) },
-					background_color => [55, 90, 140, 255],
-					children         => [ Clay::UI::Text->new(text => 'Value') ],
-				),
-			],
-			# ...more rows...
-		],
+	my $grid = Clay::UI::Grid->new(id => 'report');
+
+	my $header_cell = Clay::UI::Grid::Cell->new(
+		layout           => { padding => padding_all(8) },
+		background_color => [55, 90, 140, 255],
 	);
+	$header_cell->add_child(Clay::UI::Text->new(text => 'Header'));
+
+	my $value_cell = Clay::UI::Grid::Cell->new(
+		layout           => { padding => padding_all(8) },
+		background_color => [55, 90, 140, 255],
+	);
+	$value_cell->add_child(Clay::UI::Text->new(text => 'Value'));
+
+	$grid->append_row([ $header_cell, $value_cell ]);
+	# ...more rows...
 
 =head1 DESCRIPTION
 

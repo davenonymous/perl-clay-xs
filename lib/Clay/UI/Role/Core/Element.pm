@@ -22,14 +22,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	no warnings 'experimental';
 
 	field $id       :param :reader = undef;
-	field $children :param :reader = [];
-
-	ADJUST {
-		for my $kid (@$children) {
-			_validate_child($kid);
-			$kid->_set_parent($self);
-		}
-	}
+	field $children :reader = [];
 
 	method resolve_id ($path) {
 		return $id if defined $id;
@@ -116,9 +109,13 @@ Clay::UI::Role::Core::Element - base role for high-level Clay widget nodes
 
 Object::Pad role consumed by every L<Clay::UI> widget class. Provides the
 two structural fields the walker needs (an optional C<id>, and a
-C<children> arrayref) and a default C<to_config> that auto-discovers
-contribution methods from composed mixin roles (see
-L<Clay::UI::Role::Layout::HasLayout>, L<Clay::UI::Role::Style::HasBackground>, ...).
+C<children> arrayref populated via L</add_child>) and a default
+C<to_config> that auto-discovers contribution methods from composed
+mixin roles (see L<Clay::UI::Role::Layout::HasLayout>,
+L<Clay::UI::Role::Style::HasBackground>, ...).
+
+Widgets are mutable: construct an empty widget and attach children with
+L</add_child>. The constructor does not accept a C<children> argument.
 
 =head1 FIELDS
 
@@ -128,13 +125,11 @@ If set, the user-supplied string is used verbatim as the Clay element id.
 If omitted, the walker derives a stable id from the tree path via
 L</resolve_id>.
 
-=head2 children (optional, default C<[]>)
+=head2 children (read-only)
 
-Arrayref of nested widget instances. Each element must consume
-C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>. Children
-passed at construction are validated and parent-stamped identically to
-L</add_child>, so the same no-reparenting rule applies to widgets
-handed to the constructor.
+Arrayref of nested widget instances, exposed as a reader for the walker.
+Populate it via L</add_child>; the constructor does not accept widgets
+directly.
 
 =head1 METHODS
 

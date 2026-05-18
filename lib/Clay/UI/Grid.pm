@@ -63,7 +63,6 @@ class Clay::UI::Grid
 	:does(Clay::UI::Role::Style::HasBorder)
 	:does(Clay::UI::Role::Style::HasCornerRadius)
 {
-	field $rows :param :reader;
 	field $cell_gap :param = 0;
 	field $row_gap  :param = 0;
 
@@ -82,21 +81,7 @@ class Clay::UI::Grid
 	field $_row_height_ids    = [];   # row    index -> packed height-axis group id
 
 	ADJUST {
-		die "Clay::UI::Grid: 'rows' must be an arrayref"
-			unless ref $rows eq 'ARRAY';
-
 		$_grid_id = _claim_grid_id();
-
-		my @row_boxes;
-		for my $r (0 .. $#$rows) {
-			my $row = $rows->[$r];
-			die "Clay::UI::Grid: each row must be an arrayref"
-				unless ref $row eq 'ARRAY';
-			push @row_boxes, $self->_build_row_box($r, $row);
-		}
-
-		$self->clear_children;
-		$self->add_child(@row_boxes) if @row_boxes;
 	}
 
 	method DESTROY {
@@ -127,12 +112,16 @@ class Clay::UI::Grid
 	# If the wrapper already has a non-zero group on an axis (user-set for
 	# cross-grid alignment), that axis is left alone.
 	method _wrap_cell ($cell, $col_idx, $row_height_id) {
-		my $wrapper = $cell->isa('Clay::UI::Grid::Cell')
-			? $cell
-			: Clay::UI::Grid::Cell->new(
-				layout   => { sizing => { width => sizing_fit(), height => sizing_fit() } },
-				children => [ $cell ],
+		my $wrapper;
+		if ($cell->isa('Clay::UI::Grid::Cell')) {
+			$wrapper = $cell;
+		}
+		else {
+			$wrapper = Clay::UI::Grid::Cell->new(
+				layout => { sizing => { width => sizing_fit(), height => sizing_fit() } },
 			);
+			$wrapper->add_child($cell);
+		}
 		$wrapper->width_group($_col_width_ids->[$col_idx]) if $wrapper->width_group  == 0;
 		$wrapper->height_group($row_height_id)             if $wrapper->height_group == 0;
 		return $wrapper;
@@ -152,14 +141,15 @@ class Clay::UI::Grid
 		}
 		$cell_wrappers->[$r] = \@wrappers;
 
-		return Clay::UI::Box->new(
+		my $row_box = Clay::UI::Box->new(
 			layout => {
 				sizing           => { width => sizing_fit(), height => sizing_fit() },
 				layout_direction => CLAY_LEFT_TO_RIGHT,
 				child_gap        => $cell_gap,
 			},
-			children => \@wrappers,
 		);
+		$row_box->add_child(@wrappers) if @wrappers;
+		return $row_box;
 	}
 
 	method row_count () { return scalar @$cell_wrappers; }
@@ -220,8 +210,8 @@ class Clay::UI::Grid
 				layout_direction => CLAY_LEFT_TO_RIGHT,
 				child_gap        => $cell_gap,
 			},
-			children => \@wrappers,
 		);
+		$row_box->add_child(@wrappers) if @wrappers;
 
 		splice @$cell_wrappers,   $index, 0, \@wrappers;
 		splice @$_row_height_ids, $index, 0, $row_height_id;
@@ -294,25 +284,23 @@ Clay::UI::Grid - auto-sized grid/table widget for Clay::UI
 	use Clay::UI::Text;
 
 	my $grid = Clay::UI::Grid->new(
-		id   => 'data',
-		rows => [
-			[ Clay::UI::Text->new(text => 'Name'),
-			  Clay::UI::Text->new(text => 'Email'),
-			  Clay::UI::Text->new(text => 'Role') ],
-			[ Clay::UI::Text->new(text => 'Alice'),
-			  Clay::UI::Text->new(text => 'alice@example.com'),
-			  Clay::UI::Text->new(text => 'Admin') ],
-		],
+		id       => 'data',
 		cell_gap => 8,
 		row_gap  => 4,
 	);
 
-	# Mutate after construction:
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'Bob'),
-		Clay::UI::Text->new(text => 'bob@example.com'),
-		Clay::UI::Text->new(text => 'User'),
+		Clay::UI::Text->new(text => 'Name'),
+		Clay::UI::Text->new(text => 'Email'),
+		Clay::UI::Text->new(text => 'Role'),
 	]);
+	$grid->append_row([
+		Clay::UI::Text->new(text => 'Alice'),
+		Clay::UI::Text->new(text => 'alice@example.com'),
+		Clay::UI::Text->new(text => 'Admin'),
+	]);
+
+	# Mutate further:
 	$grid->set_cell(0, 2, Clay::UI::Text->new(text => 'Title'));
 	$grid->remove_row(1);
 
@@ -333,14 +321,6 @@ gap between rows.
 
 =head1 FIELDS
 
-=head2 rows (required)
-
-Arrayref of arrayrefs. Each inner arrayref is one row of widget
-instances. Rows may have different lengths (the grid is laid out
-row-major; group ids are still assigned by column index, so column
-N's width equals the widest cell in column N across all rows that
-have a cell at index N).
-
 =head2 cell_gap (default 0)
 
 Pixel gap between cells within a row. Forwarded to the row container's
@@ -352,10 +332,11 @@ Pixel gap between rows. Used as the outer container's C<child_gap>.
 
 =head1 STYLING CELLS
 
-Pass L<Clay::UI::Grid::Cell> instances directly in C<rows> to control
-each cell's appearance. The Grid recognises Cell objects and uses them as
-the per-cell wrapper, so their background / border / padding / corner
-radius render exactly at the equalized column-width x row-height.
+Pass L<Clay::UI::Grid::Cell> instances to L</append_row> / L</insert_row>
+/ L</set_cell> to control each cell's appearance. The Grid recognises
+Cell objects and uses them as the per-cell wrapper, so their background
+/ border / padding / corner radius render exactly at the equalized
+column-width x row-height.
 
 Any non-Cell widget (Text, Box, etc.) is wrapped in an unstyled Cell
 automatically; the wrapper still gets the sizing-group ids, but has no
@@ -364,16 +345,17 @@ appearance.
 
 =head1 MUTATION
 
-The grid's content can be edited after construction. All mutators
-preserve column/row equalization: cells in the same column continue to
-share a C<width_group>, cells in the same row a C<height_group>.
+A Grid is constructed empty and populated via the mutators below. All
+mutators preserve column/row equalization: cells in the same column
+continue to share a C<width_group>, cells in the same row a
+C<height_group>.
 
 =head2 set_cell ($row, $col, $widget)
 
-Replace the cell at C<($row, $col)>. Same wrap-or-use rule as the
-constructor: a C<Clay::UI::Grid::Cell> is used directly, anything else
-is wrapped unstyled. C<$col> may equal the current row length to extend
-the row; C<$row> must reference an existing row.
+Replace the cell at C<($row, $col)>. Wrap-or-use rule: a
+C<Clay::UI::Grid::Cell> is used directly, anything else is wrapped
+unstyled. C<$col> may equal the current row length to extend the row;
+C<$row> must reference an existing row.
 
 =head2 append_row (\@cells)
 

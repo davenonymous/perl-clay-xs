@@ -169,7 +169,7 @@ sub build_tree () {
     my @cards;
     for my $i (0 .. 2) {
         my ($name, $align) = @{ $ALIGN_DEMO[$i] };
-        push @cards, Clay::UI::Box->new(
+        my $card = Clay::UI::Box->new(
             id => "card-$i",
             layout => {
                 sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -179,19 +179,46 @@ sub build_tree () {
             },
             background_color => [225 - $i * 40, 138, 50 + $i * 30, 255],
             corner_radius    => 4,
-            children         => [
-                label("card $i ($name)"),
-                Clay::UI::Text->new(
-                    text           => $LOREM,
-                    font_size      => 14,
-                    text_color     => $WHITE,
-                    text_alignment => $align,
-                ),
-            ],
         );
+        $card->add_child(
+            label("card $i ($name)"),
+            Clay::UI::Text->new(
+                text           => $LOREM,
+                font_size      => 14,
+                text_color     => $WHITE,
+                text_alignment => $align,
+            ),
+        );
+        push @cards, $card;
     }
 
-    return Clay::UI::Box->new(
+    my $header = Clay::UI::Box->new(
+        id => 'header',
+        layout => {
+            sizing          => { width => sizing_grow(), height => sizing_fixed(48) },
+            padding         => padding_all(12),
+            child_alignment => { x => CLAY_ALIGN_X_LEFT, y => CLAY_ALIGN_Y_CENTER },
+        },
+        background_color => [50, 100, 200, 255],
+        corner_radius    => 6,
+    );
+    $header->add_child(label("Clay -> PNG demo", 20));
+
+    my $body = Clay::UI::Box->new(
+        id => 'body',
+        layout => {
+            sizing    => { width => sizing_grow(), height => sizing_grow() },
+            padding   => padding_all(12),
+            child_gap => 12,
+        },
+        background_color => $WHITE,
+        border_color     => [200, 200, 210, 255],
+        border_width     => 2,
+        corner_radius    => 6,
+    );
+    $body->add_child(@cards);
+
+    my $root = Clay::UI::Box->new(
         id => 'root',
         layout => {
             sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -200,33 +227,9 @@ sub build_tree () {
             layout_direction => CLAY_TOP_TO_BOTTOM,
         },
         background_color => [245, 246, 250, 255],
-        children => [
-            Clay::UI::Box->new(
-                id => 'header',
-                layout => {
-                    sizing          => { width => sizing_grow(), height => sizing_fixed(48) },
-                    padding         => padding_all(12),
-                    child_alignment => { x => CLAY_ALIGN_X_LEFT, y => CLAY_ALIGN_Y_CENTER },
-                },
-                background_color => [50, 100, 200, 255],
-                corner_radius    => 6,
-                children         => [ label("Clay -> PNG demo", 20) ],
-            ),
-            Clay::UI::Box->new(
-                id => 'body',
-                layout => {
-                    sizing    => { width => sizing_grow(), height => sizing_grow() },
-                    padding   => padding_all(12),
-                    child_gap => 12,
-                },
-                background_color => $WHITE,
-                border_color     => [200, 200, 210, 255],
-                border_width     => 2,
-                corner_radius    => 6,
-                children         => \@cards,
-            ),
-        ],
     );
+    $root->add_child($header, $body);
+    return $root;
 }
 
 my $ui = Clay::UI->new(

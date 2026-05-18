@@ -33,7 +33,7 @@ sub sidebar_item ($index) {
 }
 
 sub build_tree () {
-	return Clay::UI::Box->new(
+	my $outer = Clay::UI::Box->new(
 		id => 'OuterContainer',
 		layout => {
 			sizing    => { width => sizing_grow(), height => sizing_grow() },
@@ -41,48 +41,52 @@ sub build_tree () {
 			child_gap => 16,
 		},
 		background_color => [250, 250, 255, 255],
-		children => [
-			Clay::UI::Box->new(
-				id => 'SideBar',
-				layout => {
-					layout_direction => CLAY_TOP_TO_BOTTOM,
-					sizing           => { width => sizing_fixed(300), height => sizing_grow() },
-					padding          => padding_all(16),
-					child_gap        => 16,
-				},
-				background_color => $COLOR_LIGHT,
-				children => [
-					Clay::UI::Box->new(
-						id => 'ProfilePictureOuter',
-						layout => {
-							sizing          => { width => sizing_grow() },
-							padding         => padding_all(16),
-							child_gap       => 16,
-							child_alignment => { x => CLAY_ALIGN_X_LEFT, y => CLAY_ALIGN_Y_CENTER },
-						},
-						background_color => $COLOR_RED,
-						children => [
-							Clay::UI::Box->new(
-								id     => 'ProfilePicture',
-								layout => { sizing => { width => sizing_fixed(60), height => sizing_fixed(60) } },
-							),
-							Clay::UI::Text->new(
-								text       => 'Clay - UI Library',
-								font_size  => 24,
-								text_color => [255, 255, 255, 255],
-							),
-						],
-					),
-					map { sidebar_item($_) } 0 .. 4,
-				],
-			),
-			Clay::UI::Box->new(
-				id => 'MainContent',
-				layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
-				background_color => $COLOR_LIGHT,
-			),
-		],
 	);
+
+	my $sidebar = Clay::UI::Box->new(
+		id => 'SideBar',
+		layout => {
+			layout_direction => CLAY_TOP_TO_BOTTOM,
+			sizing           => { width => sizing_fixed(300), height => sizing_grow() },
+			padding          => padding_all(16),
+			child_gap        => 16,
+		},
+		background_color => $COLOR_LIGHT,
+	);
+
+	my $profile_outer = Clay::UI::Box->new(
+		id => 'ProfilePictureOuter',
+		layout => {
+			sizing          => { width => sizing_grow() },
+			padding         => padding_all(16),
+			child_gap       => 16,
+			child_alignment => { x => CLAY_ALIGN_X_LEFT, y => CLAY_ALIGN_Y_CENTER },
+		},
+		background_color => $COLOR_RED,
+	);
+	$profile_outer->add_child(
+		Clay::UI::Box->new(
+			id     => 'ProfilePicture',
+			layout => { sizing => { width => sizing_fixed(60), height => sizing_fixed(60) } },
+		),
+		Clay::UI::Text->new(
+			text       => 'Clay - UI Library',
+			font_size  => 24,
+			text_color => [255, 255, 255, 255],
+		),
+	);
+
+	$sidebar->add_child($profile_outer);
+	$sidebar->add_child(sidebar_item($_)) for 0 .. 4;
+
+	my $main = Clay::UI::Box->new(
+		id => 'MainContent',
+		layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+		background_color => $COLOR_LIGHT,
+	);
+
+	$outer->add_child($sidebar, $main);
+	return $outer;
 }
 
 my $ui = Clay::UI->new(

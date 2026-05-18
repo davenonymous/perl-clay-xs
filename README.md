@@ -73,17 +73,17 @@ use Clay::UI;
 use Clay::UI::Box;
 use Clay::UI::Text;
 
-Clay_BeginLayout();
-Clay::UI::layout(
-    Clay::UI::Box->new(
-        id               => 'root',
-        layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
-        background_color => [240, 240, 240, 255],
-        children         => [
-            Clay::UI::Text->new( text => 'hello', font_size => 18, text_color => [0, 0, 0, 255] ),
-        ],
-    ),
+my $root = Clay::UI::Box->new(
+    id               => 'root',
+    layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+    background_color => [240, 240, 240, 255],
 );
+$root->add_child(
+    Clay::UI::Text->new( text => 'hello', font_size => 18, text_color => [0, 0, 0, 255] ),
+);
+
+Clay_BeginLayout();
+Clay::UI::layout($root);
 my $cmds = Clay_EndLayout(0);
 ```
 
@@ -98,26 +98,21 @@ above.
 
 `Clay::UI::Grid` builds row-major grids whose columns shrink-wrap to
 their widest cell and rows to their tallest, in a single layout pass
-(no two-pass measure, first-frame correct). Pass `Clay::UI::Grid::Cell`
-instances for styled cells; the Grid auto-wraps non-Cell widgets:
+(no two-pass measure, first-frame correct). Populate rows with
+`append_row`; pass `Clay::UI::Grid::Cell` instances for styled cells,
+or any other widget to have it auto-wrapped in an unstyled cell:
 
 ```perl
 use Clay::UI::Grid;
 use Clay::UI::Grid::Cell;
 use Clay::UI::Text;
 
-my $grid = Clay::UI::Grid->new(
-    id   => 'report',
-    rows => [
-        [ Clay::UI::Grid::Cell->new(
-              background_color => [55, 90, 140, 255],
-              children         => [ Clay::UI::Text->new(text => 'Header') ],
-          ),
-          Clay::UI::Text->new(text => 'Value'),  # auto-wrapped
-        ],
-        # ...more rows...
-    ],
-);
+my $header = Clay::UI::Grid::Cell->new(background_color => [55, 90, 140, 255]);
+$header->add_child(Clay::UI::Text->new(text => 'Header'));
+
+my $grid = Clay::UI::Grid->new(id => 'report');
+$grid->append_row([ $header, Clay::UI::Text->new(text => 'Value') ]);
+# ...more append_row calls...
 ```
 
 Every widget (not just grid cells) accepts `width_group => N` /

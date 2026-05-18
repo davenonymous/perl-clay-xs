@@ -64,16 +64,15 @@ subtest 'single node' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'parent with children' => sub {
-	my $ui = make_ui(
-		TestWidget->new(
-			id       => 'parent',
-			bg       => [10, 20, 30, 255],
-			children => [
-				TestWidget->new( bg => [200, 100, 50, 255] ),
-				TestWidget->new( bg => [50, 100, 200, 255] ),
-			],
-		),
+	my $parent = TestWidget->new(
+		id => 'parent',
+		bg => [10, 20, 30, 255],
 	);
+	$parent->add_child(
+		TestWidget->new( bg => [200, 100, 50, 255] ),
+		TestWidget->new( bg => [50, 100, 200, 255] ),
+	);
+	my $ui = make_ui($parent);
 	my $cmds = $ui->render;
 
 	my @rects = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @$cmds;

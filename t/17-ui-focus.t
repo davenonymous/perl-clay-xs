@@ -49,7 +49,8 @@ class TestOverride
 
 # Helper: build a UI with a box that contains the given children.
 sub make_ui (@children) {
-	my $root = Clay::UI::Box->new(id => 'root', children => [@children]);
+	my $root = Clay::UI::Box->new(id => 'root');
+	$root->add_child(@children) if @children;
 	return Clay::UI->new(root => $root, width => 100, height => 100);
 }
 
@@ -231,9 +232,11 @@ subtest 'widgets with can_focus == 0 are skipped' => sub {
 
 subtest 'default order is depth-first (children before next sibling)' => sub {
 	my $deep = TestInput->new(id => 'deep');
-	my $a    = Clay::UI::Box->new(id => 'a', children => [$deep]);
+	my $a    = Clay::UI::Box->new(id => 'a');
+	$a->add_child($deep);
 	my $b    = TestInput->new(id => 'b');
-	my $root = Clay::UI::Box->new(id => 'root', children => [$a, $b]);
+	my $root = Clay::UI::Box->new(id => 'root');
+	$root->add_child($a, $b);
 	my $ui   = Clay::UI->new(root => $root, width => 100, height => 100);
 
 	$ui->focus_next;
@@ -251,8 +254,10 @@ subtest 'HasFocusOrder takes over when ancestor of focused widget' => sub {
 	my $b       = TestInput->new(id => 'b');
 	my $target  = TestInput->new(id => 'target');
 	# Container's subtree contains $a; the override always jumps to $target first.
-	my $override = TestOverride->new(id => 'ov', target => $target, children => [$a]);
-	my $root    = Clay::UI::Box->new(id => 'root', children => [$override, $b, $target]);
+	my $override = TestOverride->new(id => 'ov', target => $target);
+	$override->add_child($a);
+	my $root    = Clay::UI::Box->new(id => 'root');
+	$root->add_child($override, $b, $target);
 	my $ui      = Clay::UI->new(root => $root, width => 100, height => 100);
 
 	# Focus $a (inside the override subtree)
@@ -265,8 +270,10 @@ subtest 'default_next_focus helper returns what default order would say' => sub 
 	my $a       = TestInput->new(id => 'a');
 	my $b       = TestInput->new(id => 'b');
 	my $target  = TestInput->new(id => 'target');
-	my $override = TestOverride->new(id => 'ov', target => $target, children => [$a]);
-	my $root    = Clay::UI::Box->new(id => 'root', children => [$override, $b, $target]);
+	my $override = TestOverride->new(id => 'ov', target => $target);
+	$override->add_child($a);
+	my $root    = Clay::UI::Box->new(id => 'root');
+	$root->add_child($override, $b, $target);
 	my $ui      = Clay::UI->new(root => $root, width => 100, height => 100);
 
 	# Focus $target so the override decides to defer to default_next_focus.

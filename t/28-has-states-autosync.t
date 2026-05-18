@@ -40,7 +40,8 @@ class TestImplicitWidget
 {}
 
 sub make_ui ($child) {
-	my $root = Clay::UI::Box->new(id => 'root', children => [$child]);
+	my $root = Clay::UI::Box->new(id => 'root');
+	$root->add_child($child);
 	return Clay::UI->new(
 		width        => 400,
 		height       => 300,

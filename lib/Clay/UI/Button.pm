@@ -43,9 +43,9 @@ Clay::UI::Button - clickable, hover-aware widget driven by the event system
 		layout           => { sizing => { width => sizing_fixed(120), height => sizing_fixed(40) } },
 		background_color => [70, 130, 200, 255],
 		corner_radius    => 4,
-		children         => [
-			Clay::UI::Text->new( text => 'Submit', text_color => [255, 255, 255, 255] ),
-		],
+	);
+	$btn->add_child(
+		Clay::UI::Text->new( text => 'Submit', text_color => [255, 255, 255, 255] ),
 	);
 
 	$btn->on('OnPress',         sub ($e) { warn "clicked" });

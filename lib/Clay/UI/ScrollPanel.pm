@@ -50,8 +50,8 @@ Clay::UI::ScrollPanel - scrollable container widget for Clay::UI
 		id         => 'log-view',
 		vertical   => 1,
 		layout     => { sizing => { width => sizing_grow(), height => sizing_fixed(300) } },
-		children   => [ ... ],
 	);
+	$panel->add_child($log_entry, $more_entries);
 
 =head1 DESCRIPTION
 

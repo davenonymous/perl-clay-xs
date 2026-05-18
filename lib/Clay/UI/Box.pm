@@ -48,8 +48,8 @@ Clay::UI::Box - styled container widget for Clay::UI
 		corner_radius    => 6,
 		border_color     => [80, 80, 80, 255],
 		border_width     => 1,
-		children         => [ ... ],
 	);
+	$box->add_child($child_widget, $another_child);
 
 =head1 DESCRIPTION
 

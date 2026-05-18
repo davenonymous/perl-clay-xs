@@ -13,21 +13,14 @@ use Clay::UI::Box;
 use Clay::UI::Text;
 
 # -----------------------------------------------------------------------------
-# Constructor-time stamping: children passed via `children => [...]` get
-# their parent slot filled before the caller ever sees the tree.
+# Parent stamping: children attached via add_child get their parent slot
+# filled before any tree walk runs.
 # -----------------------------------------------------------------------------
 
 subtest 'root widget has no parent and is its own root' => sub {
 	my $root = Clay::UI::Box->new;
 	is($root->parent, undef, 'root parent is undef');
 	same($root->root, $root, 'root->root is itself');
-};
-
-subtest 'children passed at construction are parent-stamped' => sub {
-	my $kid    = Clay::UI::Box->new(id => 'kid');
-	my $parent = Clay::UI::Box->new(id => 'parent', children => [$kid]);
-	same($kid->parent, $parent, 'child parent points at constructor parent');
-	same($kid->root,   $parent, 'child root resolves to the parent');
 };
 
 subtest 'children added via add_child are parent-stamped' => sub {
@@ -40,7 +33,8 @@ subtest 'children added via add_child are parent-stamped' => sub {
 
 subtest 'TextNode children are parent-stamped too' => sub {
 	my $text = Clay::UI::Text->new(text => 'hi');
-	my $box  = Clay::UI::Box->new(children => [$text]);
+	my $box  = Clay::UI::Box->new;
+	$box->add_child($text);
 	same($text->parent, $box, 'text node parent set');
 	same($text->root,   $box, 'text node root resolves');
 };
@@ -51,9 +45,12 @@ subtest 'TextNode children are parent-stamped too' => sub {
 
 subtest 'root walks a multi-level chain' => sub {
 	my $leaf = Clay::UI::Box->new(id => 'leaf');
-	my $b    = Clay::UI::Box->new(id => 'b', children => [$leaf]);
-	my $a    = Clay::UI::Box->new(id => 'a', children => [$b]);
-	my $root = Clay::UI::Box->new(id => 'r', children => [$a]);
+	my $b    = Clay::UI::Box->new(id => 'b');
+	$b->add_child($leaf);
+	my $a    = Clay::UI::Box->new(id => 'a');
+	$a->add_child($b);
+	my $root = Clay::UI::Box->new(id => 'r');
+	$root->add_child($a);
 	same($leaf->root, $root, 'leaf->root reaches the top');
 	same($b->root,    $root, 'mid-chain->root reaches the top');
 	same($a->root,    $root, 'one-from-top->root reaches the top');
@@ -65,7 +62,8 @@ subtest 'root walks a multi-level chain' => sub {
 
 subtest 'adding an already-parented widget to a second parent dies' => sub {
 	my $kid = Clay::UI::Box->new(id => 'k');
-	my $p1  = Clay::UI::Box->new(children => [$kid]);
+	my $p1  = Clay::UI::Box->new;
+	$p1->add_child($kid);
 	my $p2  = Clay::UI::Box->new;
 	like(
 		dies { $p2->add_child($kid) },
@@ -79,7 +77,8 @@ subtest 'adding the same widget twice to the same parent also dies' => sub {
 	# write-once, no exceptions. Idempotent-builder patterns must build
 	# fresh widgets per call rather than re-attaching cached ones.
 	my $kid = Clay::UI::Box->new(id => 'k');
-	my $p   = Clay::UI::Box->new(children => [$kid]);
+	my $p   = Clay::UI::Box->new;
+	$p->add_child($kid);
 	like(
 		dies { $p->add_child($kid) },
 		qr/no reparenting/,
@@ -92,7 +91,8 @@ subtest 'remove_child leaves the parent slot intact (permanent brick)' => sub {
 	# still set, so they can never be attached anywhere else. Build a
 	# fresh widget per mount instead of reusing.
 	my $kid = Clay::UI::Box->new(id => 'k');
-	my $p1  = Clay::UI::Box->new(children => [$kid]);
+	my $p1  = Clay::UI::Box->new;
+	$p1->add_child($kid);
 	$p1->remove_child('k');
 	same($kid->parent, $p1, 'parent slot survives remove_child');
 	my $p2 = Clay::UI::Box->new;
@@ -110,7 +110,8 @@ subtest 'remove_child leaves the parent slot intact (permanent brick)' => sub {
 subtest 'parent slot is a weak reference' => sub {
 	my $kid;
 	{
-		my $parent = Clay::UI::Box->new(children => [Clay::UI::Box->new(id => 'k')]);
+		my $parent = Clay::UI::Box->new;
+		$parent->add_child(Clay::UI::Box->new(id => 'k'));
 		($kid) = @{ $parent->children };
 		same($kid->parent, $parent, 'parent set inside scope');
 	}
@@ -122,15 +123,10 @@ subtest 'parent slot is a weak reference' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Non-widget children still rejected (validation preserved across refactor).
+# Non-widget children still rejected at add_child.
 # -----------------------------------------------------------------------------
 
-subtest 'non-widget children are rejected at both call sites' => sub {
-	like(
-		dies { Clay::UI::Box->new(children => ['not a widget']) },
-		qr/not a widget/,
-		'constructor rejects non-widgets',
-	);
+subtest 'non-widget children are rejected by add_child' => sub {
 	my $p = Clay::UI::Box->new;
 	like(
 		dies { $p->add_child('not a widget') },
@@ -151,8 +147,10 @@ subtest 'unattached widget ui() is undef' => sub {
 
 subtest 'Clay::UI stamps itself on the root; descendants reach it via ui()' => sub {
 	my $leaf = Clay::UI::Box->new(id => 'leaf');
-	my $mid  = Clay::UI::Box->new(id => 'mid',  children => [$leaf]);
-	my $root = Clay::UI::Box->new(id => 'root', children => [$mid]);
+	my $mid  = Clay::UI::Box->new(id => 'mid');
+	$mid->add_child($leaf);
+	my $root = Clay::UI::Box->new(id => 'root');
+	$root->add_child($mid);
 	my $ui   = Clay::UI->new(root => $root, width => 100, height => 100);
 
 	same($root->ui, $ui, 'root sees its Clay::UI');

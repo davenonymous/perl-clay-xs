@@ -67,19 +67,18 @@ subtest 'Box with all styling slices' => sub {
 
 subtest 'Text inside a Box' => sub {
 	@errors = ();
-	my $ui = make_ui(
-		Clay::UI::Box->new(
-			id       => 'wrapper',
-			layout   => { sizing => { width => sizing_fixed(200), height => sizing_fixed(50) } },
-			children => [
-				Clay::UI::Text->new(
-					text       => 'hello',
-					font_size  => 16,
-					text_color => [255, 255, 255, 255],
-				),
-			],
+	my $wrapper = Clay::UI::Box->new(
+		id     => 'wrapper',
+		layout => { sizing => { width => sizing_fixed(200), height => sizing_fixed(50) } },
+	);
+	$wrapper->add_child(
+		Clay::UI::Text->new(
+			text       => 'hello',
+			font_size  => 16,
+			text_color => [255, 255, 255, 255],
 		),
 	);
+	my $ui = make_ui($wrapper);
 	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
@@ -244,13 +243,12 @@ subtest 'Button: hover-edge events, press events, live state readers' => sub {
 
 subtest 'bare Text at root' => sub {
 	@errors = ();
-	my $ui = make_ui(
-		Clay::UI::Box->new(
-			id => 'root',
-			layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
-			children => [ Clay::UI::Text->new( text => 'standalone' ) ],
-		),
+	my $box = Clay::UI::Box->new(
+		id     => 'root',
+		layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
 	);
+	$box->add_child(Clay::UI::Text->new( text => 'standalone' ));
+	my $ui = make_ui($box);
 	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );

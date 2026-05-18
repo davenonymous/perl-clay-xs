@@ -127,23 +127,25 @@ sub label ($text, $font_size = 16) {
 }
 
 sub header_cell ($text) {
-	return Clay::UI::Grid::Cell->new(
+	my $cell = Clay::UI::Grid::Cell->new(
 		layout           => { padding => { left => 12, right => 12, top => 8, bottom => 8 } },
 		background_color => $HEADER_BG,
 		border_color     => $BORDER,
 		border_width     => 1,
-		children         => [ label($text, 18) ],
 	);
+	$cell->add_child(label($text, 18));
+	return $cell;
 }
 
 sub body_cell ($text, $r) {
-	return Clay::UI::Grid::Cell->new(
+	my $cell = Clay::UI::Grid::Cell->new(
 		layout           => { padding => { left => 12, right => 12, top => 8, bottom => 8 } },
 		background_color => ($r % 2 ? $ALT_BG : $CELL_BG),
 		border_color     => $BORDER,
 		border_width     => 1,
-		children         => [ label($text) ],
 	);
+	$cell->add_child(label($text));
+	return $cell;
 }
 
 my ($W, $H) = (820, 320);
@@ -157,13 +159,17 @@ my @data = (
 );
 
 sub build_tree () {
-	my @rows;
-	push @rows, [ map { header_cell($_) } @{ $data[0] } ];
+	my $grid = Clay::UI::Grid->new(
+		id       => 'Report',
+		cell_gap => 0,
+		row_gap  => 0,
+	);
+	$grid->append_row([ map { header_cell($_) } @{ $data[0] } ]);
 	for my $r (1 .. $#data) {
-		push @rows, [ map { body_cell($_, $r) } @{ $data[$r] } ];
+		$grid->append_row([ map { body_cell($_, $r) } @{ $data[$r] } ]);
 	}
 
-	return Clay::UI::Box->new(
+	my $page = Clay::UI::Box->new(
 		id => 'Page',
 		layout => {
 			sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -172,20 +178,16 @@ sub build_tree () {
 			layout_direction => CLAY_TOP_TO_BOTTOM,
 		},
 		background_color => [22, 26, 32, 255],
-		children => [
-			Clay::UI::Text->new(
-				text       => 'Quarterly numbers (auto-sized grid)',
-				font_size  => 22,
-				text_color => $WHITE,
-			),
-			Clay::UI::Grid->new(
-				id       => 'Report',
-				rows     => \@rows,
-				cell_gap => 0,
-				row_gap  => 0,
-			),
-		],
 	);
+	$page->add_child(
+		Clay::UI::Text->new(
+			text       => 'Quarterly numbers (auto-sized grid)',
+			font_size  => 22,
+			text_color => $WHITE,
+		),
+		$grid,
+	);
+	return $page;
 }
 
 my $ui = Clay::UI->new(

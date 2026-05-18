@@ -56,8 +56,8 @@ subtest 'render commands carry refaddr in userData' => sub {
 		id               => 'root',
 		layout           => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
 		background_color => [40, 50, 60, 255],
-		children         => [ $child_box, $text_leaf ],
 	);
+	$root->add_child($child_box, $text_leaf);
 
 	my $ui   = make_ui($root);
 	my $cmds = $ui->render;
@@ -99,8 +99,8 @@ subtest 'get_hovered returns widget objects' => sub {
 	my $root = Clay::UI::Box->new(
 		id       => 'root',
 		layout   => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
-		children => [ $child_box ],
 	);
+	$root->add_child($child_box);
 
 	my $ui = make_ui($root);
 	$ui->render;  # warm-up frame
