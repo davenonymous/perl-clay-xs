@@ -403,7 +403,9 @@ Clay::UI - Perl-idiomatic high-level layer over Clay::XS
 	use Clay::UI;
 	use Clay::UI::Box;
 
-	my $root = Clay::UI::Box->new(
+	class My::Box :does(Clay::UI::Box) {}
+
+	my $root = My::Box->new(
 		id               => 'root',
 		layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
 		background_color => [40, 50, 60, 255],

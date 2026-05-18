@@ -5,8 +5,10 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
-use Clay::UI::Box;
-use Clay::UI::Text;
+use lib "t/lib";
+
+use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
 use Clay::UI::Enum::Bubble;
 use Clay::UI::Enum::Result;
 use Clay::UI::Events::Event;
@@ -56,7 +58,7 @@ subtest 'event_name default propagates to name' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'handler fires with target == current_target on the firer' => sub {
-	my $box = Clay::UI::Box->new( id => 'b' );
+	my $box = Clay::UI::Test::Box->new( id => 'b' );
 	my @calls;
 	$box->on('OnPress', sub ($e) {
 		push @calls, { target => $e->target, current => $e->current_target };
@@ -74,10 +76,10 @@ subtest 'handler fires with target == current_target on the firer' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'ALWAYS visits every ancestor' => sub {
-	my $leaf  = Clay::UI::Box->new( id => 'leaf' );
-	my $mid   = Clay::UI::Box->new( id => 'mid'  );
+	my $leaf  = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $mid   = Clay::UI::Test::Box->new( id => 'mid'  );
 	$mid->add_child($leaf);
-	my $root  = Clay::UI::Box->new( id => 'root' );
+	my $root  = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($mid);
 
 	my @hit_ids;
@@ -99,8 +101,8 @@ subtest 'all handlers on the firing node fire even when one returns HANDLED' => 
 	# Per-node, not per-handler: a sibling returning HANDLED must not skip
 	# later handlers at the SAME node. The stop decision applies at the
 	# node boundary, after the handler list is exhausted.
-	my $leaf = Clay::UI::Box->new( id => 'leaf' );
-	my $root = Clay::UI::Box->new( id => 'root' );
+	my $leaf = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $root = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($leaf);
 
 	my @order;
@@ -121,10 +123,10 @@ subtest 'all handlers on the firing node fire even when one returns HANDLED' => 
 };
 
 subtest 'IF_CONTINUE stops on HANDLED' => sub {
-	my $leaf  = Clay::UI::Box->new( id => 'leaf' );
-	my $mid   = Clay::UI::Box->new( id => 'mid'  );
+	my $leaf  = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $mid   = Clay::UI::Test::Box->new( id => 'mid'  );
 	$mid->add_child($leaf);
-	my $root  = Clay::UI::Box->new( id => 'root' );
+	my $root  = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($mid);
 
 	my @hit_ids;
@@ -140,8 +142,8 @@ subtest 'IF_CONTINUE stops on HANDLED' => sub {
 };
 
 subtest 'IF_CONTINUE: undef return halts as HANDLED' => sub {
-	my $leaf = Clay::UI::Box->new( id => 'leaf' );
-	my $root = Clay::UI::Box->new( id => 'root' );
+	my $leaf = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $root = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($leaf);
 
 	my @hits;
@@ -158,8 +160,8 @@ subtest 'IF_CONTINUE: undef return halts as HANDLED' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'NEVER stays on firer' => sub {
-	my $leaf = Clay::UI::Box->new( id => 'leaf' );
-	my $root = Clay::UI::Box->new( id => 'root' );
+	my $leaf = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $root = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($leaf);
 
 	my @hits;
@@ -178,8 +180,8 @@ subtest 'NEVER stays on firer' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'current_target updates per hop; target is immutable' => sub {
-	my $leaf = Clay::UI::Box->new( id => 'leaf' );
-	my $root = Clay::UI::Box->new( id => 'root' );
+	my $leaf = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $root = Clay::UI::Test::Box->new( id => 'root' );
 	$root->add_child($leaf);
 
 	my @observations;
@@ -205,7 +207,7 @@ subtest 'current_target updates per hop; target is immutable' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'event objects are single-use' => sub {
-	my $box = Clay::UI::Box->new;
+	my $box = Clay::UI::Test::Box->new;
 	my $event = Clay::UI::Events::OnPress->new;
 
 	$box->fire_event($event);
@@ -222,7 +224,7 @@ subtest 'event objects are single-use' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'multiple handlers fire in registration order' => sub {
-	my $box = Clay::UI::Box->new;
+	my $box = Clay::UI::Test::Box->new;
 	my @order;
 	$box->on('Ping', sub { push @order, 'first' });
 	$box->on('Ping', sub { push @order, 'second' });
@@ -238,13 +240,13 @@ subtest 'multiple handlers fire in registration order' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'on() rejects bad inputs' => sub {
-	my $box = Clay::UI::Box->new;
+	my $box = Clay::UI::Test::Box->new;
 	like( dies { $box->on('', sub { }) },        qr/non-empty string/, 'empty event name' );
 	like( dies { $box->on('X', 'nope') },        qr/coderef/,          'non-coderef handler' );
 };
 
 subtest 'fire_event() rejects non-event arg' => sub {
-	my $box = Clay::UI::Box->new;
+	my $box = Clay::UI::Test::Box->new;
 	like( dies { $box->fire_event("not an event") }, qr/Clay::UI::Events::Event/,
 	      'fire_event rejects non-event' );
 };
@@ -258,10 +260,10 @@ subtest 'Listener/Emitter split: Text listens, Box emits' => sub {
 	# Emitter half is composed only into widgets that originate events
 	# (Box). A Box firing an event bubbling up the tree reaches
 	# Text listeners on its ancestors - but a Text leaf cannot fire one.
-	my $inner = Clay::UI::Box->new(id => 'inner');
-	my $outer = Clay::UI::Box->new(id => 'outer');
+	my $inner = Clay::UI::Test::Box->new(id => 'inner');
+	my $outer = Clay::UI::Test::Box->new(id => 'outer');
 	$outer->add_child($inner);
-	my $text  = Clay::UI::Text->new(text => 'hi');
+	my $text  = Clay::UI::Test::Text->new(text => 'hi');
 
 	ok( $inner->can('fire_event'), 'Box exposes fire_event' );
 	ok(!$text->can('fire_event'),  'Text does NOT expose fire_event' );

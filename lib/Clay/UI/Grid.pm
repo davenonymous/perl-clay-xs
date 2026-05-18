@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::XS qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
-use Clay::UI::Box;
+use Clay::UI::Grid::Row;
 use Clay::UI::Grid::Cell;
 use Clay::UI::Role::Core::Element;
 use Clay::UI::Role::Layout::HasLayout;
@@ -56,7 +56,7 @@ sub _pack_group_id ($grid_id, $local) {
 	return ($grid_id << _LOCAL_BITS) | $local;
 }
 
-class Clay::UI::Grid
+role Clay::UI::Grid
 	:does(Clay::UI::Role::Core::Element)
 	:does(Clay::UI::Role::Layout::HasLayout)
 	:does(Clay::UI::Role::Style::HasBackground)
@@ -141,7 +141,7 @@ class Clay::UI::Grid
 		}
 		$cell_wrappers->[$r] = \@wrappers;
 
-		my $row_box = Clay::UI::Box->new(
+		my $row_box = Clay::UI::Grid::Row->new(
 			layout => {
 				sizing           => { width => sizing_fit(), height => sizing_fit() },
 				layout_direction => CLAY_LEFT_TO_RIGHT,
@@ -204,7 +204,7 @@ class Clay::UI::Grid
 			push @wrappers, $self->_wrap_cell($row_cells->[$c], $c, $row_height_id);
 		}
 
-		my $row_box = Clay::UI::Box->new(
+		my $row_box = Clay::UI::Grid::Row->new(
 			layout => {
 				sizing           => { width => sizing_fit(), height => sizing_fit() },
 				layout_direction => CLAY_LEFT_TO_RIGHT,
@@ -280,28 +280,32 @@ Clay::UI::Grid - auto-sized grid/table widget for Clay::UI
 
 =head1 SYNOPSIS
 
+	use Object::Pad;
 	use Clay::UI::Grid;
 	use Clay::UI::Text;
 
-	my $grid = Clay::UI::Grid->new(
+	class My::Grid :does(Clay::UI::Grid) {}
+	class My::Text :does(Clay::UI::Text) {}
+
+	my $grid = My::Grid->new(
 		id       => 'data',
 		cell_gap => 8,
 		row_gap  => 4,
 	);
 
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'Name'),
-		Clay::UI::Text->new(text => 'Email'),
-		Clay::UI::Text->new(text => 'Role'),
+		My::Text->new(text => 'Name'),
+		My::Text->new(text => 'Email'),
+		My::Text->new(text => 'Role'),
 	]);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'Alice'),
-		Clay::UI::Text->new(text => 'alice@example.com'),
-		Clay::UI::Text->new(text => 'Admin'),
+		My::Text->new(text => 'Alice'),
+		My::Text->new(text => 'alice@example.com'),
+		My::Text->new(text => 'Admin'),
 	]);
 
 	# Mutate further:
-	$grid->set_cell(0, 2, Clay::UI::Text->new(text => 'Title'));
+	$grid->set_cell(0, 2, My::Text->new(text => 'Title'));
 	$grid->remove_row(1);
 
 =head1 DESCRIPTION

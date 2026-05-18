@@ -5,10 +5,12 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
-use Clay::UI::Text;
+use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
 
 use Object::Pad;
 use Clay::UI::Role::Core::Stateful;
@@ -51,7 +53,7 @@ sub make_ui ($root) {
 subtest 'Box with all styling slices' => sub {
 	@errors = ();
 	my $ui = make_ui(
-		Clay::UI::Box->new(
+		Clay::UI::Test::Box->new(
 			id               => 'styled',
 			layout           => {
 				sizing  => { width => sizing_fixed(200), height => sizing_fixed(100) },
@@ -83,12 +85,12 @@ subtest 'Box with all styling slices' => sub {
 
 subtest 'Text inside a Box' => sub {
 	@errors = ();
-	my $wrapper = Clay::UI::Box->new(
+	my $wrapper = Clay::UI::Test::Box->new(
 		id     => 'wrapper',
 		layout => { sizing => { width => sizing_fixed(200), height => sizing_fixed(50) } },
 	);
 	$wrapper->add_child(
-		Clay::UI::Text->new(
+		Clay::UI::Test::Text->new(
 			text       => 'hello',
 			font_size  => 16,
 			text_color => [255, 255, 255, 255],
@@ -259,11 +261,11 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 
 subtest 'bare Text at root' => sub {
 	@errors = ();
-	my $box = Clay::UI::Box->new(
+	my $box = Clay::UI::Test::Box->new(
 		id     => 'root',
 		layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
 	);
-	$box->add_child(Clay::UI::Text->new( text => 'standalone' ));
+	$box->add_child(Clay::UI::Test::Text->new( text => 'standalone' ));
 	my $ui = make_ui($box);
 	my $cmds = $ui->render;
 

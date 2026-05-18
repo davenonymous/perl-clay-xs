@@ -14,14 +14,16 @@
 use v5.22;
 use warnings;
 use feature 'signatures';
+
+use lib "examples/lib";
 no warnings 'experimental::signatures';
 
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
+use Clay::UI::Demo::Box;
 use Clay::UI::Grid::Cell;
-use Clay::UI::Text;
-use Clay::UI::Grid;
+use Clay::UI::Demo::Text;
+use Clay::UI::Demo::Grid;
 
 # ---------------------------------------------------------------------------
 # SVG renderer (lifted from examples/03-svg-render.pl).
@@ -119,7 +121,7 @@ my $BORDER    = [90, 100, 120, 255];
 my $WHITE     = [240, 240, 245, 255];
 
 sub label ($text, $font_size = 16) {
-	return Clay::UI::Text->new(
+	return Clay::UI::Demo::Text->new(
 		text       => $text,
 		font_size  => $font_size,
 		text_color => $WHITE,
@@ -159,7 +161,7 @@ my @data = (
 );
 
 sub build_tree () {
-	my $grid = Clay::UI::Grid->new(
+	my $grid = Clay::UI::Demo::Grid->new(
 		id       => 'Report',
 		cell_gap => 0,
 		row_gap  => 0,
@@ -169,7 +171,7 @@ sub build_tree () {
 		$grid->append_row([ map { body_cell($_, $r) } @{ $data[$r] } ]);
 	}
 
-	my $page = Clay::UI::Box->new(
+	my $page = Clay::UI::Demo::Box->new(
 		id => 'Page',
 		layout => {
 			sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -180,7 +182,7 @@ sub build_tree () {
 		background_color => [22, 26, 32, 255],
 	);
 	$page->add_child(
-		Clay::UI::Text->new(
+		Clay::UI::Demo::Text->new(
 			text       => 'Quarterly numbers (auto-sized grid)',
 			font_size  => 22,
 			text_color => $WHITE,

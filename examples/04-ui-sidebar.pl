@@ -13,19 +13,21 @@
 use v5.22;
 use warnings;
 use feature 'signatures';
+
+use lib "examples/lib";
 no warnings 'experimental::signatures';
 
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
-use Clay::UI::Text;
+use Clay::UI::Demo::Box;
+use Clay::UI::Demo::Text;
 
 my $COLOR_LIGHT  = [224, 215, 210, 255];
 my $COLOR_RED    = [168,  66,  28, 255];
 my $COLOR_ORANGE = [225, 138,  50, 255];
 
 sub sidebar_item ($index) {
-	return Clay::UI::Box->new(
+	return Clay::UI::Demo::Box->new(
 		id               => "SidebarItem-$index",
 		layout           => { sizing => { width => sizing_grow(), height => sizing_fixed(50) } },
 		background_color => $COLOR_ORANGE,
@@ -33,7 +35,7 @@ sub sidebar_item ($index) {
 }
 
 sub build_tree () {
-	my $outer = Clay::UI::Box->new(
+	my $outer = Clay::UI::Demo::Box->new(
 		id => 'OuterContainer',
 		layout => {
 			sizing    => { width => sizing_grow(), height => sizing_grow() },
@@ -43,7 +45,7 @@ sub build_tree () {
 		background_color => [250, 250, 255, 255],
 	);
 
-	my $sidebar = Clay::UI::Box->new(
+	my $sidebar = Clay::UI::Demo::Box->new(
 		id => 'SideBar',
 		layout => {
 			layout_direction => CLAY_TOP_TO_BOTTOM,
@@ -54,7 +56,7 @@ sub build_tree () {
 		background_color => $COLOR_LIGHT,
 	);
 
-	my $profile_outer = Clay::UI::Box->new(
+	my $profile_outer = Clay::UI::Demo::Box->new(
 		id => 'ProfilePictureOuter',
 		layout => {
 			sizing          => { width => sizing_grow() },
@@ -65,11 +67,11 @@ sub build_tree () {
 		background_color => $COLOR_RED,
 	);
 	$profile_outer->add_child(
-		Clay::UI::Box->new(
+		Clay::UI::Demo::Box->new(
 			id     => 'ProfilePicture',
 			layout => { sizing => { width => sizing_fixed(60), height => sizing_fixed(60) } },
 		),
-		Clay::UI::Text->new(
+		Clay::UI::Demo::Text->new(
 			text       => 'Clay - UI Library',
 			font_size  => 24,
 			text_color => [255, 255, 255, 255],
@@ -79,7 +81,7 @@ sub build_tree () {
 	$sidebar->add_child($profile_outer);
 	$sidebar->add_child(sidebar_item($_)) for 0 .. 4;
 
-	my $main = Clay::UI::Box->new(
+	my $main = Clay::UI::Demo::Box->new(
 		id => 'MainContent',
 		layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
 		background_color => $COLOR_LIGHT,

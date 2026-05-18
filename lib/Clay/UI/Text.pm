@@ -11,7 +11,7 @@ use Clay::UI::Role::Core::TextNode;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
+role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 	field $text :param :reader;
 
 	field $font_id         :param :reader = 0;
@@ -42,13 +42,16 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Text - text-leaf widget for Clay::UI
+Clay::UI::Text - text-leaf widget role for Clay::UI
 
 =head1 SYNOPSIS
 
+	use Object::Pad;
 	use Clay::UI::Text;
 
-	my $label = Clay::UI::Text->new(
+	class My::Label :does(Clay::UI::Text) {}
+
+	my $label = My::Label->new(
 		text       => 'Hello, world!',
 		font_size  => 18,
 		text_color => [255, 255, 255, 255],
@@ -59,8 +62,9 @@ Clay::UI::Text - text-leaf widget for Clay::UI
 Text widgets are leaves: the walker calls Clay's
 C<Clay__OpenTextElement> rather than the normal open / configure /
 close trio, and text nodes cannot have children. C<Clay::UI::Text>
-consumes L<Clay::UI::Role::Core::TextNode> so the walker can detect text
-nodes via C<DOES>.
+is a role that composes L<Clay::UI::Role::Core::TextNode> so the walker
+can detect text nodes via C<DOES>. Consume it from a concrete class to
+get an instantiable label widget.
 
 The text-measurement callback installed via
 C<Clay::XS::Clay_SetMeasureTextFunction> is responsible for

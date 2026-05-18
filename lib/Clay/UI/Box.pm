@@ -17,7 +17,7 @@ use Clay::UI::Role::Events::Emitter;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Box
+role Clay::UI::Box
 	:does(Clay::UI::Role::Core::Element)
 	:does(Clay::UI::Role::Layout::HasLayout)
 	:does(Clay::UI::Role::Style::HasBackground)
@@ -33,13 +33,16 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Box - styled container widget for Clay::UI
+Clay::UI::Box - styled container widget role for Clay::UI
 
 =head1 SYNOPSIS
 
+	use Object::Pad;
 	use Clay::UI::Box;
 
-	my $box = Clay::UI::Box->new(
+	class My::Box :does(Clay::UI::Box) {}
+
+	my $box = My::Box->new(
 		id               => 'sidebar',
 		layout           => { sizing => { width => sizing_fixed(200), height => sizing_grow() } },
 		background_color => [40, 50, 60, 255],
@@ -51,13 +54,13 @@ Clay::UI::Box - styled container widget for Clay::UI
 
 =head1 DESCRIPTION
 
-The workhorse styled container. Composes L<Clay::UI::Role::Core::Element>
+The workhorse styled container role. Composes L<Clay::UI::Role::Core::Element>
 with every property mixin: L<HasLayout|Clay::UI::Role::Layout::HasLayout>,
 L<HasBackground|Clay::UI::Role::Style::HasBackground>,
 L<HasBorder|Clay::UI::Role::Style::HasBorder>,
 L<HasCornerRadius|Clay::UI::Role::Style::HasCornerRadius>,
-L<HasFloating|Clay::UI::Role::Layout::HasFloating>. Pass any combination of
-the mixin parameters to the constructor; the inherited C<to_config>
-collects every active slice.
+L<HasFloating|Clay::UI::Role::Layout::HasFloating>. A consumer class
+gains every mixin parameter on its constructor; the inherited
+C<to_config> collects every active slice.
 
 =cut

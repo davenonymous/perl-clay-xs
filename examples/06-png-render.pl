@@ -17,13 +17,15 @@
 use v5.22;
 use warnings;
 use feature 'signatures';
+
+use lib "examples/lib";
 no warnings 'experimental::signatures';
 
 use Imager;
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
-use Clay::UI::Text;
+use Clay::UI::Demo::Box;
+use Clay::UI::Demo::Text;
 
 # ---------------------------------------------------------------------------
 # Font resolution
@@ -158,7 +160,7 @@ my @ALIGN_DEMO = (
 );
 
 sub label ($text, $font_size = 16) {
-    return Clay::UI::Text->new(
+    return Clay::UI::Demo::Text->new(
         text       => $text,
         font_size  => $font_size,
         text_color => $WHITE,
@@ -169,7 +171,7 @@ sub build_tree () {
     my @cards;
     for my $i (0 .. 2) {
         my ($name, $align) = @{ $ALIGN_DEMO[$i] };
-        my $card = Clay::UI::Box->new(
+        my $card = Clay::UI::Demo::Box->new(
             id => "card-$i",
             layout => {
                 sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -182,7 +184,7 @@ sub build_tree () {
         );
         $card->add_child(
             label("card $i ($name)"),
-            Clay::UI::Text->new(
+            Clay::UI::Demo::Text->new(
                 text           => $LOREM,
                 font_size      => 14,
                 text_color     => $WHITE,
@@ -192,7 +194,7 @@ sub build_tree () {
         push @cards, $card;
     }
 
-    my $header = Clay::UI::Box->new(
+    my $header = Clay::UI::Demo::Box->new(
         id => 'header',
         layout => {
             sizing          => { width => sizing_grow(), height => sizing_fixed(48) },
@@ -204,7 +206,7 @@ sub build_tree () {
     );
     $header->add_child(label("Clay -> PNG demo", 20));
 
-    my $body = Clay::UI::Box->new(
+    my $body = Clay::UI::Demo::Box->new(
         id => 'body',
         layout => {
             sizing    => { width => sizing_grow(), height => sizing_grow() },
@@ -218,7 +220,7 @@ sub build_tree () {
     );
     $body->add_child(@cards);
 
-    my $root = Clay::UI::Box->new(
+    my $root = Clay::UI::Demo::Box->new(
         id => 'root',
         layout => {
             sizing           => { width => sizing_grow(), height => sizing_grow() },

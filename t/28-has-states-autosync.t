@@ -5,11 +5,13 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+
 use Clay::XS qw(:all);
 use Object::Pad 0.800;
 
 use Clay::UI;
-use Clay::UI::Box;
+use Clay::UI::Test::Box;
 use Clay::UI::Role::Core::Element;
 use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Role::Interaction::Pressable;
@@ -40,7 +42,7 @@ class TestImplicitWidget
 {}
 
 sub make_ui ($child) {
-	my $root = Clay::UI::Box->new(id => 'root');
+	my $root = Clay::UI::Test::Box->new(id => 'root');
 	$root->add_child($child);
 	return Clay::UI->new(
 		width        => 400,

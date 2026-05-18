@@ -1,0 +1,16 @@
+package Clay::UI::Demo::Grid;
+
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Object::Pad 0.800;
+
+use Clay::UI::Grid;
+
+our $VERSION = '0.01';
+
+class Clay::UI::Demo::Grid :does(Clay::UI::Grid) {}
+
+1;

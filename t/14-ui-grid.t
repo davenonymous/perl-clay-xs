@@ -5,11 +5,13 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
-use Clay::UI::Text;
-use Clay::UI::Grid;
+use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
+use Clay::UI::Test::Grid;
 
 # Deterministic glyph width so the test can predict exact column widths from
 # the test strings without depending on a real font.
@@ -40,25 +42,25 @@ sub make_ui ($root) {
 
 subtest 'columns auto-fit widest cell across rows' => sub {
 	@errors = ();
-	my $grid = Clay::UI::Grid->new(
+	my $grid = Clay::UI::Test::Grid->new(
 		id       => 'grid',
 		cell_gap => 0,
 		row_gap  => 0,
 	);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'A'),         # 1ch
-		Clay::UI::Text->new(text => 'longest'),   # 7ch <- col 1 max
-		Clay::UI::Text->new(text => 'XY'),        # 2ch
+		Clay::UI::Test::Text->new(text => 'A'),         # 1ch
+		Clay::UI::Test::Text->new(text => 'longest'),   # 7ch <- col 1 max
+		Clay::UI::Test::Text->new(text => 'XY'),        # 2ch
 	]);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'BBBB'),      # 4ch <- col 0 max
-		Clay::UI::Text->new(text => 'mid'),       # 3ch
-		Clay::UI::Text->new(text => 'longestZZ'), # 9ch <- col 2 max
+		Clay::UI::Test::Text->new(text => 'BBBB'),      # 4ch <- col 0 max
+		Clay::UI::Test::Text->new(text => 'mid'),       # 3ch
+		Clay::UI::Test::Text->new(text => 'longestZZ'), # 9ch <- col 2 max
 	]);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'C'),         # 1ch
-		Clay::UI::Text->new(text => 'm'),         # 1ch
-		Clay::UI::Text->new(text => 'tiny'),      # 4ch
+		Clay::UI::Test::Text->new(text => 'C'),         # 1ch
+		Clay::UI::Test::Text->new(text => 'm'),         # 1ch
+		Clay::UI::Test::Text->new(text => 'tiny'),      # 4ch
 	]);
 	my $ui = make_ui($grid);
 	my $cmds = $ui->render;
@@ -89,9 +91,9 @@ subtest 'columns auto-fit widest cell across rows' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'Grid assigns sizing_group ids to per-cell wrappers' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'tagging');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'c'), Clay::UI::Text->new(text => 'd') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'tagging');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a'), Clay::UI::Test::Text->new(text => 'b') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'c'), Clay::UI::Test::Text->new(text => 'd') ]);
 	my $w = $grid->cell_wrappers;
 	is( scalar @$w, 2, 'two row wrappers' );
 	is( scalar @{ $w->[0] }, 2, 'first row has two cell wrappers' );
@@ -111,10 +113,10 @@ subtest 'Grid assigns sizing_group ids to per-cell wrappers' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'nested grids use disjoint group-id ranges' => sub {
-	my $inner = Clay::UI::Grid->new(id => 'inner');
-	$inner->append_row([ Clay::UI::Text->new(text => 'i'), Clay::UI::Text->new(text => 'ii') ]);
-	my $outer = Clay::UI::Grid->new(id => 'outer');
-	$outer->append_row([ $inner, Clay::UI::Text->new(text => 'right') ]);
+	my $inner = Clay::UI::Test::Grid->new(id => 'inner');
+	$inner->append_row([ Clay::UI::Test::Text->new(text => 'i'), Clay::UI::Test::Text->new(text => 'ii') ]);
+	my $outer = Clay::UI::Test::Grid->new(id => 'outer');
+	$outer->append_row([ $inner, Clay::UI::Test::Text->new(text => 'right') ]);
 
 	my $inner_w = $inner->cell_wrappers->[0];
 	my $outer_w = $outer->cell_wrappers->[0];
@@ -134,14 +136,14 @@ subtest 'nested grids use disjoint group-id ranges' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'set_cell preserves column/row sizing groups' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'mut-set');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'c'), Clay::UI::Text->new(text => 'd') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'mut-set');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a'), Clay::UI::Test::Text->new(text => 'b') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'c'), Clay::UI::Test::Text->new(text => 'd') ]);
 	my $w = $grid->cell_wrappers;
 	my $col0_w = $w->[0][0]->width_group;
 	my $row0_h = $w->[0][0]->height_group;
 
-	$grid->set_cell(0, 0, Clay::UI::Text->new(text => 'A'));
+	$grid->set_cell(0, 0, Clay::UI::Test::Text->new(text => 'A'));
 	is( $grid->cell_wrappers->[0][0]->width_group,  $col0_w, 'replaced cell keeps column width_group' );
 	is( $grid->cell_wrappers->[0][0]->height_group, $row0_h, 'replaced cell keeps row height_group' );
 	is(
@@ -152,14 +154,14 @@ subtest 'set_cell preserves column/row sizing groups' => sub {
 };
 
 subtest 'append_row extends with fresh height_group and reuses column ids' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'mut-append');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'mut-append');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a'), Clay::UI::Test::Text->new(text => 'b') ]);
 	my $col0_w = $grid->cell_wrappers->[0][0]->width_group;
 	my $row0_h = $grid->cell_wrappers->[0][0]->height_group;
 
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'x'),
-		Clay::UI::Text->new(text => 'y'),
+		Clay::UI::Test::Text->new(text => 'x'),
+		Clay::UI::Test::Text->new(text => 'y'),
 	]);
 	is( scalar @{ $grid->cell_wrappers }, 2, 'two rows after append' );
 	is( $grid->cell_wrappers->[1][0]->width_group, $col0_w, 'new row column 0 reuses width id' );
@@ -172,12 +174,12 @@ subtest 'append_row extends with fresh height_group and reuses column ids' => su
 };
 
 subtest 'append_row widens column-id cache when new row is longer' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'mut-wide');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'mut-wide');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a') ]);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'p'),
-		Clay::UI::Text->new(text => 'q'),
-		Clay::UI::Text->new(text => 'r'),
+		Clay::UI::Test::Text->new(text => 'p'),
+		Clay::UI::Test::Text->new(text => 'q'),
+		Clay::UI::Test::Text->new(text => 'r'),
 	]);
 	my $w = $grid->cell_wrappers->[1];
 	isnt( $w->[0]->width_group, $w->[1]->width_group, 'distinct columns get distinct width ids' );
@@ -185,10 +187,10 @@ subtest 'append_row widens column-id cache when new row is longer' => sub {
 };
 
 subtest 'remove_row drops row and keeps remaining ids intact' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'mut-remove');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'b') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'c') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'mut-remove');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'b') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'c') ]);
 	my $row0_h = $grid->cell_wrappers->[0][0]->height_group;
 	my $row2_h = $grid->cell_wrappers->[2][0]->height_group;
 
@@ -199,13 +201,13 @@ subtest 'remove_row drops row and keeps remaining ids intact' => sub {
 };
 
 subtest 'replace_row reuses existing height_group' => sub {
-	my $grid = Clay::UI::Grid->new(id => 'mut-replace');
-	$grid->append_row([ Clay::UI::Text->new(text => 'a'), Clay::UI::Text->new(text => 'b') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'c'), Clay::UI::Text->new(text => 'd') ]);
+	my $grid = Clay::UI::Test::Grid->new(id => 'mut-replace');
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a'), Clay::UI::Test::Text->new(text => 'b') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'c'), Clay::UI::Test::Text->new(text => 'd') ]);
 	my $row1_h = $grid->cell_wrappers->[1][0]->height_group;
 	$grid->replace_row(1, [
-		Clay::UI::Text->new(text => 'X'),
-		Clay::UI::Text->new(text => 'Y'),
+		Clay::UI::Test::Text->new(text => 'X'),
+		Clay::UI::Test::Text->new(text => 'Y'),
 	]);
 	is( $grid->cell_wrappers->[1][0]->height_group, $row1_h, 'row 1 height id preserved on replace' );
 	is(
@@ -217,16 +219,16 @@ subtest 'replace_row reuses existing height_group' => sub {
 
 subtest 'mutated grid renders correctly' => sub {
 	@errors = ();
-	my $grid = Clay::UI::Grid->new(
+	my $grid = Clay::UI::Test::Grid->new(
 		id       => 'mut-render',
 		cell_gap => 0,
 		row_gap  => 0,
 	);
-	$grid->append_row([ Clay::UI::Text->new(text => 'A'),    Clay::UI::Text->new(text => 'BB') ]);
-	$grid->append_row([ Clay::UI::Text->new(text => 'CCC'),  Clay::UI::Text->new(text => 'D') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'A'),    Clay::UI::Test::Text->new(text => 'BB') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'CCC'),  Clay::UI::Test::Text->new(text => 'D') ]);
 	$grid->append_row([
-		Clay::UI::Text->new(text => 'EEEEE'),    # 5ch, widens col 0
-		Clay::UI::Text->new(text => 'FF'),
+		Clay::UI::Test::Text->new(text => 'EEEEE'),    # 5ch, widens col 0
+		Clay::UI::Test::Text->new(text => 'FF'),
 	]);
 	my $ui   = make_ui($grid);
 	my $cmds = $ui->render;
@@ -251,15 +253,15 @@ subtest 'grid-id is recycled on destruction' => sub {
 	# Hold references so the grids do not get GC'd prematurely.
 	my @grids;
 	for my $i (1 .. 10) {
-		my $g = Clay::UI::Grid->new(id => "g$i");
-		$g->append_row([ Clay::UI::Text->new(text => 'x') ]);
+		my $g = Clay::UI::Test::Grid->new(id => "g$i");
+		$g->append_row([ Clay::UI::Test::Text->new(text => 'x') ]);
 		push @grids, $g;
 	}
 	# Destroying a grid should free its grid-id back to the pool.
 	my $before = $grids[5]->cell_wrappers->[0][0]->width_group;
 	$grids[5] = undef;   # release one slot
-	my $fresh = Clay::UI::Grid->new(id => 'replacement');
-	$fresh->append_row([ Clay::UI::Text->new(text => 'y') ]);
+	my $fresh = Clay::UI::Test::Grid->new(id => 'replacement');
+	$fresh->append_row([ Clay::UI::Test::Text->new(text => 'y') ]);
 	ok( defined $fresh, 'allocated a grid after releasing one' );
 	# The freed grid-id is the most recently freed, so the free-list pops it
 	# for the next claim. Confirm by comparing the high bits of the new

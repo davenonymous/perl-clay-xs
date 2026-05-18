@@ -5,12 +5,14 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+
 use Scalar::Util qw(refaddr);
 
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Box;
-use Clay::UI::Text;
+use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
 
 use Object::Pad;
 use Clay::UI::Role::Core::Element;
@@ -45,14 +47,14 @@ sub make_ui ($root) {
 subtest 'render commands carry refaddr in userData' => sub {
 	@errors = ();
 
-	my $child_box = Clay::UI::Box->new(
+	my $child_box = Clay::UI::Test::Box->new(
 		id               => 'child',
 		layout           => { sizing => { width => sizing_fixed(80), height => sizing_fixed(40) } },
 		background_color => [200, 100, 50, 255],
 	);
-	my $text_leaf = Clay::UI::Text->new( text => 'hi', font_size => 16 );
+	my $text_leaf = Clay::UI::Test::Text->new( text => 'hi', font_size => 16 );
 
-	my $root = Clay::UI::Box->new(
+	my $root = Clay::UI::Test::Box->new(
 		id               => 'root',
 		layout           => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
 		background_color => [40, 50, 60, 255],
@@ -91,12 +93,12 @@ subtest 'render commands carry refaddr in userData' => sub {
 subtest 'get_hovered returns widget objects' => sub {
 	@errors = ();
 
-	my $child_box = Clay::UI::Box->new(
+	my $child_box = Clay::UI::Test::Box->new(
 		id               => 'child',
 		layout           => { sizing => { width => sizing_fixed(80), height => sizing_fixed(40) } },
 		background_color => [200, 100, 50, 255],
 	);
-	my $root = Clay::UI::Box->new(
+	my $root = Clay::UI::Test::Box->new(
 		id       => 'root',
 		layout   => { sizing => { width => sizing_fixed(200), height => sizing_fixed(100) } },
 	);

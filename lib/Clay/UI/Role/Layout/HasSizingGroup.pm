@@ -35,14 +35,16 @@ Clay::UI::Role::Layout::HasSizingGroup - cross-tree sizing constraint mixin for 
 
 	# Implicit: composed into Clay::UI::Role::Core::Element, so every widget
 	# already accepts width_group / height_group.
-	Clay::UI::Box->new(
+	class My::Box :does(Clay::UI::Box) {}
+
+	My::Box->new(
 		layout       => { sizing => { width => sizing_fit() } },
 		width_group  => 17,
 	);
 
 	# Two unrelated widgets aligned to a common width.
-	my $a = Clay::UI::Box->new( ..., width_group => 17 );
-	my $b = Clay::UI::Box->new( ..., width_group => 17 );
+	my $a = My::Box->new( ..., width_group => 17 );
+	my $b = My::Box->new( ..., width_group => 17 );
 
 =head1 DESCRIPTION
 

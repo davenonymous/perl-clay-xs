@@ -33,23 +33,27 @@ Clay::UI::Grid::Cell - styled single-cell container for Clay::UI::Grid
 
 =head1 SYNOPSIS
 
+	use Object::Pad;
 	use Clay::UI::Grid;
 	use Clay::UI::Grid::Cell;
 	use Clay::UI::Text;
 
-	my $grid = Clay::UI::Grid->new(id => 'report');
+	class My::Grid :does(Clay::UI::Grid) {}
+	class My::Text :does(Clay::UI::Text) {}
+
+	my $grid = My::Grid->new(id => 'report');
 
 	my $header_cell = Clay::UI::Grid::Cell->new(
 		layout           => { padding => padding_all(8) },
 		background_color => [55, 90, 140, 255],
 	);
-	$header_cell->add_child(Clay::UI::Text->new(text => 'Header'));
+	$header_cell->add_child(My::Text->new(text => 'Header'));
 
 	my $value_cell = Clay::UI::Grid::Cell->new(
 		layout           => { padding => padding_all(8) },
 		background_color => [55, 90, 140, 255],
 	);
-	$value_cell->add_child(Clay::UI::Text->new(text => 'Value'));
+	$value_cell->add_child(My::Text->new(text => 'Value'));
 
 	$grid->append_row([ $header_cell, $value_cell ]);
 	# ...more rows...
