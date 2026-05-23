@@ -6,6 +6,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
+use utf8;
 
 use Scalar::Util qw(blessed refaddr weaken looks_like_number);
 

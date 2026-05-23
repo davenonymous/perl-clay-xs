@@ -14,9 +14,9 @@ our $VERSION = '0.01';
 role Clay::UI::Role::Layout::HasScroll
 	:does(Clay::UI::Role::Core::Stateful)
 {
-	field $horizontal   :param :reader = 0;
-	field $vertical     :param :reader = 1;
-	field $child_offset :param :reader = undef;
+	field $horizontal   :param :accessor = 0;
+	field $vertical     :param :accessor = 1;
+	field $child_offset :param :accessor = undef;
 
 	method contribute_clip ($config) {
 		$config->{clip} = {
@@ -54,7 +54,9 @@ Mixin role that turns a widget into a Clay scroll container. Composes
 L<Clay::UI::Role::Core::Stateful>: an C<id> is mandatory because Clay
 needs a stable address to track scroll state across frames.
 
-Constructor parameters:
+Constructor parameters, each also a read/write accessor (call with no
+argument to read, with one to write; a write takes effect on the next
+C<render>):
 
 =over
 
@@ -69,7 +71,10 @@ Enable vertical scrolling. Defaults to C<1>.
 =item C<child_offset>
 
 Initial C<< { x =E<gt> ..., y =E<gt> ... } >> offset. Defaults to
-C<< { x =E<gt> 0, y =E<gt> 0 } >>.
+C<< { x =E<gt> 0, y =E<gt> 0 } >>. This is a config input only: when you
+drive scrolling via C<Clay_UpdateScrollContainers> (see USAGE NOTES),
+Clay tracks the live offset internally and a Perl-side write here does
+not act as authoritative scroll control.
 
 =back
 

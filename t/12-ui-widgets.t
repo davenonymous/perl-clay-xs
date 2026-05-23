@@ -274,4 +274,42 @@ subtest 'bare Text at root' => sub {
 	ok( defined $txt, 'text leaf rendered' );
 };
 
+# -----------------------------------------------------------------------------
+# Text attributes are mutable post-construction: writes are reflected on the
+# next text_config.
+# -----------------------------------------------------------------------------
+
+subtest 'Text attributes are mutable' => sub {
+	my $label = Clay::UI::Test::Text->new( text => 'hi', font_size => 16 );
+
+	$label->text('updated');
+	$label->font_size(24);
+	$label->text_color([255, 0, 0, 255]);
+	$label->letter_spacing(2);
+
+	is( $label->text, 'updated', 'text accessor reflects write' );
+
+	my $cfg = $label->text_config;
+	is( $cfg->{font_size},      24,              'text_config sees new font_size' );
+	is( $cfg->{text_color},     [255, 0, 0, 255], 'text_config sees new text_color' );
+	is( $cfg->{letter_spacing}, 2,               'text_config sees new letter_spacing' );
+};
+
+# -----------------------------------------------------------------------------
+# HasScroll flags are mutable: writes are reflected in the next clip slice.
+# -----------------------------------------------------------------------------
+
+subtest 'HasScroll attributes are mutable' => sub {
+	my $box = TestScrollBox->new( id => 'scroller', horizontal => 0, vertical => 1 );
+
+	$box->horizontal(1);
+	$box->vertical(0);
+	$box->child_offset({ x => 10, y => 20 });
+
+	my $cfg = $box->to_config;
+	is( $cfg->{clip}{horizontal},   1, 'clip sees new horizontal flag' );
+	is( $cfg->{clip}{vertical},     0, 'clip sees new vertical flag' );
+	is( $cfg->{clip}{child_offset}, { x => 10, y => 20 }, 'clip sees new child_offset' );
+};
+
 done_testing;

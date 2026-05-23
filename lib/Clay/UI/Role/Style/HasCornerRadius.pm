@@ -10,7 +10,7 @@ use Object::Pad 0.800;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Style::HasCornerRadius {
-	field $corner_radius :param :reader = undef;
+	field $corner_radius :param :accessor = undef;
 
 	method contribute_corner_radius ($config) {
 		return unless defined $corner_radius;
@@ -48,5 +48,8 @@ Clay::UI::Role::Style::HasCornerRadius - corner-radius mixin for Clay::UI widget
 
 Mixin role that contributes a C<cornerRadius> slice. Scalar shorthand
 expands to a uniform hashref; pass a hashref for per-corner control.
+
+C<corner_radius> is a read/write accessor: call with no argument to read,
+with one argument to write. A write takes effect on the next C<render>.
 
 =cut

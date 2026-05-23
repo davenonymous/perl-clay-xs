@@ -12,15 +12,15 @@ use Clay::UI::Role::Core::TextNode;
 our $VERSION = '0.01';
 
 role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
-	field $text :param :reader;
+	field $text :param :accessor = '';
 
-	field $font_id         :param :reader = 0;
-	field $font_size       :param :reader = 16;
-	field $text_color      :param :reader = [0, 0, 0, 255];
-	field $letter_spacing  :param :reader = 0;
-	field $line_height     :param :reader = 0;
-	field $wrap_mode       :param :reader = undef;
-	field $text_alignment  :param :reader = undef;
+	field $font_id         :param :accessor = 0;
+	field $font_size       :param :accessor = 16;
+	field $text_color      :param :accessor = [0, 0, 0, 255];
+	field $letter_spacing  :param :accessor = 0;
+	field $line_height     :param :accessor = 0;
+	field $wrap_mode       :param :accessor = undef;
+	field $text_alignment  :param :accessor = undef;
 
 	method text_config {
 		my %cfg = (
@@ -75,7 +75,7 @@ combination.
 
 =over 4
 
-=item C<text> (required)
+=item C<text> (default C<''>)
 
 =item C<font_id> (default C<0>)
 
@@ -93,5 +93,9 @@ combination.
 
 All keys are snake_case; the walker camelizes before handing them to
 L<Clay::XS>.
+
+Every parameter above is also a read/write accessor: call with no argument
+to read, with one argument to write (e.g. C<< $label->text('new') >>,
+C<< $label->font_size(20) >>). A write takes effect on the next C<render>.
 
 =cut

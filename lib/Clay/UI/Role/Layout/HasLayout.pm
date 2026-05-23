@@ -10,10 +10,10 @@ use Object::Pad 0.800;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Layout::HasLayout {
-	field $layout :param :reader = undef;
+	field $layout :param :accessor = {};
 
 	method contribute_layout ($config) {
-		return unless defined $layout;
+		return unless defined $layout && scalar(keys(%$layout)) > 0;
 		$config->{layout} = $layout;
 		return;
 	}
@@ -47,5 +47,9 @@ Clay::UI::Role::Layout::HasLayout - layout config mixin for Clay::UI widgets
 Mixin role that contributes a C<layout> slice to the Clay element
 declaration. Pass any subset of Clay's layout fields; snake_case keys
 will be camelized by the walker before reaching the C binding.
+
+C<layout> is a read/write accessor: call with no argument to read the
+stored hashref, with one argument to replace it. A write takes effect on
+the next C<render>.
 
 =cut

@@ -63,4 +63,9 @@ L<HasFloating|Clay::UI::Role::Layout::HasFloating>. A consumer class
 gains every mixin parameter on its constructor; the inherited
 C<to_config> collects every active slice.
 
+Every mixin attribute (C<layout>, C<background_color>, C<border_color>,
+C<border_width>, C<corner_radius>, C<floating>) is a read/write accessor,
+so a box's styling and layout can be changed after construction; the
+change is picked up on the next C<render>.
+
 =cut

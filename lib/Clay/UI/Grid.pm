@@ -64,7 +64,7 @@ role Clay::UI::Grid
 	:does(Clay::UI::Role::Style::HasCornerRadius)
 {
 	field $cell_gap :param = 0;
-	field $row_gap  :param = 0;
+	field $row_gap  :param :accessor = 0;
 
 	# Per-cell wrappers ([row][col]). For each input cell: if it is already a
 	# Clay::UI::Grid::Cell, it is used directly (so the caller's styling
@@ -150,6 +150,20 @@ role Clay::UI::Grid
 		);
 		$row_box->add_child(@wrappers) if @wrappers;
 		return $row_box;
+	}
+
+	# Combined read/write accessor for the inter-cell gap. Unlike row_gap
+	# (re-read from contribute_grid_defaults on every render), cell_gap is
+	# baked into each row Box's layout child_gap when the row is built
+	# (_build_row_box and insert_row), so a write must rewrite every
+	# existing row box in place. The Grid's children are exactly its row
+	# boxes, so iterating children covers both build paths.
+	method cell_gap (@v) {
+		if (@v) {
+			$cell_gap = $v[0];
+			$_->layout->{child_gap} = $cell_gap for @{ $self->children };
+		}
+		return $cell_gap;
 	}
 
 	method row_count () { return scalar @$cell_wrappers; }
@@ -328,11 +342,19 @@ gap between rows.
 =head2 cell_gap (default 0)
 
 Pixel gap between cells within a row. Forwarded to the row container's
-C<child_gap>.
+C<child_gap>. Read/write accessor: C<< $grid->cell_gap >> reads,
+C<< $grid->cell_gap($px) >> writes. Because the gap is baked into each
+row box when the row is built, a write rewrites every existing row in
+place so the change is visible on the next C<render>.
 
 =head2 row_gap (default 0)
 
 Pixel gap between rows. Used as the outer container's C<child_gap>.
+Read/write accessor: C<< $grid->row_gap >> reads,
+C<< $grid->row_gap($px) >> writes. It is re-read on every C<render>, so a
+write takes effect immediately. Note C<row_gap> only applies to the
+Grid's default outer layout; if a consumer passes an explicit C<layout>,
+that layout's own C<child_gap> wins.
 
 =head1 STYLING CELLS
 

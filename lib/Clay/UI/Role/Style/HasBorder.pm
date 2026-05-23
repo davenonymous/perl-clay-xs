@@ -10,8 +10,8 @@ use Object::Pad 0.800;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Style::HasBorder {
-	field $border_color :param :reader = undef;
-	field $border_width :param :reader = undef;
+	field $border_color :param :accessor = undef;
+	field $border_width :param :accessor = undef;
 
 	method contribute_border ($config) {
 		return unless defined $border_color || defined $border_width;
@@ -60,5 +60,9 @@ declaration. C<border_width> accepts either a scalar (applied to all
 four sides; C<between_children> is hardcoded to 0 - pass an explicit
 hashref if you need to set it) or a hashref with explicit per-side
 values.
+
+C<border_color> and C<border_width> are read/write accessors: call with no
+argument to read, with one argument to write. A write takes effect on the
+next C<render>.
 
 =cut

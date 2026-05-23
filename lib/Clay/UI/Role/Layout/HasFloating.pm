@@ -10,7 +10,7 @@ use Object::Pad 0.800;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Layout::HasFloating {
-	field $floating :param :reader = undef;
+	field $floating :param :accessor = undef;
 
 	method contribute_floating ($config) {
 		return unless defined $floating;
@@ -45,5 +45,8 @@ Clay::UI::Role::Layout::HasFloating - floating-element mixin for Clay::UI widget
 Mixin role that contributes a C<floating> slice to the Clay element
 declaration. Pass any of Clay's floating-element fields; snake_case keys
 are camelized by the walker.
+
+C<floating> is a read/write accessor: call with no argument to read, with
+one argument to write. A write takes effect on the next C<render>.
 
 =cut

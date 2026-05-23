@@ -294,4 +294,42 @@ subtest 'grid-id pool exhaustion dies loudly' => sub {
 	Clay::UI::Grid::_release_grid_id($_) for @held_ids;
 };
 
+# -----------------------------------------------------------------------------
+# row_gap is mutable: it is re-read from contribute_grid_defaults each render,
+# so a write shows up in the Grid's default outer-layout child_gap. The grid
+# must NOT carry an explicit layout, or contribute_grid_defaults short-circuits
+# and row_gap never applies.
+# -----------------------------------------------------------------------------
+
+subtest 'row_gap is mutable' => sub {
+	my $grid = Clay::UI::Test::Grid->new( id => 'rg', row_gap => 2 );
+	is( $grid->to_config->{layout}{child_gap}, 2, 'initial row_gap in default layout' );
+
+	$grid->row_gap(9);
+	is( $grid->row_gap, 9, 'row_gap accessor reflects write' );
+	is( $grid->to_config->{layout}{child_gap}, 9, 'to_config default layout sees new row_gap' );
+};
+
+# -----------------------------------------------------------------------------
+# cell_gap is mutable: it is baked into each row Box's layout child_gap at
+# row-build time, so a write must rewrite every existing row in place.
+# append_row and insert_row both build new row boxes; replace_row reuses the
+# existing box (already in children) and so needs no special handling.
+# -----------------------------------------------------------------------------
+
+subtest 'cell_gap is mutable and rewrites existing rows' => sub {
+	my $grid = Clay::UI::Test::Grid->new( id => 'cg', cell_gap => 3 );
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'a'), Clay::UI::Test::Text->new(text => 'b') ]);
+	$grid->append_row([ Clay::UI::Test::Text->new(text => 'c'), Clay::UI::Test::Text->new(text => 'd') ]);
+	$grid->insert_row(1, [ Clay::UI::Test::Text->new(text => 'e'), Clay::UI::Test::Text->new(text => 'f') ]);
+
+	is( $_->layout->{child_gap}, 3, 'each row built with initial cell_gap' )
+		for @{ $grid->children };
+
+	$grid->cell_gap(12);
+	is( $grid->cell_gap, 12, 'cell_gap accessor reflects write' );
+	is( $_->layout->{child_gap}, 12, 'existing row rewritten to new cell_gap' )
+		for @{ $grid->children };
+};
+
 done_testing;

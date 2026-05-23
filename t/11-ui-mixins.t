@@ -114,4 +114,47 @@ subtest 'unset mixins are silent' => sub {
 	is( $cfg, {}, 'no slices when no fields supplied' );
 };
 
+# -----------------------------------------------------------------------------
+# Mixin attributes are mutable post-construction: a write through the
+# same-named accessor is reflected on the next to_config (config is rebuilt
+# fresh each call, so there is nothing to invalidate).
+# -----------------------------------------------------------------------------
+
+subtest 'mixin attributes are mutable' => sub {
+	my $w = TestKitchenSink->new(
+		layout           => { padding => { left => 1, right => 1, top => 1, bottom => 1 } },
+		background_color => [10, 20, 30, 255],
+		border_color     => [50, 50, 50, 255],
+		border_width     => 1,
+		corner_radius    => 4,
+		floating         => { attach_to => 0 },
+	);
+
+	# Each accessor reads back the constructed value.
+	is( $w->background_color, [10, 20, 30, 255], 'background_color reads initial value' );
+
+	# Writing returns/stores the new value...
+	$w->background_color([99, 0, 0, 255]);
+	$w->border_color([1, 2, 3, 255]);
+	$w->border_width(3);
+	$w->corner_radius(8);
+	$w->layout({ padding => { left => 5, right => 5, top => 5, bottom => 5 } });
+	$w->floating({ attach_to => 2 });
+
+	is( $w->background_color, [99, 0, 0, 255], 'background_color reflects write' );
+
+	# ...and the rebuilt config carries every updated slice.
+	my $cfg = $w->to_config;
+	is( $cfg->{background_color}, [99, 0, 0, 255], 'to_config sees new background_color' );
+	is( $cfg->{border}{color},   [1, 2, 3, 255],   'to_config sees new border_color' );
+	is( $cfg->{border}{width},
+		{ left => 3, right => 3, top => 3, bottom => 3, between_children => 0 },
+		'to_config sees new border_width' );
+	is( $cfg->{corner_radius},
+		{ top_left => 8, top_right => 8, bottom_left => 8, bottom_right => 8 },
+		'to_config sees new corner_radius' );
+	is( $cfg->{layout}{padding}, { left => 5, right => 5, top => 5, bottom => 5 }, 'to_config sees new layout' );
+	is( $cfg->{floating}, { attach_to => 2 }, 'to_config sees new floating' );
+};
+
 done_testing;

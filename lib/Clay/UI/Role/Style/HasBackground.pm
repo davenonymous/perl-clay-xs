@@ -10,7 +10,7 @@ use Object::Pad 0.800;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Style::HasBackground {
-	field $background_color :param :reader = undef;
+	field $background_color :param :accessor = undef;
 
 	method contribute_background ($config) {
 		return unless defined $background_color;
@@ -40,5 +40,9 @@ Clay::UI::Role::Style::HasBackground - background-color mixin for Clay::UI widge
 Mixin role that contributes a C<backgroundColor> slice to the Clay
 element declaration. Value is an arrayref of four 0-255 channel values
 C<[r, g, b, a]>.
+
+C<background_color> is a read/write accessor: C<< $widget->background_color >>
+reads, C<< $widget->background_color([r, g, b, a]) >> writes. A write takes
+effect on the next C<render>.
 
 =cut
