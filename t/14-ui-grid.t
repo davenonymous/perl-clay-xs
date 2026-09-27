@@ -12,6 +12,12 @@ use Clay::UI;
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
 use Clay::UI::Test::Grid;
+use Clay::UI::Grid::Cell;
+use Object::Pad;
+use Object::Pad::MetaFunctions qw(ref_field);
+use Scalar::Util qw(refaddr weaken);
+
+sub text_cell ($text) { Clay::UI::Test::Text->new(text => $text) }
 
 # Deterministic glyph width so the test can predict exact column widths from
 # the test strings without depending on a real font.
@@ -86,8 +92,8 @@ subtest 'columns auto-fit widest cell across rows' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Group ids are assigned by Grid's ADJUST block; cells emerge from
-# construction with width_group / height_group set.
+# Group ids are assigned when a row is added: the cell wrappers carry
+# width_group / height_group.
 # -----------------------------------------------------------------------------
 
 subtest 'Grid assigns sizing_group ids to per-cell wrappers' => sub {
@@ -263,9 +269,9 @@ subtest 'grid-id is recycled on destruction' => sub {
 	my $fresh = Clay::UI::Test::Grid->new(id => 'replacement');
 	$fresh->append_row([ Clay::UI::Test::Text->new(text => 'y') ]);
 	ok( defined $fresh, 'allocated a grid after releasing one' );
-	# The freed grid-id is the most recently freed, so the free-list pops it
-	# for the next claim. Confirm by comparing the high bits of the new
-	# grid's width_group to the freed one's.
+	# The ten grids above used up every free id, so the freed one is the
+	# only id in the pool and the next grid gets it. Compare the high bits
+	# of the new grid's width_group to the freed one's.
 	my $high_bits = sub { $_[0] >> 20 };
 	is(
 		$high_bits->($fresh->cell_wrappers->[0][0]->width_group),
@@ -330,6 +336,130 @@ subtest 'cell_gap is mutable and rewrites existing rows' => sub {
 	is( $grid->cell_gap, 12, 'cell_gap accessor reflects write' );
 	is( $_->layout->{child_gap}, 12, 'existing row rewritten to new cell_gap' )
 		for @{ $grid->children };
+};
+
+# -----------------------------------------------------------------------------
+# The Grid owns its rows: no generic child mutators, and the readers
+# return copies.
+# -----------------------------------------------------------------------------
+
+subtest 'Grid and its rows have no generic child mutators' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'closed');
+	$grid->append_row([ text_cell('a') ]);
+	for my $method (qw(add_child clear_children remove_child remove_children_with)) {
+		ok( !$grid->can($method), "Grid cannot $method" );
+		ok( !$grid->children->[0]->can($method), "Grid::Row cannot $method" );
+	}
+};
+
+subtest 'children and cell_wrappers return copies' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'copies');
+	$grid->append_row([ text_cell('a'), text_cell('b') ]);
+	push @{ $grid->children }, 'junk';
+	push @{ $grid->cell_wrappers }, [ 'junk' ];
+	push @{ $grid->cell_wrappers->[0] }, 'junk';
+	is( scalar @{ $grid->children }, 1, 'rows unchanged' );
+	is( $grid->row_count, 1, 'row_count unchanged' );
+	is( scalar @{ $grid->cell_wrappers->[0] }, 2, 'row wrappers unchanged' );
+};
+
+# -----------------------------------------------------------------------------
+# Failed mutations leave the grid unchanged.
+# -----------------------------------------------------------------------------
+
+subtest 'a row with the same cell twice changes nothing' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'dup');
+	$grid->append_row([ text_cell('a'), text_cell('b') ]);
+	my $cell = Clay::UI::Grid::Cell->new;
+	like( dies { $grid->append_row([ $cell, $cell ]) }, qr/attached twice in one call/, 'append_row dies' );
+	is( $grid->row_count, 1, 'row_count unchanged' );
+	is( scalar @{ $grid->children }, 1, 'rows unchanged' );
+	is( $cell->parent, undef, 'the cell was not attached' );
+	ok( lives { $grid->set_cell(0, 0, text_cell('x')) }, 'the grid keeps working' );
+};
+
+subtest 'set_cell with a cell that is already in the grid changes nothing' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'moved');
+	my $first = Clay::UI::Grid::Cell->new;
+	$first->add_child(text_cell('a'));
+	$grid->append_row([ $first, text_cell('b') ]);
+	like( dies { $grid->set_cell(0, 1, $first) }, qr/no reparenting/, 'set_cell dies' );
+	my $row = $grid->children->[0]->children;
+	is( scalar @$row, 2, 'row still has two cells' );
+	isnt( refaddr($row->[1]), refaddr($first), 'the second cell was not replaced' );
+};
+
+subtest 'a cell cannot move to a new grid after its grid is freed' => sub {
+	my $cell = Clay::UI::Grid::Cell->new;
+	$cell->add_child(text_cell('reused'));
+	{
+		my $old = Clay::UI::Test::Grid->new(id => 'old');
+		$old->append_row([ $cell ]);
+	}
+	my $new = Clay::UI::Test::Grid->new(id => 'new');
+	like( dies { $new->append_row([ $cell ]) }, qr/no reparenting/, 'reusing the cell dies' );
+};
+
+# -----------------------------------------------------------------------------
+# A user layout is merged over the Grid's default layout.
+# -----------------------------------------------------------------------------
+
+subtest 'a layout with padding keeps rows stacked and row_gap' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'padded', row_gap => 4, layout => { padding => padding_all(8) });
+	$grid->append_row([ text_cell('a1'), text_cell('a2') ]);
+	$grid->append_row([ text_cell('b1'), text_cell('b2') ]);
+	my @texts = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ make_ui($grid)->render };
+	my %at = map { $_->{renderData}{stringContents} => $_->{boundingBox} } @texts;
+	is( [ $at{a1}{x}, $at{a1}{y} ], [ 8, 8 ], 'padding applies' );
+	is( [ $at{b1}{x}, $at{b1}{y} ], [ 8, 8 + $LINE_H + 4 ], 'rows are stacked with row_gap between them' );
+};
+
+# -----------------------------------------------------------------------------
+# Grid ids: height ids are recycled, the grid id is released on free, and
+# consumers may define DESTROY.
+# -----------------------------------------------------------------------------
+
+subtest 'removed rows free their height id' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'rolling');
+	${ ref_field('Clay::UI::Grid.$_next_height_local', $grid) } = (1 << 20) - 1;
+	$grid->append_row([ text_cell('last fresh id') ]);
+	like( dies { $grid->append_row([ text_cell('one too many') ]) }, qr/local index 1048576 out of range/,
+		'the local id space is exhausted' );
+	is( $grid->row_count, 1, 'the failed append left no row behind' );
+	$grid->remove_row(0);
+	ok( lives { $grid->append_row([ text_cell('recycled') ]) }, 'append after remove reuses the released id' );
+};
+
+subtest 'the grid id is released when the grid is freed' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'short-lived');
+	$grid->append_row([ text_cell('x') ]);
+	my $grid_id = $grid->cell_wrappers->[0][0]->width_group >> 20;
+
+	# Hold every other id, so the only free id is the one the grid returns.
+	my @held;
+	while (1) {
+		my $id = eval { Clay::UI::Grid::_claim_grid_id() };
+		last unless defined $id;
+		push @held, $id;
+	}
+	my $weak = $grid;
+	weaken $weak;
+	undef $grid;
+	is( $weak, undef, 'the grid was freed' );
+	my $reclaimed = Clay::UI::Grid::_claim_grid_id();
+	is( $reclaimed, $grid_id, 'its grid id went back to the pool' );
+	Clay::UI::Grid::_release_grid_id($_) for @held, $reclaimed;
+};
+
+class DestroyingGrid :does(Clay::UI::Grid) {
+	field $log :param;
+	method DESTROY { $log->('consumer DESTROY ran') }
+}
+
+subtest 'a Grid consumer can define DESTROY' => sub {
+	my @log;
+	{ DestroyingGrid->new(id => 'd', log => sub { push @log, @_ }) }
+	is( \@log, ['consumer DESTROY ran'], 'the consumer DESTROY runs' );
 };
 
 done_testing;

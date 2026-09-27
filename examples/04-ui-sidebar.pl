@@ -2,9 +2,9 @@
 
 # 04-ui-sidebar.pl - The 02-sidebar-demo.pl layout, rebuilt on Clay::UI.
 #
-# Same render output as the low-level version; the only difference is
-# the surface area. Open / configure / close calls are replaced by
-# Clay::UI::Box / Text / layout walk.
+# Same render output as the low-level version; the open / configure /
+# close calls are replaced by a tree of Clay::UI::Box and Clay::UI::Text
+# widgets that Clay::UI lays out.
 #
 # Run with:
 #

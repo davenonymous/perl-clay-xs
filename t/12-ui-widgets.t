@@ -179,12 +179,6 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 
 	# Frame 1: build geometry (no pointer state yet).
 	$ui->render;
-
-	# Warm-up: Clay's pointer state struct is zero-initialised, which
-	# means the FIRST Clay_SetPointerState call dispatches hover with
-	# state=PRESSED_THIS_FRAME (0) regardless of isPointerDown. Push one
-	# unpressed-and-out-of-bounds state to settle Clay into RELEASED
-	# before the real test frames begin.
 	$ui->render( pointer_state => { x => -100, y => -100, down => 0 } );
 
 	@hover_start = ();
@@ -213,14 +207,10 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 	is( scalar(@hover_stop), 1, 'OnHoverStopped fired on exit' );
 	is( $button->is_hovered, 0, 'is_hovered back to false' );
 
-	# Frame 5: enter again, this time pressed. Clay reports
-	# PRESSED_THIS_FRAME the frame AFTER `down => 1` is first observed,
-	# so we need a follow-up frame.
+	# Frame 5: enter again, this time pressed: OnPress fires in the frame
+	# that first reports the pointer down.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
-	is( scalar(@press), 0, 'press pending: state still RELEASED on first down-frame' );
-
-	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
-	is( scalar(@press),  1,  'OnPress fired once Clay transitioned to PRESSED_THIS_FRAME' );
+	is( scalar(@press),  1,  'OnPress fired in the first down-frame' );
 	is( $button->is_pressed, 1, 'is_pressed true while held' );
 
 	# Holding => no refire on subsequent frames (still PRESSED, not PRESSED_THIS_FRAME).
@@ -228,13 +218,10 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 	is( scalar(@press),   1, 'OnPress edge-triggered: no refire while held' );
 	is( scalar(@release), 0, 'OnRelease not yet (still held)' );
 
-	# Release the pointer while over the button: Clay observes RELEASED_THIS_FRAME
-	# the frame after `down => 0` is first reported, mirroring the press path.
+	# Release the pointer while over the button: OnRelease fires in the
+	# frame that first reports the pointer up.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
-	is( scalar(@release), 0, 'release pending: state still PRESSED on first up-frame' );
-
-	$ui->render( pointer_state => { x => 50, y => 20, down => 0 } );
-	is( scalar(@release),    1, 'OnRelease fired once Clay transitioned to RELEASED_THIS_FRAME' );
+	is( scalar(@release),    1, 'OnRelease fired in the first up-frame' );
 	is( $button->is_pressed, 0, 'is_pressed back to false after release' );
 
 	# Hold still => no refire.
@@ -242,11 +229,11 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 	is( scalar(@release), 1, 'OnRelease edge-triggered: no refire while idle' );
 
 	# Press, then drag off-element and release: OnRelease must NOT fire,
-	# because the underlying Clay_OnHover only runs while the pointer is
-	# over the element. is_pressed drops to 0 once the pointer leaves.
+	# because the release does not happen over the widget the press started
+	# on. is_pressed drops to 0 once the pointer leaves.
 	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
-	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );  # PRESSED_THIS_FRAME edge
-	is( scalar(@press), 2, 'second press registered' );
+	$ui->render( pointer_state => { x => 50, y => 20, down => 1 } );
+	is( scalar(@press), 2, 'second press registered once' );
 
 	$ui->render( pointer_state => { x => -100, y => -100, down => 1 } );  # drag off, still down
 	is( $button->is_pressed, 0, 'is_pressed reset once pointer leaves the widget' );
@@ -256,22 +243,17 @@ subtest 'Pressable: hover-edge events, press events, live state readers' => sub 
 };
 
 # -----------------------------------------------------------------------------
-# Text without an Element wrapper at root level still works.
+# A Text leaf can be the root of a Clay::UI.
 # -----------------------------------------------------------------------------
 
 subtest 'bare Text at root' => sub {
 	@errors = ();
-	my $box = Clay::UI::Test::Box->new(
-		id     => 'root',
-		layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
-	);
-	$box->add_child(Clay::UI::Test::Text->new( text => 'standalone' ));
-	my $ui = make_ui($box);
+	my $ui = make_ui(Clay::UI::Test::Text->new( text => 'standalone' ));
 	my $cmds = $ui->render;
 
 	is( scalar(@errors), 0, 'no Clay errors' );
 	my ($txt) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$cmds;
-	ok( defined $txt, 'text leaf rendered' );
+	is( $txt->{renderData}{stringContents}, 'standalone', 'the root text leaf is rendered' );
 };
 
 # -----------------------------------------------------------------------------
@@ -293,6 +275,38 @@ subtest 'Text attributes are mutable' => sub {
 	is( $cfg->{font_size},      24,              'text_config sees new font_size' );
 	is( $cfg->{text_color},     [255, 0, 0, 255], 'text_config sees new text_color' );
 	is( $cfg->{letter_spacing}, 2,               'text_config sees new letter_spacing' );
+};
+
+# -----------------------------------------------------------------------------
+# HasScroll containers scroll: render feeds wheel input to Clay and the
+# walker positions the children at Clay's scroll offset. An explicit
+# child_offset takes over (manual scrolling).
+# -----------------------------------------------------------------------------
+
+subtest 'HasScroll content moves with scroll input' => sub {
+	@errors = ();
+	my $panel = TestScrollBox->new(
+		id     => 'log',
+		layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(50) }, layout_direction => CLAY_TOP_TO_BOTTOM },
+	);
+	my @rows = map {
+		Clay::UI::Test::Box->new(id => "row$_",
+			layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(20) } })
+	} 0 .. 5;
+	$panel->add_child(@rows);
+	my $ui = make_ui($panel);
+	my $row0_y = sub { Clay_GetElementData(Clay_GetElementId('row0'))->{boundingBox}{y} };
+
+	$ui->render;
+	$ui->render(pointer_state => { x => 50, y => 25, down => 0 });
+	is( $row0_y->(), 0, 'content starts unscrolled' );
+	$ui->render(pointer_state => { x => 50, y => 25, down => 0 }, scroll_delta => { x => 0, y => -1.5 });
+	is( $row0_y->(), -15, 'a wheel delta moves the children' );
+
+	$panel->child_offset({ x => 0, y => -40 });
+	$ui->render(pointer_state => { x => 50, y => 25, down => 0 });
+	is( $row0_y->(), -40, 'an explicit child_offset wins' );
+	is( scalar(@errors), 0, 'no Clay errors' );
 };
 
 # -----------------------------------------------------------------------------

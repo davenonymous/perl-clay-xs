@@ -13,6 +13,7 @@ use Object::Pad 0.800;
 use Clay::UI;
 use Clay::UI::Test::Box;
 use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Interaction::Focusable;
 use Clay::UI::Role::Interaction::HasFocusOrder;
 
@@ -32,7 +33,7 @@ class TestInput
 
 # Container that always returns the same widget first, then defers.
 class TestOverride
-	:does(Clay::UI::Role::Core::Element)
+	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Interaction::HasFocusOrder)
 {
 	use Scalar::Util qw(refaddr);
@@ -268,7 +269,7 @@ subtest 'HasFocusOrder takes over when ancestor of focused widget' => sub {
 	same($ui->get_focused_widget, $target, 'override redirected to target');
 };
 
-subtest 'default_next_focus helper returns what default order would say' => sub {
+subtest 'default order resumes once focus leaves the override subtree' => sub {
 	my $a       = TestInput->new(id => 'a');
 	my $b       = TestInput->new(id => 'b');
 	my $target  = TestInput->new(id => 'target');
@@ -278,19 +279,160 @@ subtest 'default_next_focus helper returns what default order would say' => sub 
 	$root->add_child($override, $b, $target);
 	my $ui      = Clay::UI->new(root => $root, width => 100, height => 100);
 
-	# Focus $target so the override decides to defer to default_next_focus.
-	# But $target is outside override's subtree - to trigger override, focus
-	# must be on a widget under the override OR be the override itself.
-	# Direct test: focus $a, call focus_next twice - first goes to $target,
-	# then since focus is at $target (outside override) the override no longer
-	# applies and default order kicks in.
 	$ui->set_focused_widget($a);
 	$ui->focus_next;
 	same($ui->get_focused_widget, $target, 'first jump to target via override');
 	$ui->focus_next;
-	# Now focused is $target which is NOT under $override; default order
-	# from $target wraps to first focusable in tree which is $a.
+	# $target is not under the override, so the default order applies and
+	# wraps to the first focusable widget, $a.
 	same($ui->get_focused_widget, $a, 'default order takes over once focus leaves override subtree');
+};
+
+subtest 'default_next_focus / default_previous_focus report the default order' => sub {
+	my $a       = TestInput->new(id => 'a');
+	my $b       = TestInput->new(id => 'b');
+	my $target  = TestInput->new(id => 'target');
+	my $override = TestOverride->new(id => 'ov', target => $target);
+	$override->add_child($a);
+	my $root    = Clay::UI::Test::Box->new(id => 'root');
+	$root->add_child($override, $b, $target);
+	my $ui      = Clay::UI->new(root => $root, width => 100, height => 100);
+
+	$ui->set_focused_widget($a);
+	same($override->default_next_focus,     $b,      'next after a in the default order is b');
+	same($override->default_previous_focus, $target, 'previous before a wraps to target');
+};
+
+# -----------------------------------------------------------------------------
+# HasFocusOrder on the root decides the first focus; its results are
+# validated.
+# -----------------------------------------------------------------------------
+
+class ToolbarFirst
+	:does(Clay::UI::Role::Core::Container)
+	:does(Clay::UI::Role::Interaction::HasFocusOrder)
+{
+	field $toolbar :param;
+	field $calls :reader = 0;
+	method get_next_focus {
+		$calls++;
+		my $focused = $self->ui->get_focused_widget;
+		return $toolbar if !defined($focused) || refaddr($focused) != refaddr($toolbar);
+		return $self->default_next_focus;
+	}
+	method get_previous_focus { $self->default_previous_focus }
+}
+
+class FixedOrder
+	:does(Clay::UI::Role::Core::Container)
+	:does(Clay::UI::Role::Interaction::HasFocusOrder)
+{
+	field $next :param :accessor = undef;
+	method get_next_focus { $next }
+	method get_previous_focus { $next }
+}
+
+class Plain :does(Clay::UI::Role::Core::Container) {}
+
+subtest 'the root HasFocusOrder chooses the first focus' => sub {
+	my $toolbar = TestInput->new(id => 'toolbar');
+	my $first   = TestInput->new(id => 'first');
+	my $root    = ToolbarFirst->new(id => 'root', toolbar => $toolbar);
+	$root->add_child($first, $toolbar);
+	my $ui = Clay::UI->new(root => $root, width => 100, height => 100);
+	$ui->focus_next;
+	same($ui->get_focused_widget, $toolbar, 'nothing focused: the root order is consulted');
+	is($root->calls, 1, 'get_next_focus ran once');
+};
+
+subtest 'an invalid focus-order result dies' => sub {
+	my $x    = TestInput->new(id => 'x');
+	my $nf   = Plain->new(id => 'nf');
+	my $root = FixedOrder->new(id => 'broken');
+	$root->add_child($x, $nf);
+	my $ui = Clay::UI->new(root => $root, width => 100, height => 100);
+	$ui->set_focused_widget($x);
+
+	$root->next($nf);
+	like( dies { $ui->focus_next }, qr/FixedOrder returned Plain, which is not Clay::UI::Role::Interaction::Focusable/,
+		'a non-Focusable result dies naming the class' );
+	$root->next('x');
+	like( dies { $ui->focus_next }, qr/FixedOrder returned a non-widget/, 'a non-widget result dies' );
+	my $foreign = TestInput->new(id => 'foreign');
+	make_ui($foreign);
+	$root->next($foreign);
+	like( dies { $ui->focus_next }, qr/which is not part of this Clay::UI/, 'a widget of another UI dies' );
+
+	my $disabled = TestInput->new(id => 'disabled', disabled => 1);
+	$root->add_child($disabled);
+	$root->next($disabled);
+	ok( lives { $ui->focus_next }, 'a disabled widget of this UI means no change' );
+	same($ui->get_focused_widget, $x, 'focus stayed');
+	$root->next(undef);
+	ok( lives { $ui->focus_next }, 'undef means no change' );
+};
+
+subtest 'a dying OnBlur listener still completes the focus change' => sub {
+	my $a  = TestInput->new(id => 'a');
+	my $b  = TestInput->new(id => 'b');
+	my $ui = make_ui($a, $b);
+	my @log;
+	$a->on('OnBlur',  sub ($e) { die "validation failed\n" });
+	$b->on('OnFocus', sub ($e) { push @log, 'b:focus'; return });
+	$ui->set_focused_widget($a);
+	like( dies { $ui->set_focused_widget($b) }, qr/^validation failed$/, 'the listener error propagates' );
+	same($ui->get_focused_widget, $b, 'b is focused');
+	ok( $b->has_state('focused') && !$a->has_state('focused'), 'both states switched' );
+	is( \@log, ['b:focus'], 'OnFocus still fired' );
+};
+
+subtest 'focus_next from a disabled focused widget continues in order' => sub {
+	my @w  = map { TestInput->new(id => $_) } qw(a b c d);
+	my $ui = make_ui(@w);
+	$ui->set_focused_widget($w[2]);
+	$w[2]->can_focus(0);
+	$ui->focus_next;
+	same($ui->get_focused_widget, $w[3], 'c -> d, not back to a');
+	$ui->set_focused_widget($w[1]);
+	$w[1]->can_focus(0);
+	$ui->focus_previous;
+	same($ui->get_focused_widget, $w[0], 'b -> a going backwards');
+};
+
+# -----------------------------------------------------------------------------
+# Removing widgets releases focus held inside them.
+# -----------------------------------------------------------------------------
+
+subtest 'removing the focused widget blurs it' => sub {
+	my $a  = TestInput->new(id => 'a');
+	my $b  = TestInput->new(id => 'b');
+	my $ui = make_ui($a, $b);
+	my @log;
+	$b->on('OnBlur', sub ($e) { push @log, 'b:blur'; return });
+
+	$ui->set_focused_widget($b);
+	$ui->root->remove_child('b');
+	is( \@log, ['b:blur'], 'OnBlur fired on removal' );
+	is( $ui->get_focused_widget, undef, 'nothing is focused' );
+	is( $b->is_focused, 0, 'the removed widget is not focused' );
+	ok( !$b->has_state('focused'), 'and lost its focused state' );
+};
+
+subtest 'removing an ancestor of the focused widget blurs it' => sub {
+	my $deep  = TestInput->new(id => 'deep');
+	my $panel = Clay::UI::Test::Box->new(id => 'panel');
+	$panel->add_child($deep);
+	my $ui = make_ui($panel);
+	$ui->set_focused_widget($deep);
+	$ui->root->remove_child('panel');
+	is( $ui->get_focused_widget, undef, 'focus released with the subtree' );
+};
+
+subtest 'a removed widget cannot be focused' => sub {
+	my $c  = TestInput->new(id => 'c');
+	my $ui = make_ui($c);
+	$ui->root->remove_child('c');
+	like( dies { $ui->set_focused_widget($c) }, qr/does not belong to this Clay::UI/, 'focusing it dies' );
 };
 
 # -----------------------------------------------------------------------------

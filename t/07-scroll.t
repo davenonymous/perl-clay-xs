@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 8: scrolling containers.
+# Scrolling containers.
 #
 # Build a container with vertical clip enabled and contents taller than
 # the container. Scroll downward and verify the scroll container data
@@ -69,5 +69,33 @@ is( $scroll_data->{scrollContainerDimensions}{height},  50, 'container height' )
 # Negative wheel scroll means the content moves up (scrollPosition.y becomes negative).
 ok( $scroll_data->{scrollPosition}{y} < 0,
     "scrollPosition.y is negative after scrolling down (got $scroll_data->{scrollPosition}{y})" );
+
+# set_scroll_position writes Clay's scroll position; the children move on the
+# next frame (build() feeds Clay_GetScrollOffset into clip.childOffset).
+set_scroll_position($scroll_id, { x => 0, y => -30 });
+Clay_BeginLayout();
+build();
+Clay_EndLayout(0);
+is( Clay_GetElementData( Clay_GetElementIdWithIndex("row", 0) )->{boundingBox}{y}, -30,
+    'set_scroll_position moves the children on the next frame' );
+like( dies { set_scroll_position(Clay_GetElementId("nope"), [0, 0]) }, qr/not a known scroll container/,
+    'set_scroll_position croaks for an unknown container' );
+
+# With external scroll handling, Clay asks the query function for the offset.
+my @queried;
+like( dies { Clay_SetExternalScrollHandlingEnabled(1) }, qr/Clay_SetQueryScrollOffsetFunction first/,
+    'external handling needs a query function' );
+Clay_SetQueryScrollOffsetFunction(sub ($element_id, $userdata) {
+    push @queried, [ $element_id, $userdata ];
+    return { x => 0, y => -12 };
+}, 'query-payload');
+Clay_SetExternalScrollHandlingEnabled(1);
+Clay_BeginLayout();
+build();
+Clay_EndLayout(0);
+is( $queried[0], [ $scroll_id->{id}, 'query-payload' ], 'query function receives the element id and userdata' );
+is( Clay_GetScrollContainerData($scroll_id)->{scrollPosition}{y}, -12,
+    'the returned offset becomes the scroll position' );
+Clay_SetExternalScrollHandlingEnabled(0);
 
 done_testing;

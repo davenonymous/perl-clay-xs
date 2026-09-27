@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 2.4: the sizing / padding / border / corner-radius helper subs.
+# The sizing / padding / border / corner-radius helper subs.
 # These are the Perl analogues of the CLAY_SIZING_* / CLAY_PADDING_ALL /
 # CLAY_BORDER_* / CLAY_CORNER_RADIUS macros from clay.h.
 # -----------------------------------------------------------------------------
@@ -51,6 +51,23 @@ subtest 'padding/border/corner helpers' => sub {
     my $cr = corner_radius_all(12);
     is( $cr->{topLeft},     12, 'corner_radius_all topLeft' );
     is( $cr->{bottomRight}, 12, 'corner_radius_all bottomRight' );
+};
+
+subtest 'helpers validate their arguments' => sub {
+    like( dies { padding_all(-1) },    qr/padding_all: value: expected an integer in 0\.\.65535, got '-1'/,
+        'negative padding' );
+    like( dies { padding_all(70000) }, qr/padding_all: value: expected an integer in 0\.\.65535/,
+        'padding above uint16' );
+    like( dies { border_all(1.5) },    qr/border_all: width: expected an integer/, 'fractional border' );
+    like( dies { border_outside('x') }, qr/border_outside: width: expected an integer/, 'non-numeric border' );
+    like( dies { sizing_fixed('abc') }, qr/sizing_fixed: size: expected a finite number/, 'non-numeric size' );
+    like( dies { corner_radius_all(9**9**9) }, qr/corner_radius_all: radius: expected a finite number/,
+        'infinite radius' );
+    like( dies { sizing_fit(0, -9**9**9) }, qr/sizing_fit: max: expected a finite number or \+Inf/,
+        '-Inf max' );
+
+    is( sizing_grow(0, 0)->{max}, 0, 'sizing_grow(0, 0) keeps Clay\'s "no max" zero' );
+    is( sizing_fit(10, 9**9**9)->{max}, 9**9**9, '+Inf is accepted as an unbounded max' );
 };
 
 done_testing;

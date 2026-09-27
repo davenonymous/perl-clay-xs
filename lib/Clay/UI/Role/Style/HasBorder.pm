@@ -7,11 +7,28 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::_validate qw(optional validate_color validate_border_width);
+
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Style::HasBorder {
-	field $border_color :param :accessor = undef;
-	field $border_width :param :accessor = undef;
+	field $border_color :param = undef;
+	field $border_width :param = undef;
+
+	ADJUST {
+		$border_color = optional(\&validate_color,        border_color => $border_color);
+		$border_width = optional(\&validate_border_width, border_width => $border_width);
+	}
+
+	method border_color (@new) {
+		return $border_color unless @new;
+		return $border_color = optional(\&validate_color, border_color => @new);
+	}
+
+	method border_width (@new) {
+		return $border_width unless @new;
+		return $border_width = optional(\&validate_border_width, border_width => @new);
+	}
 
 	method contribute_border ($config) {
 		return unless defined $border_color || defined $border_width;
@@ -40,7 +57,7 @@ Clay::UI::Role::Style::HasBorder - border mixin for Clay::UI widgets
 
 =head1 SYNOPSIS
 
-	class My::Box :does(Clay::UI::Role::Core::Element)
+	class My::Box :strict(params) :does(Clay::UI::Role::Core::Element)
 	              :does(Clay::UI::Role::Style::HasBorder)
 	{}
 
@@ -63,6 +80,8 @@ values.
 
 C<border_color> and C<border_width> are read/write accessors: call with no
 argument to read, with one argument to write. A write takes effect on the
-next C<render>.
+next C<render>. Values are validated when set: C<border_color> is a
+colour (C<[r, g, b, a]> or C<{ r, g, b, a }>), C<border_width> a number or
+a hashref with the keys above; anything else dies.
 
 =cut

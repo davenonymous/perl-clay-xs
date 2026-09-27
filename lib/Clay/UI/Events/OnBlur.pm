@@ -11,7 +11,7 @@ use Clay::UI::Events::Event;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Events::OnBlur :isa(Clay::UI::Events::Event) {
+class Clay::UI::Events::OnBlur :isa(Clay::UI::Events::Event) :strict(params) {
 	method event_name :common { 'OnBlur' }
 }
 

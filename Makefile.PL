@@ -10,8 +10,9 @@ use Config;
 # Compile flags.
 #
 # Clay requires C99 (or C++20, but we use C). We force the standard and
-# enable a strict warning baseline; users who hit a portability issue on
-# an exotic platform can override CCFLAGS in the environment.
+# enable a strict warning baseline (GCC/Clang flags). Users who hit a
+# portability issue can override CCFLAGS on the command line
+# (perl Makefile.PL CCFLAGS=...) or through PERL_MM_OPT.
 # -----------------------------------------------------------------------------
 
 my @ccflags = qw( -std=c99 -Wall -Wextra -Wno-unused-parameter );
@@ -74,7 +75,7 @@ WriteMakefile(
     CCFLAGS    => "$Config{ccflags} $ccflags",
 
     # Sanity: clean intermediate objects.
-    clean      => { FILES => 'lib/Clay/XS.c lib/Clay/XS.o src/*.o src/clay/clay.h src/clay/.patched' },
+    clean      => { FILES => 'lib/Clay/XS.c lib/Clay/XS.o src/*.o src/clay/clay.h src/clay/clay.h.tmp*' },
 
     META_MERGE => {
         'meta-spec' => { version => 2 },
@@ -98,13 +99,14 @@ sub MY::postamble {
 
 # The pristine upstream Clay header lives in src/clay/clay.h.orig (tracked in
 # git). The build copy at src/clay/clay.h is regenerated each time the pristine
-# or any patch file changes: copy from .orig, then apply patches/*.patch in
-# order. Both src/clay/clay.h and the .patched sentinel are gitignored so the
-# working tree stays clean after a build.
+# header or the patch changes. The patched header is written to a temporary
+# file and moved into place only when patch succeeds, so a failed patch never
+# leaves an up-to-date-looking, unpatched src/clay/clay.h behind.
+# src/clay/clay.h is gitignored so the working tree stays clean after a build.
 src/clay/clay.h : src/clay/clay.h.orig patches/0001-clay-sizing-groups.patch
-	cp src/clay/clay.h.orig src/clay/clay.h
-	patch -p1 < patches/0001-clay-sizing-groups.patch
-	@touch src/clay/.patched
+	$(RM_F) src/clay/clay.h.tmp
+	patch -o src/clay/clay.h.tmp src/clay/clay.h.orig < patches/0001-clay-sizing-groups.patch
+	$(MV) src/clay/clay.h.tmp src/clay/clay.h
 
 src/clay_impl$(OBJ_EXT) : src/clay/clay.h
 src/marshal$(OBJ_EXT) : src/clay/clay.h

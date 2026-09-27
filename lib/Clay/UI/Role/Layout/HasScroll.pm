@@ -7,23 +7,47 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::_validate qw(optional required validate_flag validate_vector2);
+use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
+use Clay::UI::Role::Events::Emitter;
 
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Layout::HasScroll
 	:does(Clay::UI::Role::Core::Stateful)
+	:does(Clay::UI::Role::Core::Container)
+	:does(Clay::UI::Role::Events::Emitter)
 {
-	field $horizontal   :param :accessor = 0;
-	field $vertical     :param :accessor = 1;
-	field $child_offset :param :accessor = undef;
+	field $horizontal   :param = 0;
+	field $vertical     :param = 1;
+	field $child_offset :param = undef;
+
+	ADJUST {
+		$horizontal   = required(\&validate_flag,    horizontal   => $horizontal);
+		$vertical     = required(\&validate_flag,    vertical     => $vertical);
+		$child_offset = optional(\&validate_vector2, child_offset => $child_offset);
+	}
+
+	method horizontal (@new) {
+		return $horizontal unless @new;
+		return $horizontal = required(\&validate_flag, horizontal => @new);
+	}
+
+	method vertical (@new) {
+		return $vertical unless @new;
+		return $vertical = required(\&validate_flag, vertical => @new);
+	}
+
+	method child_offset (@new) {
+		return $child_offset unless @new;
+		return $child_offset = optional(\&validate_vector2, child_offset => @new);
+	}
 
 	method contribute_clip ($config) {
-		$config->{clip} = {
-			horizontal   => $horizontal,
-			vertical     => $vertical,
-			child_offset => $child_offset // { x => 0, y => 0 },
-		};
+		my %clip = (horizontal => $horizontal, vertical => $vertical);
+		$clip{child_offset} = $child_offset if defined $child_offset;
+		$config->{clip} = \%clip;
 		return;
 	}
 }
@@ -38,7 +62,12 @@ Clay::UI::Role::Layout::HasScroll - scrollable-container mixin for Clay::UI widg
 
 =head1 SYNOPSIS
 
-	class My::LogView :does(Clay::UI::Role::Layout::HasScroll)
+	use Object::Pad;
+	use Clay::XS qw(sizing_grow sizing_fixed);
+	use Clay::UI::Role::Layout::HasScroll;
+	use Clay::UI::Role::Layout::HasLayout;
+
+	class My::LogView :strict(params) :does(Clay::UI::Role::Layout::HasScroll)
 	                  :does(Clay::UI::Role::Layout::HasLayout)
 	{}
 
@@ -51,8 +80,10 @@ Clay::UI::Role::Layout::HasScroll - scrollable-container mixin for Clay::UI widg
 =head1 DESCRIPTION
 
 Mixin role that turns a widget into a Clay scroll container. Composes
-L<Clay::UI::Role::Core::Stateful>: an C<id> is mandatory because Clay
-needs a stable address to track scroll state across frames.
+L<Clay::UI::Role::Core::Stateful> (an C<id> is mandatory because Clay
+needs a stable address to track scroll state across frames),
+L<Clay::UI::Role::Core::Container> (the scrolled content is added with
+C<add_child>) and L<Clay::UI::Role::Events::Emitter>.
 
 Constructor parameters, each also a read/write accessor (call with no
 argument to read, with one to write; a write takes effect on the next
@@ -70,24 +101,32 @@ Enable vertical scrolling. Defaults to C<1>.
 
 =item C<child_offset>
 
-Initial C<< { x =E<gt> ..., y =E<gt> ... } >> offset. Defaults to
-C<< { x =E<gt> 0, y =E<gt> 0 } >>. This is a config input only: when you
-drive scrolling via C<Clay_UpdateScrollContainers> (see USAGE NOTES),
-Clay tracks the live offset internally and a Perl-side write here does
-not act as authoritative scroll control.
+Undef by default, meaning "Clay-managed": each frame the walker positions
+the children at Clay's own scroll offset (C<Clay_GetScrollOffset>), which
+L<Clay::UI/render> updates from its C<scroll_delta> and
+C<enable_drag_scrolling> arguments (wheel input applies while the pointer
+is over the container). Set C<< { x =E<gt> ..., y =E<gt> ... } >> to take
+over and position the content yourself; the explicit offset is used as
+is. Set it back to undef to return control to Clay.
 
 =back
 
 =head1 USAGE NOTES
 
-Scroll containers need the caller to drive scroll updates each frame.
-After processing input events, call
+Scrolling needs no extra plumbing:
 
-	Clay::XS::Clay_UpdateScrollContainers($enable_drag_scrolling, $scroll_delta, $delta_time);
+	$ui->render(
+		pointer_state => { x => $mx, y => $my, down => $button },
+		scroll_delta  => { x => 0, y => $wheel_delta },
+	);
 
-and, if you want programmatic scroll-offset queries, install a
-C<Clay::XS::Clay_SetQueryScrollOffsetFunction>. The role itself only
-contributes the C<clip> config; per-frame scroll plumbing lives on the
-caller (see F<AGENTS.md> invariant 3).
+C<render> calls C<Clay_UpdateScrollContainers> once per frame; do not
+call it yourself between renders: Clay then drops the scroll state of
+every container that was not declared since its previous call.
+
+For programmatic scrolling that keeps Clay's momentum and clamping, use
+L<Clay::XS/set_scroll_position> with the container's element id
+(C<< Clay::XS::Clay_GetElementId($widget-E<gt>id) >>); for full manual
+control, set C<child_offset>.
 
 =cut

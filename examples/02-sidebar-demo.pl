@@ -3,8 +3,8 @@
 # 02-sidebar-demo.pl - Port of the README's sidebar example.
 #
 # Reproduces the layout shown in clay's README using only the low-level
-# Clay::XS primitives. Demonstrates loops, helper subs, hover state,
-# and a complete two-pass interactive pipeline.
+# Clay::XS primitives. Demonstrates loops, helper subs, and pointer-over
+# queries across two frames.
 #
 # Run with:
 #

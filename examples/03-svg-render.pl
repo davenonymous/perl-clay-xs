@@ -3,9 +3,9 @@
 # 03-svg-render.pl - Render Clay's command list as an SVG image.
 #
 # Provides a generic render_to_svg(\@commands, $width, $height) function
-# that handles RECTANGLE, BORDER, and TEXT commands (the three types this
-# binding emits today; IMAGE is acknowledged but skipped). Demo builds a
-# small showcase layout and prints the SVG to stdout.
+# that handles RECTANGLE, BORDER, and TEXT commands (IMAGE, CUSTOM,
+# scissor and overlay commands are skipped). Demo builds a small showcase
+# layout and prints the SVG to stdout.
 #
 # Run with:
 #

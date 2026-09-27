@@ -42,7 +42,7 @@ Clay::UI::Role::Interaction::Focusable - role marking a widget as focusable
 	use Clay::UI::Role::Core::Element;
 	use Clay::UI::Role::Interaction::Focusable;
 
-	class My::TextInput
+	class My::TextInput :strict(params)
 		:does(Clay::UI::Role::Core::Element)
 		:does(Clay::UI::Role::Interaction::Focusable)
 	{
@@ -88,8 +88,11 @@ accessor from an C<ADJUST> block or any state-mutating method:
 
 C<< $ui->set_focused_widget >>, C<focus_next>, and C<focus_previous>
 all consult C<can_focus>; a widget that returns false is skipped by
-the default focus chain and rejected (loud die) by direct
-C<set_focused_widget> calls.
+the default focus chain, rejected (loud die) by direct
+C<set_focused_widget> calls, and means "no change" when a
+L<Clay::UI::Role::Interaction::HasFocusOrder> returns it. Turning
+C<can_focus> off does not blur a widget that already has the focus;
+C<focus_next> and C<focus_previous> move on from its position.
 
 =head2 is_focused
 

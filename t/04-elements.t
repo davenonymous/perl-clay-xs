@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 5: nested elements and text.
+# Nested elements and text.
 #
 # Build a 3-level layout:
 #
@@ -96,5 +96,149 @@ is( $id_a->{id}, $id_b->{id}, 'HashString is deterministic' );
 
 my $id_c = Clay__HashStringWithOffset("foo", 1, 0);
 isnt( $id_a->{id}, $id_c->{id}, 'HashStringWithOffset changes the hash' );
+
+sub texts_of ($commands) {
+    return map { $_->{renderData}{stringContents} }
+           grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$commands;
+}
+
+# -----------------------------------------------------------------------------
+# Text copies stay valid for the whole frame, however much text it holds.
+# -----------------------------------------------------------------------------
+
+subtest 'more than 16 KiB of text in one frame round-trips' => sub {
+    my @lines = map { sprintf "line %04d %s", $_, "abcdefghij" x 4 } 1 .. 400;
+    Clay_SetLayoutDimensions({ width => 800, height => 20_000 });
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("column") );
+    Clay__ConfigureOpenElement({ layout => { layoutDirection => CLAY_TOP_TO_BOTTOM } });
+    Clay__OpenTextElement($_, { fontSize => 10, wrapMode => CLAY_TEXT_WRAP_NONE }) for @lines;
+    Clay__CloseElement();
+    my @got = texts_of(Clay_EndLayout(0));
+    Clay_SetLayoutDimensions({ width => 320, height => 240 });
+
+    ok( length(join '', @lines) > 16 * 1024, 'the frame carries more than 16 KiB of text' );
+    is( \@got, \@lines, 'every text command carries its own string' );
+};
+
+# -----------------------------------------------------------------------------
+# Strings are characters in and out.
+# -----------------------------------------------------------------------------
+
+subtest 'non-ASCII text and ids round-trip as characters' => sub {
+    use utf8;
+    my @strings = ("日本語 テキスト", "déjà vu", "ключ");
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("ключ") );
+    Clay__OpenTextElement($_, { fontSize => 10 }) for @strings;
+    Clay__CloseElement();
+    my @got = texts_of(Clay_EndLayout(0));
+    is( join(' ', @got), join(' ', @strings), 'render commands carry the same characters' );
+
+    my $id = Clay_GetElementId("ключ");
+    is( $id->{stringId}, "ключ", 'Clay_GetElementId returns the character id' );
+    ok( Clay_GetElementData($id)->{found}, 'the element declared with a Cyrillic id is found' );
+};
+
+# -----------------------------------------------------------------------------
+# Element ids reach Clay's debug view.
+# -----------------------------------------------------------------------------
+
+subtest 'debug mode labels elements with their id' => sub {
+    Clay_SetLayoutDimensions({ width => 900, height => 600 });
+    Clay_SetDebugModeEnabled(1);
+    for my $frame (1 .. 2) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("labelled-root") );
+        Clay__ConfigureOpenElement({ backgroundColor => [1, 2, 3, 255] });
+        Clay__CloseElement();
+        my @texts = texts_of(Clay_EndLayout(0));
+        ok( ( grep { $_ eq 'labelled-root' } @texts ), "frame $frame shows the id label" );
+    }
+    Clay_SetDebugModeEnabled(0);
+    Clay_SetLayoutDimensions({ width => 320, height => 240 });
+};
+
+# -----------------------------------------------------------------------------
+# Culling drops elements outside the layout dimensions.
+# -----------------------------------------------------------------------------
+
+subtest 'culling drops off-screen elements unless disabled' => sub {
+    my $row = sub () {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("row") );
+        Clay__ConfigureOpenElement({ layout => { childGap => 20 } });
+        for my $name (qw(visible offscreen)) {
+            Clay__OpenElementWithId( Clay_GetElementId($name) );
+            Clay__ConfigureOpenElement({
+                layout          => { sizing => { width => sizing_fixed(320), height => sizing_fixed(10) } },
+                backgroundColor => [1, 2, 3, 255],
+            });
+            Clay__CloseElement();
+        }
+        Clay__CloseElement();
+        return scalar grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout(0) };
+    };
+    is( $row->(), 1, 'the element beyond the right edge is culled' );
+    Clay_SetCullingEnabled(0);
+    is( $row->(), 2, 'with culling disabled it is drawn' );
+    Clay_SetCullingEnabled(1);
+};
+
+# -----------------------------------------------------------------------------
+# Open/close balance is enforced; a frame abandoned mid-element can still be
+# ended and the next frame renders normally.
+# -----------------------------------------------------------------------------
+
+subtest 'unbalanced open/close croaks instead of crashing' => sub {
+    Clay_BeginLayout();
+    ok( !eval { Clay__OpenElementWithId( Clay_GetElementId("abandoned") ); die "user error\n"; 1 },
+        'an exception leaves an element open' );
+    like( dies { Clay_EndLayout(0) },
+        qr/1 element still open at Clay_EndLayout \(unbalanced Clay__OpenElement\/Clay__CloseElement\)/,
+        'Clay_EndLayout croaks cleanly' );
+
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("healthy") );
+    Clay__ConfigureOpenElement({ backgroundColor => [9, 9, 9, 255],
+                                 layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } } });
+    Clay__CloseElement();
+    my @rects = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout(0) };
+    is( scalar(@rects), 1, 'the next frame renders normally' );
+
+    Clay_BeginLayout();
+    like( dies { Clay__CloseElement() }, qr/Clay__CloseElement: no element is open/,
+        'closing with nothing open croaks' );
+    like( dies { Clay__ConfigureOpenElement({}) }, qr/Clay__ConfigureOpenElement: no element is open/,
+        'configuring with nothing open croaks' );
+    like( dies { Clay_OnHover(sub { }) }, qr/Clay_OnHover: no element is open/,
+        'registering hover with nothing open croaks' );
+    Clay_EndLayout(0);
+
+    like( dies { Clay_EndLayout(0) }, qr/Clay_EndLayout: called without a matching Clay_BeginLayout/,
+        'Clay_EndLayout without Clay_BeginLayout croaks' );
+    like( dies { Clay__OpenTextElement("stray", {}) }, qr/called outside Clay_BeginLayout\/Clay_EndLayout/,
+        'text outside a frame croaks' );
+};
+
+subtest 'undef text and ids croak' => sub {
+    like( dies { Clay_GetElementId(undef) }, qr/Clay_GetElementId: element id string must be defined/,
+        'undef id string' );
+    Clay_BeginLayout();
+    like( dies { Clay__OpenTextElement(undef, {}) }, qr/text must be a defined string/, 'undef text' );
+    my $missing;
+    like( dies { Clay__OpenElementWithId($missing) },
+        qr/Clay__OpenElementWithId: element id: expected an element id hash reference .*got undef/,
+        'Clay__OpenElementWithId with an undef id' );
+    like( dies { Clay__OpenElementWithId('box') }, qr/expected an element id hash reference/,
+        'Clay__OpenElementWithId with a plain string' );
+    Clay_EndLayout(0);
+    for my $query (\&Clay_GetElementData, \&Clay_PointerOver, \&Clay_GetScrollContainerData) {
+        like( dies { $query->($missing) }, qr/element id: expected an element id hash reference/,
+            'id queries croak for an undef id' );
+    }
+    like( dies { set_scroll_position($missing, [0, 0]) }, qr/set_scroll_position: element id: expected/,
+        'set_scroll_position croaks for an undef id' );
+};
 
 done_testing;

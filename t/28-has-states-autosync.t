@@ -13,20 +13,22 @@ use Object::Pad 0.800;
 use Clay::UI;
 use Clay::UI::Test::Box;
 use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Role::Interaction::Pressable;
 use Clay::UI::Role::Interaction::Focusable;
 use Clay::UI::Role::Layout::HasLayout;
 
 # -----------------------------------------------------------------------------
-# Widget composing every interaction role. HasStates is pulled in transitively
-# by Hoverable / Pressable / Focusable, so 'hovered', 'pressed', and 'focused'
-# show up in states() on edge transitions automatically.
+# Widget composing every interaction role, and HasStates explicitly:
+# 'hovered', 'pressed', and 'focused' show up in states() on edge
+# transitions automatically.
 # -----------------------------------------------------------------------------
 
 class TestStateWidget
 	:does(Clay::UI::Role::Core::Element)
 	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Style::HasStates)
 	:does(Clay::UI::Role::Interaction::Pressable)
 	:does(Clay::UI::Role::Interaction::Focusable)
 {}
@@ -81,16 +83,12 @@ subtest 'press transitions sync into states()' => sub {
 	$ui->render;
 	$ui->render(pointer_state => { x => -100, y => -100, down => 0 });
 
-	# Enter pressed. Two frames are needed: Clay reports the down-edge as
-	# PRESSED_THIS_FRAME only on the frame AFTER `down => 1` is first seen,
-	# mirroring the press-lag pattern documented in t/12-ui-widgets.t.
-	$ui->render(pointer_state => { x => 50, y => 20, down => 1 });
+	# Enter pressed: the states follow in the same frame.
 	$ui->render(pointer_state => { x => 50, y => 20, down => 1 });
 	ok($w->has_state('hovered'), 'hovered set while pressed');
-	ok($w->has_state('pressed'), 'pressed added once Clay reports PRESSED');
+	ok($w->has_state('pressed'), 'pressed added in the first down-frame');
 
-	# Release: state pending one frame, then cleared.
-	$ui->render(pointer_state => { x => 50, y => 20, down => 0 });
+	# Release: cleared in the first up-frame.
 	$ui->render(pointer_state => { x => 50, y => 20, down => 0 });
 	ok(!$w->has_state('pressed'), 'pressed cleared after release');
 	ok($w->has_state('hovered'),  'hovered still active (still over widget)');

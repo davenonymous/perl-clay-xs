@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 7: pointer state, Hovered(), PointerOver(), GetPointerOverIds().
+# Pointer state, Hovered(), PointerOver(), GetPointerOverIds().
 #
 # Clay's pointer detection walks the most recent layout tree to populate
 # pointerOverIds. That means the conventional usage is:
@@ -74,6 +74,36 @@ build_layout();
 Clay_EndLayout(0);
 
 ok( !Clay_PointerOver($button_id), 'PointerOver false when pointer is outside' );
+
+# ----- Pointer-over ids keep their string ids across frames -----------------
+Clay_SetPointerState({ x => 30, y => 30 }, 0);
+Clay_BeginLayout();
+build_layout();
+Clay_EndLayout(0);
+Clay_BeginLayout();
+my @names = sort map { $_->{stringId} // '' } @{ Clay_GetPointerOverIds() };
+Clay_EndLayout(0);
+is( \@names, [ 'Clay__RootContainer', 'button', 'root' ],
+    'pointer-over ids carry their string ids after the next Clay_BeginLayout' );
+
+# ----- Queries about the open element ----------------------------------------
+Clay_BeginLayout();
+build_layout();
+Clay_EndLayout(0);
+Clay_SetPointerState({ x => 30, y => 30 }, 0);
+Clay_BeginLayout();
+Clay__OpenElementWithId( Clay_GetElementId("root") );
+Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(100) } } });
+    Clay__OpenElementWithId( Clay_GetElementId("button") );
+    is( Clay_GetOpenElementId(), Clay_GetElementId("button")->{id}, 'Clay_GetOpenElementId names the open element' );
+    ok( Clay_Hovered(), 'Clay_Hovered is true for the element under the pointer' );
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(80), height => sizing_fixed(80) } } });
+    Clay__CloseElement();
+    Clay__OpenElementWithId( Clay_GetElementId("elsewhere") );
+    ok( !Clay_Hovered(), 'and false for an element the pointer is not over' );
+    Clay__CloseElement();
+Clay__CloseElement();
+Clay_EndLayout(0);
 
 # ----- Pointer state round-trip ---------------------------------------------
 Clay_SetPointerState({ x => 10, y => 20 }, 1);

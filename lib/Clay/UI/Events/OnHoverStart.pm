@@ -7,12 +7,14 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::Enum::Bubble;
 use Clay::UI::Events::Event;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Events::OnHoverStart :isa(Clay::UI::Events::Event) {
+class Clay::UI::Events::OnHoverStart :isa(Clay::UI::Events::Event) :strict(params) {
 	method event_name :common { 'OnHoverStart' }
+	method default_bubble_mode :common { Clay::UI::Enum::Bubble->NEVER }
 }
 
 1;
@@ -31,12 +33,14 @@ Clay::UI::Events::OnHoverStart - edge-triggered hover-entry event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI::Role::Interaction::Hoverable> on the frame the pointer first
-moves over the widget. Pairs with L<Clay::UI::Events::OnHoverStopped>.
+Fired by L<Clay::UI/render> on a L<Clay::UI::Role::Interaction::Hoverable>
+widget in the frame the pointer first moves over it. Pairs with L<Clay::UI::Events::OnHoverStopped>.
 Carries no payload beyond the inherited C<target> / C<current_target>;
 both expose the originating widget.
 
 C<name> defaults to C<'OnHoverStart'>; C<bubble_mode> defaults to
-C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> (inherited).
+C<< Clay::UI::Enum::Bubble->NEVER >>: like the DOM's C<mouseenter> /
+C<mouseleave>, hover events do not bubble, and every hovered widget
+gets its own.
 
 =cut

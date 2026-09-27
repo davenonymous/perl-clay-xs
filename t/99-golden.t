@@ -4,7 +4,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Test2::V0;
-use JSON::PP qw(decode_json encode_json);
+use JSON::PP;
 use File::Spec;
 use File::Basename qw(dirname);
 use FindBin;
@@ -12,7 +12,7 @@ use FindBin;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 11: golden-fixture comparison tests.
+# Golden-fixture comparison tests.
 #
 # Each fixture script under t/fixtures/*.pl builds a deterministic
 # layout and is expected to produce the render command array stored in
@@ -84,7 +84,7 @@ for my $script (@scripts) {
         local $/;
         my $expected_json = <$fh>;
         close $fh;
-        my $expected = canonicalise(decode_json($expected_json));
+        my $expected = canonicalise($json->decode($expected_json));
 
         is( $got, $expected, "render commands match $name.json" );
     };

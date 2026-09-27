@@ -157,4 +157,31 @@ subtest 'mixin attributes are mutable' => sub {
 	is( $cfg->{floating}, { attach_to => 2 }, 'to_config sees new floating' );
 };
 
+# -----------------------------------------------------------------------------
+# Contributor discovery: every contribute_* method runs exactly once per
+# to_config, whether it comes from a role, the class or a superclass.
+# -----------------------------------------------------------------------------
+
+my %calls;
+role CountingRole { method contribute_counted ($cfg) { $calls{role}++; return } }
+class CountingWidget :does(Clay::UI::Role::Core::Element) :does(CountingRole) {
+	method contribute_own ($cfg) { $calls{class}++; return }
+}
+
+subtest 'each contributor runs once per to_config' => sub {
+	%calls = ();
+	CountingWidget->new->to_config;
+	is( \%calls, { role => 1, class => 1 }, 'role and class contributors ran once each' );
+};
+
+class StyledBase :does(Clay::UI::Role::Core::Element) {
+	method contribute_base_style ($cfg) { $cfg->{background_color} = [1, 2, 3, 255]; return }
+}
+class StyledSub :isa(StyledBase) {}
+
+subtest 'a subclass keeps its superclass contributors' => sub {
+	is( StyledSub->new->to_config, { background_color => [1, 2, 3, 255] },
+		'contribute_* defined directly on the superclass is discovered' );
+};
+
 done_testing;

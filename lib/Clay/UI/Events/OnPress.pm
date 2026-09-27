@@ -11,11 +11,10 @@ use Clay::UI::Events::Event;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Events::OnPress :isa(Clay::UI::Events::Event) {
-	field $x        :param :reader = 0;
-	field $y        :param :reader = 0;
-	field $button   :param :reader = 1;
-	field $userdata :param :reader = undef;
+class Clay::UI::Events::OnPress :isa(Clay::UI::Events::Event) :strict(params) {
+	field $x      :param :reader = 0;
+	field $y      :param :reader = 0;
+	field $button :param :reader = 1;
 
 	method event_name :common { 'OnPress' }
 }
@@ -34,6 +33,13 @@ Clay::UI::Events::OnPress - pointer-pressed event
 		do_thing();
 	});
 
+=head1 DESCRIPTION
+
+Fired by L<Clay::UI/render> on the innermost
+L<Clay::UI::Role::Interaction::Pressable> widget under the pointer in the
+frame the pointer goes down (Clay's C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>).
+Pairs with L<Clay::UI::Events::OnRelease>.
+
 =head1 FIELDS
 
 =over 4
@@ -46,10 +52,6 @@ Pointer position when the press was registered.
 
 Mouse-button index. Clay's pointer state does not distinguish buttons,
 so this is forwarded by callers that do (defaults to C<1> = primary).
-
-=item C<userdata> (default undef)
-
-Opaque payload forwarded from the originating callback.
 
 =back
 

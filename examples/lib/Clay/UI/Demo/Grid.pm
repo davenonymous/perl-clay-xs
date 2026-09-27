@@ -11,6 +11,6 @@ use Clay::UI::Grid;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Demo::Grid :does(Clay::UI::Grid) {}
+class Clay::UI::Demo::Grid :strict(params) :does(Clay::UI::Grid) {}
 
 1;

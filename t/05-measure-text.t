@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 6: Perl-side text measurement callback.
+# The Perl-side text measurement callback.
 #
 # Install a measurer that records every call, returns a deterministic
 # size, and verifies the contract: each text element emitted in the
@@ -60,18 +60,51 @@ my ($text_cmd) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$c
 ok( defined $text_cmd, 'text render command emitted' );
 is( $text_cmd->{renderData}{fontSize}, 20, 'text command fontSize matches' );
 
-# A failing measurer must not crash; Clay survives swallowed exceptions.
-Clay_SetMeasureTextFunction(sub { die "measurer exploded" });
-Clay_BeginLayout();
-Clay__OpenElementWithId( Clay_GetElementId("root") );
-Clay__ConfigureOpenElement({
-    layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
-});
-    Clay__OpenTextElement("ouch", { fontSize => 12 });
-Clay__CloseElement();
-my $cmds2 = Clay_EndLayout(0);
+sub text_frame ($text, $config) {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("root") );
+    Clay__ConfigureOpenElement({
+        layout => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+    });
+        Clay__OpenTextElement($text, $config);
+    Clay__CloseElement();
+    my $frame = Clay_EndLayout(0);
+    my ($cmd) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$frame;
+    return $cmd;
+}
 
-ok( defined $cmds2 && ref($cmds2) eq 'ARRAY',
-    'layout still produces a render command stream after measurer dies' );
+# A failing measurer makes Clay_EndLayout croak with its error; once the
+# measurer works again the text is measured afresh (no cached zero size).
+Clay_SetMeasureTextFunction(sub { die "measurer exploded\n" });
+like( dies { text_frame("ouch", { fontSize => 12 }) }, qr/^measurer exploded$/,
+    'Clay_EndLayout croaks with the measurer error' );
+
+Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+    return { width => length($text) * 10, height => 12 };
+});
+is( text_frame("ouch", { fontSize => 12 })->{boundingBox}{width}, 40,
+    'a working measurer measures the same text correctly on the next frame' );
+
+# Strings are characters: the measurer sees the decoded text.
+{
+    use utf8;
+    my @seen;
+    Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+        push @seen, $text;
+        return { width => length($text), height => 10 };
+    });
+    text_frame("日本語 déjà", { fontSize => 10 });
+    ok( ( grep { $_ eq "日本語" } @seen ), 'measurer receives CJK characters' );
+    ok( ( grep { $_ eq "déjà" } @seen ),   'measurer receives accented characters' );
+}
+
+# A measurer that calls Clay_GetElementId while Clay reads the text must not
+# disturb the text Clay holds.
+Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+    Clay_GetElementId("measure-" . ("x" x 64)) for 1 .. 50;
+    return { width => length($text), height => 10 };
+});
+is( text_frame("unchanged words here", { fontSize => 10 })->{renderData}{stringContents},
+    "unchanged words here", 'text survives id lookups from inside the measurer' );
 
 done_testing;

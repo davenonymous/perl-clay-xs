@@ -26,7 +26,7 @@ Clay::UI::Role::Core::Stateful - require an explicit id on a Clay::UI widget
 
 =head1 SYNOPSIS
 
-	class My::Toggle :does(Clay::UI::Role::Core::Stateful) { ... }
+	class My::Toggle :strict(params) :does(Clay::UI::Role::Core::Stateful) { ... }
 
 	My::Toggle->new( id => 'main-toggle' );    # ok
 	My::Toggle->new;                            # dies

@@ -12,17 +12,28 @@ our $VERSION = '0.01';
 
 role Clay::UI::Role::Layout::HasParent {
 	field $parent :reader = undef;
+	field $_was_parented  = 0;
 	field $_ui_controller = undef;
 
 	method _set_parent ($new_parent) {
 		die "Clay::UI: parent must be a blessed widget"
 			unless blessed $new_parent;
-		die "Clay::UI: widget is already parented; no reparenting allowed"
-			if defined $parent;
+		die "Clay::UI: widget has been attached before; no reparenting allowed"
+			if $_was_parented;
 		$parent = $new_parent;
 		weaken $parent;
+		$_was_parented = 1;
 		return;
 	}
+
+	# Clears the parent slot when the widget is removed from its parent. The
+	# widget stays marked as parented: it can never be attached again.
+	method _detach_parent () {
+		$parent = undef;
+		return;
+	}
+
+	method _was_parented () { $_was_parented }
 
 	method root () {
 		my $node = $self;
@@ -91,41 +102,45 @@ C<children> arrayrefs, not by children referring back up.
 
 =head1 NO REPARENTING
 
-B<A widget's parent slot is set exactly once for its lifetime.>
-L<Clay::UI::Role::Core::Element/add_child> stamps the parent on each kid the
-first time it is attached and dies on any further attempt, including:
+B<A widget is attached to a parent at most once in its lifetime.> The
+first attachment (for example L<Clay::UI::Role::Core::Container/add_child>)
+stamps the parent; every later attempt dies, including:
 
 =over 4
 
 =item *
 
-Adding the same widget to a different parent.
+Adding the same widget to a different parent, or to the same parent
+again.
 
 =item *
 
-Adding the same widget to its existing parent again.
+Re-attaching a widget after it was removed (C<remove_child>,
+C<clear_children>, a Grid row replacement): removal detaches the widget
+- its C<parent> becomes undef, it becomes the C<root> of its own
+subtree, and C<ui> returns undef for that subtree - but it stays
+marked as having been attached.
 
 =item *
 
-Re-attaching a widget that was previously removed via C<remove_child>
-or C<clear_children>: those mutators do B<not> clear the child's
-C<parent> slot.
+Attaching a widget whose previous parent has been garbage-collected.
 
 =back
 
-A detached widget therefore cannot be re-attached anywhere. Build a
-fresh widget per mount rather than reusing instances across rebuilds.
-This rule keeps the parent contract simple (single-writer, no race
-between concurrent attaches, no cache-invalidation surface) at the cost
-of forbidding patterns that rely on widget reuse.
+A widget that was ever attached also cannot become the root of a
+L<Clay::UI>. Build a fresh widget per mount rather than reusing
+instances. The rule keeps the parent contract simple (one writer, no
+stale back-references, no id reuse across trees) at the cost of
+forbidding patterns that rely on widget reuse.
 
 =head1 METHODS
 
 =head2 parent
 
 Read-only accessor. Returns the widget that owns this one, or C<undef>
-if the widget has never been attached, or if the parent has been
-garbage-collected (the back-reference is weak).
+if the widget has never been attached, has been removed from its
+parent, or its parent has been garbage-collected (the back-reference is
+weak).
 
 =head2 root
 
@@ -140,8 +155,9 @@ enough in practice that the walk cost is negligible.
 =head2 ui
 
 Returns the L<Clay::UI> controller that owns this widget's tree, or
-C<undef> if the widget is not yet attached to a Clay::UI. Walks up to
-the root widget and returns the controller stamped there by
+C<undef> if the widget is not attached to a Clay::UI (not yet, or no
+longer: a removed subtree has no controller). Walks up to the root
+widget and returns the controller stamped there by
 C<< Clay::UI->new(root => $root) >>.
 
 The Clay::UI back-reference is held weakly; if the controller has been

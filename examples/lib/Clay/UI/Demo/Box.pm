@@ -11,6 +11,6 @@ use Clay::UI::Box;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Demo::Box :does(Clay::UI::Box) {}
+class Clay::UI::Demo::Box :strict(params) :does(Clay::UI::Box) {}
 
 1;

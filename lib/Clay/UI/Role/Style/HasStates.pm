@@ -59,7 +59,7 @@ Clay::UI::Role::Style::HasStates - free-form state-set mixin for Clay::UI widget
 	use Clay::UI::Role::Core::Element;
 	use Clay::UI::Role::Style::HasStates;
 
-	class My::Button
+	class My::Button :strict(params)
 		:does(Clay::UI::Role::Core::Element)
 		:does(Clay::UI::Role::Style::HasStates)
 	{}

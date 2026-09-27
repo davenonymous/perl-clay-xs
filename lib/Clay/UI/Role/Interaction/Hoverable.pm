@@ -7,8 +7,6 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::XS qw(Clay_OnHover);
-
 use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Events::OnHoverStart;
@@ -20,59 +18,17 @@ role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitte
                                             :does(Clay::UI::Role::Style::HasStates) {
 	field $is_hovered :reader = 0;
 
-	# Set to 1 by the Clay_OnHover trampoline whenever it fires for this
-	# widget. Compared against $is_hovered each frame to detect edges.
-	field $_seen_over_this_frame = 0;
-
-	# Sub-roles (Pressable, future) push extra per-frame logic in here so
-	# the single Clay_OnHover slot per element stays uncontested:
-	#   $self->_register_pointer_hook(sub ($pointer, $userdata) { ... });
-	#   $self->_register_transition_hook(sub ($was_over_this_frame) { ... });
-	field @_pointer_hooks;
-	field @_transition_hooks;
-
-	method _register_pointer_hook ($code) {
-		die "Hoverable: pointer hook must be a coderef"
-			unless ref $code eq 'CODE';
-		push @_pointer_hooks, $code;
-		return $self;
+	ADJUST {
+		die "Clay::UI: " . ref($self) . " composes Clay::UI::Role::Interaction::Hoverable on a text node;"
+			. " Clay cannot report the pointer over text elements - wrap the text in an Element"
+			if $self->DOES('Clay::UI::Role::Core::TextNode');
 	}
 
-	method _register_transition_hook ($code) {
-		die "Hoverable: transition hook must be a coderef"
-			unless ref $code eq 'CODE';
-		push @_transition_hooks, $code;
-		return $self;
-	}
-
-	# Called by the Clay::UI walker once per frame, between
-	# Clay__ConfigureOpenElement and the recursion into children.
-	#
-	# At this point the callback we registered in the PREVIOUS frame has
-	# already fired (or not) via Clay_SetPointerState earlier in the same
-	# render() call, so $_seen_over_this_frame is the authoritative
-	# "pointer was over this widget on the most-recent input poll" flag.
-	method install_hover_callback {
-		my $was_over = $_seen_over_this_frame;
-
-		if ($was_over && !$is_hovered) {
-			$is_hovered = 1;
-			$self->add_state('hovered');
-			$self->fire_event(Clay::UI::Events::OnHoverStart->new);
-		} elsif (!$was_over && $is_hovered) {
-			$is_hovered = 0;
-			$self->remove_state('hovered');
-			$self->fire_event(Clay::UI::Events::OnHoverStopped->new);
-		}
-
-		$_->($was_over) for @_transition_hooks;
-		$_seen_over_this_frame = 0;
-
-		my @hooks = @_pointer_hooks;
-		Clay_OnHover(sub ($id, $pointer, $userdata) {
-			$_seen_over_this_frame = 1;
-			$_->($pointer, $userdata) for @hooks;
-		}, undef);
+	# Set by Clay::UI while it dispatches pointer input; keeps the
+	# 'hovered' state in step with is_hovered.
+	method _set_hovered ($hovered) {
+		$is_hovered = $hovered ? 1 : 0;
+		$hovered ? $self->add_state('hovered') : $self->remove_state('hovered');
 		return;
 	}
 }
@@ -83,16 +39,16 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Interaction::Hoverable - stateful hover-tracking + edge-triggered events
+Clay::UI::Role::Interaction::Hoverable - hover tracking with edge-triggered events
 
 =head1 SYNOPSIS
 
 	use Object::Pad;
-	use Clay::UI::Role::Core::Element;
+	use Clay::UI::Role::Core::Stateful;
 	use Clay::UI::Role::Interaction::Hoverable;
 
-	class My::HoverBox
-		:does(Clay::UI::Role::Core::Element)
+	class My::HoverBox :strict(params)
+		:does(Clay::UI::Role::Core::Stateful)
 		:does(Clay::UI::Role::Interaction::Hoverable)
 	{}
 
@@ -104,52 +60,37 @@ Clay::UI::Role::Interaction::Hoverable - stateful hover-tracking + edge-triggere
 
 =head1 DESCRIPTION
 
-Stateful role. Composing widgets get:
+Composing widgets get:
 
 =over 4
 
 =item C<is_hovered> (reader)
 
-Live boolean reflecting whether the pointer was over the widget at the
-most recent input poll.
+True while the pointer is over the widget, as of the last
+L<Clay::UI/render>. The C<hovered> state (see
+L<Clay::UI::Role::Style::HasStates>) follows it.
 
-=item C<install_hover_callback>
+=item Events
 
-Method called once per frame by the L<Clay::UI> walker. It detects
-hover edges, fires L<Clay::UI::Events::OnHoverStart> /
-L<Clay::UI::Events::OnHoverStopped> via the event system, then
-re-registers the underlying C<Clay_OnHover> trampoline for the next
-frame (per L<AGENTS.md> invariant 6).
-
-=back
-
-Hoverable composes L<Clay::UI::Role::Events::Emitter> transitively, so the
-consuming widget gets C<fire_event> for free; just compose Hoverable
-and you can both listen for events (every widget can - see
-L<Clay::UI::Role::Events::Listener>) and fire your own.
-
-=head1 EXTENSION POINTS
-
-Sub-roles (e.g. L<Clay::UI::Role::Interaction::Pressable>) layer additional pointer
-state on top of Hoverable without registering their own C<Clay_OnHover>
-(the registry only keeps one entry per element). Two hooks are
-available:
-
-=over 4
-
-=item C<_register_pointer_hook($code)>
-
-C<$code> is invoked as C<< $code->($pointer, $userdata) >> from inside
-the Clay_OnHover trampoline every frame the pointer is over the
-widget.
-
-=item C<_register_transition_hook($code)>
-
-C<$code> is invoked as C<< $code->($was_over_this_frame) >> from
-C<install_hover_callback>, after the built-in hover-edge detection but
-before the new Clay_OnHover registration. Use this to update derived
-state at the frame boundary.
+L<Clay::UI::Events::OnHoverStart> when the pointer enters the widget and
+L<Clay::UI::Events::OnHoverStopped> when it leaves (or when the widget is
+removed from the tree while hovered). Like the DOM's C<mouseenter> /
+C<mouseleave>, they do not bubble by default: every hovered widget -
+nested ones included - gets its own event.
 
 =back
+
+The widget needs no wiring: L<Clay::UI/render> works out which widgets
+are under the pointer from Clay's pointer-over list and fires the
+events itself, before it lays out the frame (see
+L<Clay::UI/POINTER EVENTS>). Listeners may therefore change the tree.
+
+Hover tracking needs an element: composing Hoverable (or
+L<Clay::UI::Role::Interaction::Pressable>) onto a text node dies at
+construction, because Clay does not report the pointer over text
+elements. Wrap the text in an Element and make that hoverable.
+
+Hoverable composes L<Clay::UI::Role::Events::Emitter> and
+L<Clay::UI::Role::Style::HasStates> transitively.
 
 =cut

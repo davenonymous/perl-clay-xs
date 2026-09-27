@@ -11,6 +11,6 @@ use Clay::UI::Text;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Demo::Text :does(Clay::UI::Text) {}
+class Clay::UI::Demo::Text :strict(params) :does(Clay::UI::Text) {}
 
 1;

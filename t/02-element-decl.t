@@ -8,12 +8,12 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 3: a rich ElementDeclaration passes through Clay's open/configure/
-# close pipeline without raising errors. We do not have a Perl-callable
-# inspector for the marshalled struct (Clay does not expose one), so the
-# check here is "Clay accepts the declaration and produces the matching
-# render commands". The shape of those commands implicitly verifies the
-# borders, corner radius, etc. were marshalled correctly.
+# A rich ElementDeclaration passes through Clay's open/configure/close
+# pipeline without raising errors. Clay has no inspector for the marshalled
+# struct, so the check is "Clay accepts the declaration and produces the
+# matching render commands": their shape verifies that borders, corner
+# radius, etc. were marshalled correctly. Invalid input croaks with the
+# struct and field named.
 # -----------------------------------------------------------------------------
 
 my @errors;
@@ -107,5 +107,107 @@ my @floater_rects = grep {
 } @$cmds2;
 ok( scalar(@floater_rects) >= 1, 'floating rectangle emitted somewhere' );
 is( $floater_rects[0]{zIndex}, 5, 'zIndex propagated from floating config' );
+
+# -----------------------------------------------------------------------------
+# Every value is range-checked at the boundary; errors name struct and field.
+# -----------------------------------------------------------------------------
+
+sub configure_error ($decl) {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("checked") );
+    my $error = dies { Clay__ConfigureOpenElement($decl) };
+    Clay__CloseElement();
+    Clay_EndLayout(0);
+    return $error;
+}
+
+subtest 'out-of-range values croak with struct and field' => sub {
+    like( configure_error({ layout => { padding => { left => -8 } } }),
+        qr/Clay_ElementDeclaration\.layout\.padding\.left: expected an integer in 0\.\.65535, got '-8'/,
+        'negative padding (uint16)' );
+    like( configure_error({ layout => { childGap => 70000 } }),
+        qr/layout\.childGap: expected an integer in 0\.\.65535/, 'childGap above 65535' );
+    like( configure_error({ layout => { layoutDirection => 257 } }),
+        qr/layout\.layoutDirection: expected an integer in 0\.\.1/, 'enum out of range' );
+    like( configure_error({ floating => { zIndex => 40000 } }),
+        qr/floating\.zIndex: expected an integer in -32768\.\.32767/, 'zIndex beyond int16' );
+    like( configure_error({ sizingGroup => { width => -1 } }),
+        qr/sizingGroup\.width: expected an integer in 0\.\.4294967295/, 'negative sizing group (uint32)' );
+    like( configure_error({ border => { width => { top => 1.5 } } }),
+        qr/border\.width\.top: expected an integer/, 'fractional border width' );
+    like( configure_error({ backgroundColor => [ 'red', 0, 0, 255 ] }),
+        qr/backgroundColor\.r: expected a finite number, got 'red'/, 'non-numeric colour channel' );
+    like( configure_error({ cornerRadius => 9**9**9 }),
+        qr/cornerRadius: expected a finite number/, 'infinite corner radius' );
+    Clay_BeginLayout();
+    like( dies { Clay__OpenTextElement("x", { fontSize => -1 }) },
+        qr/Clay_TextElementConfig\.fontSize: expected an integer in 0\.\.65535/, 'negative fontSize' );
+    Clay_EndLayout(0);
+    like( dies { Clay_GetElementData({ id => -1 }) },
+        qr/element id\.id: expected an integer in 0\.\.4294967295/, 'negative element id' );
+};
+
+subtest 'wrong-typed nested values croak' => sub {
+    like( configure_error({ floating => { attachPoints => [ 1, 2 ] } }),
+        qr/floating\.attachPoints: expected a hash reference/, 'attachPoints must be a hash' );
+    like( configure_error({ transition => { duration => 1, enter => 'fade' } }),
+        qr/transition\.enter: expected a hash reference, got 'fade'/, 'transition.enter must be a hash' );
+    like( configure_error({ transition => { duration => 1, exit => [] } }),
+        qr/transition\.exit: expected a hash reference/, 'transition.exit must be a hash' );
+    like( configure_error({ layout => { padding => 8 } }),
+        qr/layout\.padding: expected a hash reference, got '8'/, 'scalar padding' );
+};
+
+subtest 'floating.parentId accepts an element id hash' => sub {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("anchor") );
+    Clay__ConfigureOpenElement({
+        layout => { sizing => { width => sizing_fixed(40), height => sizing_fixed(40) } },
+    });
+    Clay__CloseElement();
+    Clay__OpenElementWithId( Clay_GetElementId("attached") );
+    Clay__ConfigureOpenElement({
+        layout   => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } },
+        floating => {
+            attachTo     => CLAY_ATTACH_TO_ELEMENT_WITH_ID,
+            parentId     => Clay_GetElementId("anchor"),
+            attachPoints => { element => CLAY_ATTACH_POINT_LEFT_TOP, parent => CLAY_ATTACH_POINT_RIGHT_TOP },
+        },
+    });
+    Clay__CloseElement();
+    Clay_EndLayout(0);
+    is( Clay_GetElementData( Clay_GetElementId("attached") )->{boundingBox}{x}, 40,
+        'attached to the right edge of the element named by the id hash' );
+};
+
+subtest 'an exiting element is drawn underneath its siblings by default' => sub {
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $frame = sub ($with_leaving) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("row") );
+        Clay__OpenElementWithId( Clay_GetElementId("staying") );
+        Clay__ConfigureOpenElement({
+            layout          => { sizing => { width => sizing_fixed(30), height => sizing_fixed(10) } },
+            backgroundColor => [1, 1, 1, 255],
+        });
+        Clay__CloseElement();
+        if ($with_leaving) {
+            Clay__OpenElementWithId( Clay_GetElementId("leaving") );
+            Clay__ConfigureOpenElement({
+                layout          => { sizing => { width => sizing_fixed(20), height => sizing_fixed(10) } },
+                backgroundColor => [2, 2, 2, 255],
+                transition      => { duration => 1, properties => CLAY_TRANSITION_PROPERTY_X, exit => { hasSetFinal => 1 } },
+            });
+            Clay__CloseElement();
+        }
+        Clay__CloseElement();
+        return [ map { $_->{renderData}{backgroundColor}{r} }
+                 grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout(0.016) } ];
+    };
+    is( $frame->(1), [1, 2], 'declared order while both are present' ) for 1 .. 2;
+    is( $frame->(0), [2, 1],
+        'the exiting element is drawn first (CLAY_EXIT_TRANSITION_ORDERING_UNDERNEATH_SIBLINGS, the C default)' );
+    Clay_SetTransitionHandlers();
+};
 
 done_testing;

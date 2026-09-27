@@ -8,74 +8,136 @@
  * Conventions used throughout:
  *
  *   - clay_perl_*   : functions implemented in this binding
- *   - cpc_          : abbreviation for "Clay Perl Context" used on fields
  *   - SV/HV/AV      : standard Perl reference-counted value types
  *
  * Memory ownership rules (read these before touching the helpers):
  *
- *   - The per-frame string arena is owned by clay_perl_context. Buffers
- *     allocated from it remain valid until the next Clay_BeginLayout call,
- *     at which point the arena is reset (offset -> 0). All Clay_String
- *     values passed in from Perl strings live in this arena; their
- *     isStaticallyAllocated flag is always false.
+ *   - Text strings handed to Clay (Clay__OpenTextElement) are copied into
+ *     the per-context string arena, a list of chunks that never move or
+ *     shrink while Clay may still read them. Clay keeps the text pointer
+ *     of a text element until the end of the following frame (an element
+ *     can start an exit transition one frame after its last declaration)
+ *     and for as long as an exit transition of its element is running.
+ *     The arena therefore retains the previous frame's chunks, and every
+ *     chunk while any exit transition runs. isStaticallyAllocated is
+ *     always false.
  *
- *   - The callback SV slots (measure_text_cb, error_handler_cb,
- *     query_scroll_offset_cb) hold one increment of refcount. They are
- *     replaced atomically: install increments the new one, decrements the
- *     old one, then writes the slot.
+ *   - Element id strings (Clay_ElementId.stringId) are interned in a
+ *     per-context hash. Clay copies element ids into its persistent hash
+ *     map and into pointerOverIds, so the interned buffers live until the
+ *     id has been unused for two frames, no exit transition runs and the
+ *     id is not part of the current pointer-over list.
  *
- *   - hover_callbacks and transition_callbacks are HVs that contain
- *     blessed arrayrefs (one ref + userdata per element_id). Standard
- *     Perl GC rules apply; the HV holds one refcount per entry.
+ *   - Callback and userdata slots hold private copies (newSVsv) of the
+ *     values the caller passed, one refcount each. Replacing a slot
+ *     copies the new value before releasing the old one.
  *
- *   - clay_arena_memory is a malloc()-ed buffer owned by the Perl context.
- *     It is freed on context DESTROY. Clay itself never frees it.
+ *   - hover_callbacks maps element ids (decimal strings) to plain
+ *     arrayrefs [coderef, userdata, generation]; the HV owns one refcount
+ *     per entry.
+ *
+ *   - clay_arena_memory is a malloc()-ed buffer owned by the context. It
+ *     is freed on context DESTROY. Clay itself never frees it.
  */
 
 #ifndef CLAY_PERL_H
 #define CLAY_PERL_H
 
 /*
- * We intentionally do NOT define PERL_NO_GET_CONTEXT.
- *
- * With PERL_NO_GET_CONTEXT every macro that uses the Perl interpreter
- * (newSV, SvREFCNT_dec, hv_store, ...) requires an explicit `aTHX` /
- * `pTHX` argument to be threaded through every C helper. That doubles
- * the signature noise on every internal helper without measurable
- * performance gain in a UI-layout workload.
- *
- * Helpers that need a thread context will use `dTHX` locally. Trampolines
- * called by Clay (which knows nothing about Perl) also use `dTHX`.
+ * Every helper takes the interpreter explicitly (pTHX_ / aTHX_), so the
+ * cheaper PERL_NO_GET_CONTEXT calling convention is used throughout.
+ * Trampolines called by Clay (which knows nothing about Perl) fetch the
+ * interpreter with dTHX.
  */
+#define PERL_NO_GET_CONTEXT
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
 
 #include "clay/clay.h"
+#include "clay_impl_helpers.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
+/* Upstream implements Clay_SetExternalScrollHandlingEnabled but does not
+ * declare it in the public API section of clay.h. */
+void Clay_SetExternalScrollHandlingEnabled(bool enabled);
+
+/* The interpreter a context belongs to. Contexts must not be touched
+ * from another interpreter (ithreads): Clay keeps one process-wide
+ * current-context pointer. */
+#ifdef MULTIPLICITY
+#  define CLAY_PERL_THIS_INTERPRETER ((void *) aTHX)
+#else
+#  define CLAY_PERL_THIS_INTERPRETER ((void *) NULL)
+#endif
+
+/* ---------------------------------------------------------------------------
+ * Per-frame string arena.
+ *
+ * A singly linked list of chunks. Copies append to the head chunk of the
+ * current frame; when it is full a new chunk of max(needed, 2 x previous)
+ * bytes is pushed. Chunks are never reallocated or freed while Clay may
+ * read from them (see clay_perl_context_begin_frame for the lifetime rule).
+ * ------------------------------------------------------------------------ */
+
+typedef struct clay_perl_arena_chunk {
+    struct clay_perl_arena_chunk *next;
+    size_t capacity;
+    size_t used;
+    char   bytes[1];
+} clay_perl_arena_chunk;
+
+typedef struct clay_perl_string_arena {
+    clay_perl_arena_chunk *current;   /* chunks written during this frame */
+    clay_perl_arena_chunk *retained;  /* chunks of earlier frames Clay may still read */
+    size_t frame_bytes;               /* bytes copied during this frame */
+} clay_perl_string_arena;
+
 /* ---------------------------------------------------------------------------
  * Per-Perl-context state.
  *
- * One of these is allocated per call to clay_perl_context_new() (which wraps
- * Clay_Initialize). A blessed Clay::XS::Context scalar ref in Perl
- * holds a pointer to one of these. Cleanup happens in DESTROY.
+ * One of these is allocated per successful Clay_Initialize. The blessed
+ * Clay::XS::Context object is a reference to a read-only scalar that
+ * carries a pointer to this struct in private ext magic; every Perl
+ * handle to the context shares that one referent, so DESTROY runs once.
  * ------------------------------------------------------------------------ */
 
 typedef struct clay_perl_context {
+    /* Owning interpreter and the blessed referent (not ref-counted). */
+    void *owner;
+    SV   *referent;
+
     /* Underlying Clay state. */
     Clay_Context *clay_ctx;
     Clay_Arena    clay_arena;
     char         *clay_arena_memory;
 
-    /* Per-frame string arena. Grows monotonically; reset on BeginLayout. */
-    char   *string_arena;
-    size_t  string_arena_used;
-    size_t  string_arena_capacity;
+    /* Element and measure-cache word counts Clay_Initialize sized the
+     * arena for. Clay's persistent arrays keep these sizes, so a count
+     * changed afterwards is unsafe until the next Clay_Initialize. */
+    int32_t max_element_count;
+    int32_t max_measure_text_cache_word_count;
 
-    /* Global-per-context callbacks. Each holds one refcount. */
+    /* Frame bookkeeping for the open/close balance guards. */
+    bool     in_frame;
+    int32_t  open_depth;
+    uint32_t frame_generation;
+
+    /* Per-frame text copies and interned element id strings. */
+    clay_perl_string_arena strings;
+    HV *interned_ids;
+
+    /* Deferred callback error: the first exception raised by a Perl
+     * callback while Clay was running, re-thrown at the next safe point.
+     * Later errors of the same period are only counted. */
+    CV      *dispatch_cv;
+    SV      *pending_error;
+    uint32_t suppressed_errors;
+    bool     measure_cache_poisoned;
+
+    /* Per-context callbacks. Each slot holds a private copy. */
     SV *measure_text_cb;
     SV *measure_text_userdata;
     SV *error_handler_cb;
@@ -83,28 +145,15 @@ typedef struct clay_perl_context {
     SV *query_scroll_offset_cb;
     SV *query_scroll_offset_userdata;
 
-    /* Per-element hover callbacks. Keyed by element id (uint32_t as decimal
-     * string). Each value is an arrayref [coderef, userdata, generation]. */
-    HV       *hover_callbacks;
-    uint32_t  hover_generation;
+    /* Per-element hover callbacks, keyed by element id (decimal string).
+     * Each value is an arrayref [coderef, userdata, generation]. */
+    HV *hover_callbacks;
 
-    /* Transition callbacks.
-     *
-     * NOTE on the design: Clay's transition callback signatures
-     * (Clay_TransitionElementConfig.handler / enter.setInitialState /
-     * exit.setFinalState) do not pass the element id to the callback. That
-     * means a single C trampoline cannot demultiplex back to a per-element
-     * Perl coderef the way Clay_OnHover can. See src/clay/clay.h:4685,
-     * src/clay/clay.h:4600, src/clay/clay.h:4486 for the call sites that
-     * confirm this.
-     *
-     * For Phase 1 we expose a single per-context handler set. If the user
-     * stores transition handlers in an element declaration's `transition`
-     * hashref, we install our trampolines (which call these per-context
-     * slots) on every element. The user's handler can dispatch on the
-     * transition state and the values in args.target if it needs to
-     * distinguish elements. Per-element handlers will require a small
-     * upstream patch and are intentionally deferred. */
+    /* Transition callbacks. Clay's transition callback signatures carry
+     * no element id (see the handler / setInitialState / setFinalState
+     * calls in Clay_EndLayout), so one handler set per context serves
+     * every transitioning element; the handler dispatches on its
+     * arguments. */
     SV *transition_handler_cb;
     SV *transition_set_initial_cb;
     SV *transition_set_final_cb;
@@ -115,23 +164,61 @@ typedef struct clay_perl_context {
  * Context lifecycle (src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
+/* Allocates a context and its Clay arena. Returns NULL (after freeing
+ * everything) when the arena cannot be allocated. */
 clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity);
 void               clay_perl_context_free(pTHX_ clay_perl_context *self);
 
-/* Bless the given pointer as a Clay::XS::Context. Returns a new mortal SV. */
+/* Creates the blessed Clay::XS::Context object for a new context and
+ * records its referent. Returns a new (non-mortal) reference. */
+SV *clay_perl_context_bless(pTHX_ clay_perl_context *self);
+
+/* Returns a new (non-mortal) reference to the context's shared referent. */
 SV *clay_perl_context_to_sv(pTHX_ clay_perl_context *self);
 
-/* Recover a clay_perl_context * from a blessed SV. Croaks if the SV is not a
- * Clay::XS::Context. */
+/* Recovers the context from a Clay::XS::Context object. Croaks "not a
+ * live Clay::XS::Context" for copies, forgeries and destroyed contexts. */
 clay_perl_context *clay_perl_context_from_sv(pTHX_ SV *sv);
 
+/* Like clay_perl_context_from_sv but never croaks. Returns NULL for any
+ * SV that does not carry a live context, and the magic slot through
+ * *magic_out when it exists (so DESTROY can clear it). */
+clay_perl_context *clay_perl_context_peek(pTHX_ SV *sv, MAGIC **magic_out);
+
 /* ---------------------------------------------------------------------------
- * Per-frame string arena (src/clay_perl_context.c).
+ * Frame lifecycle, string arena and id interning (src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
-void        clay_perl_arena_reset(clay_perl_context *self);
-Clay_String clay_perl_arena_copy_pv(pTHX_ clay_perl_context *self, SV *sv);
-Clay_String clay_perl_arena_copy_bytes(clay_perl_context *self, const char *bytes, size_t len);
+/* Called at Clay_BeginLayout: recycles the string arena, sweeps unused
+ * interned ids and stale hover entries, advances frame_generation. */
+void        clay_perl_context_begin_frame(pTHX_ clay_perl_context *self);
+
+/* Copies the (UTF-8) bytes of sv into the arena. Croaks if sv is undef. */
+Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, const char *what);
+
+/* Returns a Clay_String pointing at the interned copy of the given bytes. */
+Clay_String clay_perl_intern_id(pTHX_ clay_perl_context *self, const char *bytes, STRLEN len);
+
+/* ---------------------------------------------------------------------------
+ * Deferred callback errors (src/callbacks.c).
+ * ------------------------------------------------------------------------ */
+
+/* Stashes the current $@ as the context's pending error (or counts it if
+ * one is already pending) and clears $@. */
+void clay_perl_stash_callback_error(pTHX_ clay_perl_context *ctx);
+
+/* Stashes a plain message as the pending error (or counts it). */
+void clay_perl_stash_error_message(pTHX_ clay_perl_context *ctx, const char *message);
+
+/* Removes and returns the pending error as a mortal SV, or NULL when
+ * nothing is pending. A string message gains " (and N more callback
+ * errors this frame)" when N > 0 and then the optional note. Resets
+ * Clay's measure-text cache when a failed measurement may have been
+ * cached. Call only while ctx is Clay's current context. */
+SV  *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note);
+
+/* Croaks with the pending error, if any. */
+void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx);
 
 /* ---------------------------------------------------------------------------
  * HV/AV <-> Clay struct converters (src/marshal.c).
@@ -140,79 +227,98 @@ Clay_String clay_perl_arena_copy_bytes(clay_perl_context *self, const char *byte
  *   *_from_sv  : Perl value -> C struct (used at function entry)
  *   *_to_sv    : C struct  -> Perl value (used at function return)
  *
- * All _from_sv helpers croak on invalid input (Law of Fail Fast).
- * They never return half-initialised structs.
+ * All _from_sv helpers croak on invalid input (wrong reference type,
+ * non-numeric or non-finite numbers, integers out of the C field's
+ * range) naming the struct and field. They never return half-initialised
+ * structs. All _to_sv helpers return a new, non-mortal SV.
  * ------------------------------------------------------------------------ */
 
-Clay_Color           clay_color_from_sv(pTHX_ SV *sv);
+/* Scalar parsing shared by the XS wrappers. */
+double   clay_perl_parse_float(pTHX_ SV *sv, const char *what);
+double   clay_perl_parse_max_float(pTHX_ SV *sv, const char *what);
+UV       clay_perl_parse_uint(pTHX_ SV *sv, const char *what, UV max);
+NV       clay_perl_parse_integer(pTHX_ SV *sv, const char *what, NV min, NV max);
+SV      *clay_perl_require_code(pTHX_ SV *sv, const char *what, bool allow_undef);
+
+Clay_Color           clay_color_from_sv(pTHX_ SV *sv, const char *what);
 SV                  *clay_color_to_sv(pTHX_ Clay_Color value);
 
-Clay_Vector2         clay_vector2_from_sv(pTHX_ SV *sv);
+Clay_Vector2         clay_vector2_from_sv(pTHX_ SV *sv, const char *what);
 SV                  *clay_vector2_to_sv(pTHX_ Clay_Vector2 value);
 
-Clay_Dimensions      clay_dimensions_from_sv(pTHX_ SV *sv);
+Clay_Dimensions      clay_dimensions_from_sv(pTHX_ SV *sv, const char *what);
 SV                  *clay_dimensions_to_sv(pTHX_ Clay_Dimensions value);
 
-Clay_BoundingBox     clay_bounding_box_from_sv(pTHX_ SV *sv);
 SV                  *clay_bounding_box_to_sv(pTHX_ Clay_BoundingBox value);
 
-Clay_CornerRadius    clay_corner_radius_from_sv(pTHX_ SV *sv);
 SV                  *clay_corner_radius_to_sv(pTHX_ Clay_CornerRadius value);
-
-Clay_Padding         clay_padding_from_sv(pTHX_ SV *sv);
 SV                  *clay_padding_to_sv(pTHX_ Clay_Padding value);
-
-Clay_BorderWidth     clay_border_width_from_sv(pTHX_ SV *sv);
 SV                  *clay_border_width_to_sv(pTHX_ Clay_BorderWidth value);
-
-Clay_ChildAlignment  clay_child_alignment_from_sv(pTHX_ SV *sv);
-SV                  *clay_child_alignment_to_sv(pTHX_ Clay_ChildAlignment value);
-
-Clay_SizingAxis      clay_sizing_axis_from_sv(pTHX_ SV *sv);
 SV                  *clay_sizing_axis_to_sv(pTHX_ Clay_SizingAxis value);
 
-Clay_Sizing          clay_sizing_from_sv(pTHX_ SV *sv);
-SV                  *clay_sizing_to_sv(pTHX_ Clay_Sizing value);
+Clay_TextElementConfig  clay_text_element_config_from_sv(pTHX_ SV *sv);
+SV                     *clay_text_element_config_to_sv(pTHX_ Clay_TextElementConfig value);
 
-Clay_LayoutConfig    clay_layout_config_from_sv(pTHX_ SV *sv);
-SV                  *clay_layout_config_to_sv(pTHX_ Clay_LayoutConfig value);
+Clay_ElementDeclaration clay_element_declaration_from_sv(pTHX_ SV *sv);
 
-Clay_TextElementConfig clay_text_element_config_from_sv(pTHX_ SV *sv);
-SV                    *clay_text_element_config_to_sv(pTHX_ Clay_TextElementConfig value);
+/* Transition data: from_sv starts from base and overrides the keys present
+ * in the hash; undef returns base unchanged. */
+Clay_TransitionData clay_transition_data_from_sv(pTHX_ SV *sv, Clay_TransitionData base, const char *what);
+SV                 *clay_transition_data_to_sv(pTHX_ Clay_TransitionData data);
 
-Clay_AspectRatioElementConfig clay_aspect_ratio_config_from_sv(pTHX_ SV *sv);
-Clay_ImageElementConfig       clay_image_config_from_sv(pTHX_ SV *sv);
-Clay_CustomElementConfig      clay_custom_config_from_sv(pTHX_ SV *sv);
-Clay_ClipElementConfig        clay_clip_config_from_sv(pTHX_ SV *sv);
-Clay_BorderElementConfig      clay_border_config_from_sv(pTHX_ SV *sv);
-Clay_FloatingElementConfig    clay_floating_config_from_sv(pTHX_ SV *sv);
-
-Clay_ElementDeclaration       clay_element_declaration_from_sv(pTHX_ clay_perl_context *ctx, SV *sv);
-
-Clay_ElementId      clay_element_id_from_sv(pTHX_ SV *sv);
+/* Element ids. from_sv requires an element-id hash reference (undef
+ * croaks) and leaves stringId empty; the caller interns it where Clay
+ * keeps the id (Clay__OpenElementWithId). */
+Clay_ElementId      clay_element_id_from_sv(pTHX_ SV *sv, const char *what);
 SV                 *clay_element_id_to_sv(pTHX_ Clay_ElementId id);
 
-Clay_PointerData    clay_pointer_data_from_sv(pTHX_ SV *sv);
 SV                 *clay_pointer_data_to_sv(pTHX_ Clay_PointerData data);
 
 /* Render command output (src/marshal.c). */
-SV *clay_render_command_to_sv(pTHX_ const Clay_RenderCommand *cmd);
 SV *clay_render_command_array_to_sv(pTHX_ const Clay_RenderCommandArray *array);
 
 /* ScrollContainerData and ElementData returns. */
 SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data);
 SV *clay_element_data_to_sv(pTHX_ Clay_ElementData data);
 
-/* String slice -> Perl string (read-only, copied). */
-SV *clay_string_slice_to_sv(pTHX_ Clay_StringSlice slice);
+/* Clay bytes -> Perl character string (copied, UTF-8 flagged). */
+SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length);
 
 /* ---------------------------------------------------------------------------
  * Callback trampolines (src/callbacks.c).
  *
- * These are static C functions that Clay holds as function pointers. They
- * forward into Perl via the clay_perl_context pointer threaded through
- * userData (or through the global current-context for hover/transition).
+ * Clay holds these as function pointers. Each one pushes its arguments and
+ * calls the internal Clay::XS::_dispatch XSUB once under G_EVAL; the
+ * dispatcher calls the user's coderef and parses its return value, so any
+ * exception (from the callback or from parsing its result) lands in the
+ * trampoline's G_EVAL and never unwinds through Clay's C frames.
  * ------------------------------------------------------------------------ */
+
+typedef enum {
+    CLAY_PERL_DISPATCH_MEASURE_TEXT = 1,
+    CLAY_PERL_DISPATCH_ERROR_HANDLER,
+    CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET,
+    CLAY_PERL_DISPATCH_HOVER,
+    CLAY_PERL_DISPATCH_TRANSITION_HANDLER,
+    CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL,
+    CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL
+} clay_perl_dispatch_kind;
+
+/* Result slot a trampoline hands to the dispatcher. The trampoline fills
+ * in the defaults; the dispatcher overwrites the member for its kind. */
+typedef struct clay_perl_dispatch_result {
+    Clay_Dimensions     dimensions;
+    Clay_Vector2        vector;
+    Clay_TransitionData transition_data;
+    bool                complete;
+} clay_perl_dispatch_result;
+
+/* Body of the Clay::XS::_dispatch XSUB: parses the callback's return
+ * value (ret) for the given kind into *result. args_sv is the argument
+ * hash the transition handler may have modified (NULL otherwise). */
+void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
+                                     clay_perl_dispatch_result *result,
+                                     SV *ret, SV *args_sv);
 
 Clay_Dimensions clay_perl_measure_text_trampoline(
     Clay_StringSlice text,
@@ -230,40 +336,58 @@ void clay_perl_on_hover_trampoline(
     Clay_PointerData pointer,
     void *userData);
 
-/* Returns true (1) when this transition handler completes. */
 bool clay_perl_transition_handler_trampoline(Clay_TransitionCallbackArguments args);
 Clay_TransitionData clay_perl_transition_set_initial_trampoline(
     Clay_TransitionData target, Clay_TransitionProperty properties);
 Clay_TransitionData clay_perl_transition_set_final_trampoline(
     Clay_TransitionData initial, Clay_TransitionProperty properties);
 
-/* Thread-local pointer to the context currently inside Clay_EndLayout.
- * The transition trampolines read this to find their per-context handlers.
- * The Clay_EndLayout XS wrapper sets it before calling Clay_EndLayout and
- * resets it to NULL immediately afterward. */
 #if defined(__GNUC__) || defined(__clang__)
-extern __thread clay_perl_context *clay_perl_active_transition_ctx;
+#  define CLAY_PERL_THREAD_LOCAL __thread
 #elif defined(_MSC_VER)
-extern __declspec(thread) clay_perl_context *clay_perl_active_transition_ctx;
+#  define CLAY_PERL_THREAD_LOCAL __declspec(thread)
 #else
-extern clay_perl_context *clay_perl_active_transition_ctx;
+#  define CLAY_PERL_THREAD_LOCAL
 #endif
 
+/* Thread-local pointer to the context currently inside Clay_EndLayout.
+ * The transition trampolines read this to find their per-context handlers
+ * (Clay passes them no userData). The Clay_EndLayout XS wrapper sets it
+ * around the Clay_EndLayout call. */
+extern CLAY_PERL_THREAD_LOCAL clay_perl_context *clay_perl_active_transition_ctx;
+
+/* Number of Clay callbacks running on this thread. While it is non-zero
+ * Clay is in the middle of one of its own functions, so the XS wrappers
+ * that change Clay's state croak (see the guards in lib/Clay/XS.xs). */
+extern CLAY_PERL_THREAD_LOCAL uint32_t clay_perl_callback_depth;
+
+/* The dispatch a trampoline has started: set by the trampoline for the
+ * duration of its call into Clay::XS::_dispatch, which takes it (and
+ * clears .result, so only that one call can use it). */
+typedef struct clay_perl_active_dispatch {
+    clay_perl_dispatch_kind    kind;
+    clay_perl_dispatch_result *result;
+} clay_perl_active_dispatch;
+
+extern CLAY_PERL_THREAD_LOCAL clay_perl_active_dispatch clay_perl_pending_dispatch;
+
+/* The context the binding treats as current (mirrors Clay's global). The
+ * trampolines use it for callbacks whose userData Clay leaves NULL. */
+extern clay_perl_context *clay_perl_current_ctx;
+
 /* ---------------------------------------------------------------------------
- * Internal hover/transition registry helpers (src/callbacks.c).
+ * Callback registries (src/callbacks.c).
  * ------------------------------------------------------------------------ */
+
+/* Replaces a callback or userdata slot with a copy of new_value (NULL for
+ * undef), copying before the old value is released. */
+void clay_perl_replace_sv_slot(pTHX_ SV **slot, SV *new_value);
 
 void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
                               uint32_t element_id, SV *cb, SV *userdata);
 
-/* Drop hover entries older than (current_generation - keep_generations).
- * Called from clay_perl_arena_reset at BeginLayout time. */
+/* Drops hover entries registered more than keep_generations frames ago. */
 void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx,
                                     uint32_t keep_generations);
-
-/* Replace one of the three transition callback slots, managing refcounts. */
-void clay_perl_set_transition_handler(pTHX_ clay_perl_context *ctx,
-                                      SV *handler, SV *set_initial,
-                                      SV *set_final, SV *userdata);
 
 #endif /* CLAY_PERL_H */

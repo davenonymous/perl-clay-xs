@@ -58,7 +58,8 @@ Clay::UI::Role::Events::Emitter - mixin role giving a widget fire_event()
 
 =head1 SYNOPSIS
 
-	# Composed into widgets that originate events (Box, ...).
+	# Composed into widgets that originate events (Clay::UI::Box,
+	# Hoverable, Pressable, Focusable and HasScroll widgets).
 	# Listening is separately available on every widget via
 	# Clay::UI::Role::Events::Listener.
 
@@ -69,8 +70,11 @@ Clay::UI::Role::Events::Emitter - mixin role giving a widget fire_event()
 =head1 DESCRIPTION
 
 The I<send> half of the Clay::UI event system. Composed into widget
-classes that originate events (currently L<Clay::UI::Box>; future
-widgets like a scroll-aware container would add it too). The
+classes that originate events: L<Clay::UI::Box> and every widget
+composing L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Pressable>,
+L<Clay::UI::Role::Interaction::Focusable> or
+L<Clay::UI::Role::Layout::HasScroll>. The
 complementary I<receive> half lives in
 L<Clay::UI::Role::Events::Listener> and is composed transitively into
 every widget via the structural roles, so any widget - emitter or not -

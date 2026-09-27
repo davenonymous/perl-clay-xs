@@ -7,11 +7,15 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Box;
+use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Layout::HasLayout;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Grid::Row :does(Clay::UI::Box) {}
+class Clay::UI::Grid::Row :strict(params)
+	:does(Clay::UI::Role::Core::Element)
+	:does(Clay::UI::Role::Layout::HasLayout)
+{}
 
 1;
 
@@ -23,10 +27,11 @@ Clay::UI::Grid::Row - internal row container class for Clay::UI::Grid
 
 =head1 DESCRIPTION
 
-Concrete consumer of the L<Clay::UI::Box> role used by L<Clay::UI::Grid>
-to build its per-row C<LEFT_TO_RIGHT> containers. Has no body of its
-own: it exists only so Grid has an instantiable class to call
-C<< ->new(layout => ...) >> on now that C<Clay::UI::Box> is a role.
+The C<LEFT_TO_RIGHT> container L<Clay::UI::Grid> builds for each row. It
+composes L<Clay::UI::Role::Core::Element> and
+L<Clay::UI::Role::Layout::HasLayout> only: it has no public child
+mutators, because the Grid alone decides which cells a row holds (through
+C<append_row>, C<insert_row>, C<replace_row> and C<set_cell>).
 
 Not intended for direct use by application code; if you want a plain
 styled container, consume L<Clay::UI::Box> in your own class.

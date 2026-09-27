@@ -252,14 +252,14 @@ subtest 'fire_event() rejects non-event arg' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# TextNode widgets also get on()/fire_event() through the same role.
+# Every widget can listen; only emitters can fire.
 # -----------------------------------------------------------------------------
 
 subtest 'Listener/Emitter split: Text listens, Box emits' => sub {
-	# Listener half is composed into every widget (Text included);
-	# Emitter half is composed only into widgets that originate events
-	# (Box). A Box firing an event bubbling up the tree reaches
-	# Text listeners on its ancestors - but a Text leaf cannot fire one.
+	# The Listener half is composed into every widget (Text included);
+	# the Emitter half only into widgets that originate events (Box).
+	# A Text leaf has on() but no fire_event; an event a Box fires bubbles
+	# to the listeners of its ancestors.
 	my $inner = Clay::UI::Test::Box->new(id => 'inner');
 	my $outer = Clay::UI::Test::Box->new(id => 'outer');
 	$outer->add_child($inner);

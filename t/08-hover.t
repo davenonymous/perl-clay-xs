@@ -4,11 +4,12 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Test2::V0;
+use Scalar::Util qw(weaken);
 
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 7: per-element hover callbacks via Clay_OnHover.
+# Per-element hover callbacks via Clay_OnHover.
 #
 # The trampoline forwards to Perl with (element_id, pointer_data, userdata).
 # We register two different hover handlers on two different elements,
@@ -81,5 +82,36 @@ Clay_EndLayout(0);
 
 is( scalar(@red_calls),  0, 'red handler no longer firing' );
 is( scalar(@blue_calls), 1, 'blue handler fired once' );
+
+# -----------------------------------------------------------------------------
+# A hover callback that is not registered again is released after a few
+# frames; one that is registered every frame is kept.
+# -----------------------------------------------------------------------------
+
+subtest 'hover callbacks that are not re-registered are released' => sub {
+    my $weak_dropped;
+    my $kept_calls = 0;
+    my $frame = sub ($register_dropped) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("sweep-kept") );
+        Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(50), height => sizing_fixed(50) } } });
+        Clay_OnHover(sub { $kept_calls++ }, undef);
+        Clay__CloseElement();
+        Clay__OpenElementWithId( Clay_GetElementId("sweep-dropped") );
+        if ($register_dropped) {
+            my $object = {};
+            weaken($weak_dropped = $object);
+            Clay_OnHover(sub { $object }, undef);
+        }
+        Clay__CloseElement();
+        Clay_EndLayout(0);
+    };
+    $frame->(1);
+    ok( defined $weak_dropped, 'a registered callback is held' );
+    $frame->(0) for 1 .. 4;
+    is( $weak_dropped, undef, 'the callback registered once was released' );
+    Clay_SetPointerState({ x => 10, y => 10 }, 0);
+    is( $kept_calls, 1, 'the callback registered every frame still fires' );
+};
 
 done_testing;

@@ -8,7 +8,7 @@ use Test2::V0;
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
-# Phase 4: full Init -> BeginLayout -> Element -> EndLayout cycle.
+# The full Init -> BeginLayout -> Element -> EndLayout cycle.
 #
 # We declare a single root rectangle of fixed size and confirm exactly one
 # RECTANGLE render command is emitted with the bounding box we expect.

@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::Role::Core::Element;
+use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Layout::HasLayout;
 use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
@@ -15,8 +15,8 @@ use Clay::UI::Role::Style::HasCornerRadius;
 
 our $VERSION = '0.01';
 
-class Clay::UI::Grid::Cell
-	:does(Clay::UI::Role::Core::Element)
+class Clay::UI::Grid::Cell :strict(params)
+	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Layout::HasLayout)
 	:does(Clay::UI::Role::Style::HasBackground)
 	:does(Clay::UI::Role::Style::HasBorder)
@@ -38,10 +38,12 @@ Clay::UI::Grid::Cell - styled single-cell container for Clay::UI::Grid
 	use Clay::UI::Grid::Cell;
 	use Clay::UI::Text;
 
-	class My::Grid :does(Clay::UI::Grid) {}
-	class My::Text :does(Clay::UI::Text) {}
+	class My::Grid :strict(params) :does(Clay::UI::Grid) {}
+	class My::Text :strict(params) :does(Clay::UI::Text) {}
 
 	my $grid = My::Grid->new(id => 'report');
+
+	use Clay::XS qw(padding_all);
 
 	my $header_cell = Clay::UI::Grid::Cell->new(
 		layout           => { padding => padding_all(8) },
@@ -61,10 +63,13 @@ Clay::UI::Grid::Cell - styled single-cell container for Clay::UI::Grid
 =head1 DESCRIPTION
 
 A C<Clay::UI::Grid::Cell> is the styled container the Grid uses to carry
-one visual cell. Functionally it is identical to L<Clay::UI::Box> without
-clip/floating support; the distinction exists because the Grid widget
-needs a container it can recognise and use directly rather than
-re-wrapping.
+one visual cell. It composes L<Clay::UI::Role::Core::Container> (so
+C<add_child> puts content into it), L<Clay::UI::Role::Layout::HasLayout>,
+L<Clay::UI::Role::Style::HasBackground>,
+L<Clay::UI::Role::Style::HasBorder> and
+L<Clay::UI::Role::Style::HasCornerRadius> - but not floating or events.
+The distinct class exists because the Grid needs a container it can
+recognise and use directly rather than re-wrapping.
 
 When you build a Grid:
 

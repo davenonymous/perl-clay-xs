@@ -23,9 +23,8 @@ my $ctx = Clay_Initialize(
     },
 );
 
-# Clay requires a text measurement function even if no text is rendered,
-# because Clay's text-measurement cache initialisation depends on the
-# function pointer being non-null. A monospace approximation is enough.
+# Clay measures text through this function; a context that lays out text
+# needs one. A monospace approximation is enough here.
 Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
     my $fs = $config->{fontSize} || 16;
     return { width => length($text) * $fs * 0.5, height => $fs };

@@ -74,9 +74,9 @@ subtest 'render commands carry refaddr in userData' => sub {
 		$widgets_seen{ refaddr $w } = $w;
 	}
 
-	# Identity compare via refaddr: widgets now back-reference their
-	# parents (Clay::UI::Role::Layout::HasParent), creating a cycle that Test2's
-	# deep `is` cannot traverse.
+	# Identity compare via refaddr: widgets reference their parents
+	# (Clay::UI::Role::Layout::HasParent), a cycle that Test2's deep `is`
+	# cannot traverse.
 	is( refaddr $widgets_seen{ refaddr $root },      refaddr $root,      'root widget recovered' );
 	is( refaddr $widgets_seen{ refaddr $child_box }, refaddr $child_box, 'child box recovered' );
 	is( refaddr $widgets_seen{ refaddr $text_leaf }, refaddr $text_leaf, 'text leaf recovered' );
@@ -105,7 +105,7 @@ subtest 'get_hovered returns widget objects' => sub {
 	$root->add_child($child_box);
 
 	my $ui = make_ui($root);
-	$ui->render;  # warm-up frame
+	$ui->render;  # the pointer is tested against the previous layout
 	$ui->render( pointer_state => { x => 40, y => 20, down => 0 } );
 
 	my $hovered = $ui->get_hovered;
