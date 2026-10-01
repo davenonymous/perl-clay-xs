@@ -10,9 +10,10 @@
  * the default counts and the arena routines are only visible inside the
  * implementation section. This file includes no Perl headers.
  *
- * The diagnostic suppression below silences three categories of warning
+ * The diagnostic suppression below silences four categories of warning
  * that Clay v0.14 emits under -Wall -Wextra. They are upstream issues
- * (unused locals, sign mismatch in a comparison) and are not bugs in
+ * (unused locals, sign mismatch in a comparison, a partially initialised
+ * compound literal) and are not bugs in
  * the binding. Suppressing them here keeps Clay::XS's own diagnostic
  * output clean for users running tests under default flags.
  */
@@ -22,6 +23,7 @@
 # pragma GCC diagnostic ignored "-Wunused-variable"
 # pragma GCC diagnostic ignored "-Wunused-function"
 # pragma GCC diagnostic ignored "-Wsign-compare"
+# pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
 #define CLAY_IMPLEMENTATION

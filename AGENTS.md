@@ -78,7 +78,8 @@ Useful invocations:
    helpers against the new internals.
 4. **`src/clay_impl.c` brackets its include in `#pragma GCC diagnostic
    ignored` lines.** Upstream Clay v0.14 emits `-Wunused-variable`,
-   `-Wunused-function`, and `-Wsign-compare` under `-Wall -Wextra`. The
+   `-Wunused-function`, `-Wsign-compare` and `-Wmissing-field-initializers`
+   under `-Wall -Wextra`. The
    suppression must travel with any clay.h bump.
 5. **`PERL_NO_GET_CONTEXT` is defined in `src/clay_perl.h`.** Every
    helper takes `pTHX_` and every call passes `aTHX_`; trampolines that
