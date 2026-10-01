@@ -106,7 +106,11 @@ class Clay::UI :strict(params) {
 		# frame"; settle it so the first real pointer frame is no click.
 		Clay_SetPointerState({ x => -1, y => -1 }, 0);
 
-		$interaction = Clay::UI::Interaction->new(ui => $self);
+		# Events follow the tree order of the last completed frame.
+		$interaction = Clay::UI::Interaction->new(
+			ui         => $self,
+			tree_order => sub (@widgets) { $_frame->in_tree_order(@widgets) },
+		);
 		$root->_set_ui_controller($self);
 	}
 
@@ -310,12 +314,6 @@ class Clay::UI :strict(params) {
 			push @widgets, $widget if defined $widget && $self->_belongs_here($widget);
 		}
 		return @widgets;
-	}
-
-	# Widgets sorted by their position in the last walk (pre-order); widgets
-	# the walk did not reach (removed ones) keep their relative order last.
-	method _in_tree_order (@widgets) {
-		return $_frame->in_tree_order(@widgets);
 	}
 
 	method widget_for ($user_data) {

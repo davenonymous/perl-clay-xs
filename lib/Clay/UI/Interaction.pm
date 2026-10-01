@@ -28,6 +28,14 @@ my $FOCUS_ORDER = 'Clay::UI::Role::Interaction::HasFocusOrder';
 class Clay::UI::Interaction :strict(params) {
 	field $ui :param :weak;
 
+	# Sorts widgets into the tree order of the last layout (Clay::UI
+	# passes its frame registry's in_tree_order).
+	field $tree_order :param;
+
+	ADJUST {
+		die "Clay::UI::Interaction: 'tree_order' must be a coderef\n" unless ref $tree_order eq 'CODE';
+	}
+
 	# Widgets keyed by refaddr; the values are weak references, so a freed
 	# widget leaves an undef value behind and never counts.
 	field %_hovered;
@@ -152,14 +160,14 @@ class Clay::UI::Interaction :strict(params) {
 		my ($x, $y) = @$input{qw(x y)};
 		my %scroll_of = map { refaddr($_->[0]) => $_ } @{ $input->{scrolled} };
 		return (
-			(map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $ui->_in_tree_order(@hover_stopped)),
-			(map { [ $_, Clay::UI::Events::OnHoverStart->new ] }   $ui->_in_tree_order(@hover_started)),
+			(map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $tree_order->(@hover_stopped)),
+			(map { [ $_, Clay::UI::Events::OnHoverStart->new ] }   $tree_order->(@hover_started)),
 			(defined $press_origin   ? [ $press_origin,   Clay::UI::Events::OnPress->new(x => $x, y => $y) ]   : ()),
 			(defined $release_origin ? [ $release_origin, Clay::UI::Events::OnRelease->new(x => $x, y => $y) ] : ()),
 			(map {
 				my (undef, $dx, $dy) = @{ $scroll_of{ refaddr $_ } };
 				[ $_, Clay::UI::Events::OnScroll->new(delta_x => $dx, delta_y => $dy) ];
-			} $ui->_in_tree_order(map { $_->[0] } @{ $input->{scrolled} })),
+			} $tree_order->(map { $_->[0] } @{ $input->{scrolled} })),
 		);
 	}
 
@@ -167,7 +175,7 @@ class Clay::UI::Interaction :strict(params) {
 	# widgets in it stop being hovered, armed and pressed and are no longer
 	# under the pointer, and focus inside it is released. Then the hovered
 	# ones get OnHoverStopped and the focused one OnBlur.
-	method _subtree_detached ($top) {
+	method release_subtree ($top) {
 		my @stopped = grep { _is_within($_, $top) } _live(\%_hovered);
 		delete $_hovered{ refaddr $_ } for @stopped;
 		for my $state (\%_armed, \%_pressed) {
@@ -176,7 +184,7 @@ class Clay::UI::Interaction :strict(params) {
 		@_under_pointer = grep { defined && !_is_within($_, $top) } @_under_pointer;
 		weaken $_ for @_under_pointer;
 
-		my @events = map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $ui->_in_tree_order(@stopped);
+		my @events = map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $tree_order->(@stopped);
 		if (defined $_focused && _is_within($_focused, $top)) {
 			push @events, [ $_focused, Clay::UI::Events::OnBlur->new ];
 			undef $_focused;
@@ -555,5 +563,19 @@ When a subtree leaves the tree, its hovered widgets stop being hovered,
 its armed and pressed widgets are dropped and focus inside it is
 released. Then the hovered ones get C<OnHoverStopped> and the focused
 one gets C<OnBlur>, all at once, during the removal.
+
+=head2 release_subtree($top)
+
+Does the above for C<$top> and everything below it. The child-mutation
+methods of L<Clay::UI::Role::Core::Element> call it while C<$top> is
+still attached, so the events bubble through its old ancestors; a widget
+class that detaches children some other way must call it too. Every
+event fires even if a listener dies; the first error is rethrown.
+
+=head1 CONSTRUCTION
+
+L<Clay::UI> builds its tracker with C<ui> (the UI, held weakly) and
+C<tree_order>, a coderef that sorts widgets into the tree order of the
+last layout. Nothing else needs to construct one.
 
 =cut

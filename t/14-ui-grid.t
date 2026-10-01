@@ -112,6 +112,12 @@ subtest 'Grid assigns sizing_group ids to per-cell wrappers' => sub {
 	is( $w->[0][0]->height_group, $w->[0][1]->height_group, 'row 0 wrappers share height_group' );
 	is( $w->[1][0]->height_group, $w->[1][1]->height_group, 'row 1 wrappers share height_group' );
 	isnt( $w->[0][0]->height_group, $w->[1][0]->height_group, 'different rows get different height_groups' );
+
+	my $cell = $w->[0][0];
+	my ($width, $height) = ($cell->width_group, $cell->height_group);
+	ok( lives { $cell->width_group($width); $cell->height_group($height) }, 'a Grid id can be written back' );
+	is( [ $cell->width_group, $cell->height_group ], [ $width, $height ], 'and stays' );
+	like( dies { $cell->width_group($width + 1) }, qr/reserved for Clay::UI::Grid/, 'another Grid id still dies' );
 };
 
 # -----------------------------------------------------------------------------

@@ -145,7 +145,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		if (defined $ui) {
 			for my $kid (@kids) {
 				local $@;
-				eval { $ui->interaction->_subtree_detached($kid); 1 }
+				eval { $ui->interaction->release_subtree($kid); 1 }
 					or $listener_error //= $@ || 'unknown listener error';
 			}
 		}

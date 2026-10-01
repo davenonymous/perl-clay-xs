@@ -6,6 +6,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
+use Scalar::Util qw(looks_like_number);
 
 use Clay::UI::_validate qw(required validate_group_id);
 
@@ -22,12 +23,19 @@ role Clay::UI::Role::Layout::HasSizingGroup {
 
 	method width_group (@new) {
 		return $width_group unless @new;
-		return $width_group = required(\&validate_group_id, width_group => @new);
+		return $width_group = _write_group(width_group => $width_group, @new);
 	}
 
 	method height_group (@new) {
 		return $height_group unless @new;
-		return $height_group = required(\&validate_group_id, height_group => @new);
+		return $height_group = _write_group(height_group => $height_group, @new);
+	}
+
+	# Writing back the current id is a no-op, even for an id Grid owns.
+	sub _write_group ($name, $current, @new) {
+		return $current
+			if @new == 1 && defined $new[0] && !ref $new[0] && looks_like_number($new[0]) && $new[0] == $current;
+		return required(\&validate_group_id, $name => @new);
 	}
 
 	# Clay::UI::Grid stamps its packed (grid id << 20 | index) group ids
@@ -99,7 +107,9 @@ every other element declaring the same C<width_group>. Larger ids are
 reserved for the ids L<Clay::UI::Grid> assigns; other values die.
 
 Read/write accessor: C<< $widget->width_group >> reads,
-C<< $widget->width_group($id) >> writes.
+C<< $widget->width_group($id) >> writes. Writing back the value just read
+is always allowed, even for a cell whose id Grid assigned (nothing
+changes).
 
 =head2 height_group (default 0)
 

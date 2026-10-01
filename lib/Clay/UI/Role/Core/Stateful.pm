@@ -35,7 +35,10 @@ Clay::UI::Role::Core::Stateful - require an explicit id on a Clay::UI widget
 
 Marker role that extends L<Clay::UI::Role::Core::Element> and asserts the
 consumer supplied an explicit C<id> at construction. Use for widgets
-whose Clay-side state (scroll offset, hover, focus) needs a stable
-addressable id across frames.
+whose Clay-side state needs a stable addressable id across frames, such
+as a scroll container's scroll offset
+(L<Clay::UI::Role::Layout::HasScroll> composes it). Hover, press and
+focus do not need one: L<Clay::UI::Interaction> tracks widgets by
+reference.
 
 =cut
