@@ -139,10 +139,10 @@ void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx)
  * pushes (callback, args...) and calls Clay::XS::_dispatch under G_EVAL,
  * counting itself in clay_perl_callback_depth. The previous pending
  * dispatch is restored afterwards, so nested dispatches (an error reported
- * while a callback runs) work. It must run between ENTER/SAVETMPS and
- * FREETMPS/LEAVE of the calling trampoline, with $@ localised there, so
- * the caller's $@ survives the callback. Returns true on failure (the
- * error is stashed on ctx).
+ * while a callback runs) work. It runs inside invoke_callback's
+ * ENTER/SAVETMPS ... FREETMPS/LEAVE, with $@ localised there, so the
+ * caller's $@ survives the callback. Returns true on failure (the error
+ * is stashed on ctx).
  * ------------------------------------------------------------------------ */
 
 static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
@@ -176,9 +176,32 @@ static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
     return true;
 }
 
-static SV *userdata_arg(pTHX_ SV *userdata)
+/* Upper bound on the arguments a trampoline passes before the userdata. */
+#define MAX_CALLBACK_ARGS 2
+
+/* Fills args with up to MAX_CALLBACK_ARGS mortal SVs built from a
+ * trampoline's own data and returns how many. */
+typedef int (*callback_args_builder)(pTHX_ const void *data, SV **args);
+
+/* Calls a Perl callback for a trampoline: builds its arguments (plus the
+ * userdata, always last) inside a temporaries scope of their own, with $@
+ * localised, and dispatches. Returns true on failure (the error is
+ * stashed on ctx). */
+static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
+                            clay_perl_dispatch_result *result, const clay_perl_callback *callback,
+                            callback_args_builder build_args, const void *data)
 {
-    return sv_2mortal(newSVsv(userdata ? userdata : &PL_sv_undef));
+    SV *args[MAX_CALLBACK_ARGS + 1];
+
+    ENTER;
+    SAVETMPS;
+    save_scalar(PL_errgv);
+    int argc = build_args(aTHX_ data, args);
+    args[argc++] = sv_2mortal(newSVsv(callback->userdata ? callback->userdata : &PL_sv_undef));
+    bool failed = call_dispatcher(aTHX_ ctx, kind, result, callback->code, args, argc);
+    FREETMPS;
+    LEAVE;
+    return failed;
 }
 
 void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
@@ -221,21 +244,60 @@ void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
     case CLAY_PERL_DISPATCH_ERROR_HANDLER:
     case CLAY_PERL_DISPATCH_HOVER:
         return;
+
+    case CLAY_PERL_DISPATCH_KIND_COUNT:
+        break;
     }
     croak("Clay::XS: internal error: unknown dispatch kind %d", (int) kind);
 }
 
 /* ---------------------------------------------------------------------------
- * Callback slots and the hover registry.
+ * Per-context callback slots.
  * ------------------------------------------------------------------------ */
 
-void clay_perl_replace_sv_slot(pTHX_ SV **slot, SV *new_value)
+/* Replaces a slot with a copy of new_value (NULL for undef), copying
+ * before the old value is released. */
+static void replace_sv_slot(pTHX_ SV **slot, SV *new_value)
 {
     SV *copy = (new_value && SvOK(new_value)) ? newSVsv(new_value) : NULL;
     SV *old  = *slot;
     *slot = copy;
     SvREFCNT_dec(old);
 }
+
+void clay_perl_callback_set(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
+                            SV *code, SV *userdata)
+{
+    if (kind <= 0 || kind >= CLAY_PERL_DISPATCH_KIND_COUNT || kind == CLAY_PERL_DISPATCH_HOVER) {
+        croak("Clay::XS: internal error: no context slot for callback kind %d", (int) kind);
+    }
+    replace_sv_slot(aTHX_ &ctx->callbacks[kind].code, code);
+    replace_sv_slot(aTHX_ &ctx->callbacks[kind].userdata, userdata);
+}
+
+void clay_perl_callbacks_free(pTHX_ clay_perl_context *ctx)
+{
+    for (int kind = 0; kind < CLAY_PERL_DISPATCH_KIND_COUNT; kind++) {
+        replace_sv_slot(aTHX_ &ctx->callbacks[kind].code, NULL);
+        replace_sv_slot(aTHX_ &ctx->callbacks[kind].userdata, NULL);
+    }
+}
+
+/* The context of a per-context callback: Clay's userData, or the current
+ * context for one that never installed the function (NULL userData). */
+static clay_perl_context *context_or_current(void *userData)
+{
+    return userData ? (clay_perl_context *) userData : clay_perl_current_ctx;
+}
+
+/* ---------------------------------------------------------------------------
+ * The hover registry.
+ * ------------------------------------------------------------------------ */
+
+/* Hover entries registered this many frames ago are dropped. Entries of
+ * the previous frame must survive: Clay_SetPointerState dispatches the
+ * hover callbacks registered while declaring the last completed frame. */
+#define HOVER_KEEP_FRAMES 2
 
 static void make_id_key(uint32_t id, char buf[16])
 {
@@ -255,11 +317,10 @@ void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
     (void) hv_store(ctx->hover_callbacks, key, (I32) strlen(key), newRV_noinc((SV *) entry), 0);
 }
 
-void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx,
-                                    uint32_t keep_generations)
+void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx)
 {
-    if (ctx->frame_generation < keep_generations) return;
-    uint32_t cutoff = ctx->frame_generation - keep_generations;
+    if (ctx->frame_generation < HOVER_KEEP_FRAMES) return;
+    uint32_t cutoff = ctx->frame_generation - HOVER_KEEP_FRAMES;
 
     /* Collect first, delete afterwards: deleting invalidates the iterator. */
     HV *hv = ctx->hover_callbacks;
@@ -291,6 +352,19 @@ void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx,
  * is raised, so one broken measurer produces one exception per frame.
  * ------------------------------------------------------------------------ */
 
+typedef struct measure_text_call {
+    Clay_StringSlice        text;
+    Clay_TextElementConfig *config;
+} measure_text_call;
+
+static int measure_text_args(pTHX_ const void *data, SV **args)
+{
+    const measure_text_call *call = (const measure_text_call *) data;
+    args[0] = sv_2mortal(clay_perl_utf8_sv(aTHX_ call->text.chars, call->text.length));
+    args[1] = sv_2mortal(clay_text_element_config_to_sv(aTHX_ *call->config));
+    return 2;
+}
+
 Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
                                                   Clay_TextElementConfig *config,
                                                   void *userData)
@@ -298,13 +372,14 @@ Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
     dTHX;
     Clay_Dimensions zero = { 0, 0 };
 
-    clay_perl_context *ctx = userData ? (clay_perl_context *) userData : clay_perl_current_ctx;
+    clay_perl_context *ctx = context_or_current(userData);
     if (!ctx) return zero;
     if (ctx->pending_error) {
         ctx->measure_cache_poisoned = true;
         return zero;
     }
-    if (!ctx->measure_text_cb) {
+    const clay_perl_callback *callback = &ctx->callbacks[CLAY_PERL_DISPATCH_MEASURE_TEXT];
+    if (!callback->code) {
         clay_perl_stash_error_message(aTHX_ ctx,
             "Clay::XS: text measured but no measure_text function is installed for this context");
         ctx->measure_cache_poisoned = true;
@@ -313,21 +388,9 @@ Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
 
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
-
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    SV *args[3] = {
-        sv_2mortal(clay_perl_utf8_sv(aTHX_ text.chars, text.length)),
-        sv_2mortal(clay_text_element_config_to_sv(aTHX_ *config)),
-        userdata_arg(aTHX_ ctx->measure_text_userdata),
-    };
-    bool failed = call_dispatcher(aTHX_ ctx, CLAY_PERL_DISPATCH_MEASURE_TEXT, &result,
-                                  ctx->measure_text_cb, args, 3);
-    FREETMPS;
-    LEAVE;
-
-    if (failed) {
+    measure_text_call call = { text, config };
+    if (invoke_callback(aTHX_ ctx, CLAY_PERL_DISPATCH_MEASURE_TEXT, &result, callback,
+                        measure_text_args, &call)) {
         ctx->measure_cache_poisoned = true;
         return zero;
     }
@@ -342,30 +405,28 @@ Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
  * With no Perl handler installed, Clay errors are ignored (as in C).
  * ------------------------------------------------------------------------ */
 
+static int error_handler_args(pTHX_ const void *data, SV **args)
+{
+    const Clay_ErrorData *error = (const Clay_ErrorData *) data;
+    HV *err_hv = newHV();
+    (void) hv_stores(err_hv, "errorType", newSViv((IV) error->errorType));
+    (void) hv_stores(err_hv, "errorText",
+                     clay_perl_utf8_sv(aTHX_ error->errorText.chars, error->errorText.length));
+    args[0] = sv_2mortal(newRV_noinc((SV *) err_hv));
+    return 1;
+}
+
 void clay_perl_error_handler_trampoline(Clay_ErrorData error)
 {
     dTHX;
     clay_perl_context *ctx = (clay_perl_context *) error.userData;
-    if (!ctx || !ctx->error_handler_cb) return;
+    if (!ctx || !ctx->callbacks[CLAY_PERL_DISPATCH_ERROR_HANDLER].code) return;
 
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
-
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    HV *err_hv = newHV();
-    (void) hv_stores(err_hv, "errorType", newSViv((IV) error.errorType));
-    (void) hv_stores(err_hv, "errorText",
-                     clay_perl_utf8_sv(aTHX_ error.errorText.chars, error.errorText.length));
-    SV *args[2] = {
-        sv_2mortal(newRV_noinc((SV *) err_hv)),
-        userdata_arg(aTHX_ ctx->error_handler_userdata),
-    };
-    (void) call_dispatcher(aTHX_ ctx, CLAY_PERL_DISPATCH_ERROR_HANDLER, &result,
-                           ctx->error_handler_cb, args, 2);
-    FREETMPS;
-    LEAVE;
+    (void) invoke_callback(aTHX_ ctx, CLAY_PERL_DISPATCH_ERROR_HANDLER, &result,
+                           &ctx->callbacks[CLAY_PERL_DISPATCH_ERROR_HANDLER],
+                           error_handler_args, &error);
 }
 
 /* ---------------------------------------------------------------------------
@@ -374,15 +435,22 @@ void clay_perl_error_handler_trampoline(Clay_ErrorData error)
  *     $cb->( $element_id, $userdata ) -> { x, y } or [ x, y ]
  * ------------------------------------------------------------------------ */
 
+static int query_scroll_offset_args(pTHX_ const void *data, SV **args)
+{
+    args[0] = sv_2mortal(newSVuv(*(const uint32_t *) data));
+    return 1;
+}
+
 Clay_Vector2 clay_perl_query_scroll_offset_trampoline(uint32_t element_id,
                                                       void *userData)
 {
     dTHX;
     Clay_Vector2 zero = { 0, 0 };
 
-    clay_perl_context *ctx = userData ? (clay_perl_context *) userData : clay_perl_current_ctx;
+    clay_perl_context *ctx = context_or_current(userData);
     if (!ctx) return zero;
-    if (!ctx->query_scroll_offset_cb) {
+    const clay_perl_callback *callback = &ctx->callbacks[CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET];
+    if (!callback->code) {
         clay_perl_stash_error_message(aTHX_ ctx,
             "Clay::XS: external scroll handling is enabled but no query_scroll_offset function is installed for this context");
         return zero;
@@ -390,19 +458,8 @@ Clay_Vector2 clay_perl_query_scroll_offset_trampoline(uint32_t element_id,
 
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
-
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    SV *args[2] = {
-        sv_2mortal(newSVuv(element_id)),
-        userdata_arg(aTHX_ ctx->query_scroll_offset_userdata),
-    };
-    bool failed = call_dispatcher(aTHX_ ctx, CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET, &result,
-                                  ctx->query_scroll_offset_cb, args, 2);
-    FREETMPS;
-    LEAVE;
-
+    bool failed = invoke_callback(aTHX_ ctx, CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET, &result,
+                                  callback, query_scroll_offset_args, &element_id);
     return failed ? zero : result.vector;
 }
 
@@ -411,6 +468,19 @@ Clay_Vector2 clay_perl_query_scroll_offset_trampoline(uint32_t element_id,
  *
  *     $cb->( \%element_id, \%pointer_data, $userdata )
  * ------------------------------------------------------------------------ */
+
+typedef struct hover_call {
+    Clay_ElementId   element_id;
+    Clay_PointerData pointer;
+} hover_call;
+
+static int hover_args(pTHX_ const void *data, SV **args)
+{
+    const hover_call *call = (const hover_call *) data;
+    args[0] = sv_2mortal(clay_element_id_to_sv(aTHX_ call->element_id));
+    args[1] = sv_2mortal(clay_pointer_data_to_sv(aTHX_ call->pointer));
+    return 2;
+}
 
 void clay_perl_on_hover_trampoline(Clay_ElementId element_id,
                                    Clay_PointerData pointer,
@@ -426,23 +496,12 @@ void clay_perl_on_hover_trampoline(Clay_ElementId element_id,
     if (!entry_slot) return;
 
     AV *entry = (AV *) SvRV(*entry_slot);
-    SV *callback = *av_fetch(entry, 0, 0);
-    SV *userdata = *av_fetch(entry, 1, 0);
+    clay_perl_callback callback = { *av_fetch(entry, 0, 0), *av_fetch(entry, 1, 0) };
 
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
-
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    SV *args[3] = {
-        sv_2mortal(clay_element_id_to_sv(aTHX_ element_id)),
-        sv_2mortal(clay_pointer_data_to_sv(aTHX_ pointer)),
-        userdata_arg(aTHX_ userdata),
-    };
-    (void) call_dispatcher(aTHX_ ctx, CLAY_PERL_DISPATCH_HOVER, &result, callback, args, 3);
-    FREETMPS;
-    LEAVE;
+    hover_call call = { element_id, pointer };
+    (void) invoke_callback(aTHX_ ctx, CLAY_PERL_DISPATCH_HOVER, &result, &callback, hover_args, &call);
 }
 
 /* ---------------------------------------------------------------------------
@@ -458,83 +517,81 @@ void clay_perl_on_hover_trampoline(Clay_ElementId element_id,
  * `current` entry of the argument hash and the dispatcher copies it back.
  * ------------------------------------------------------------------------ */
 
+static int transition_handler_args(pTHX_ const void *data, SV **args)
+{
+    const Clay_TransitionCallbackArguments *call = (const Clay_TransitionCallbackArguments *) data;
+    HV *args_hv = newHV();
+    (void) hv_stores(args_hv, "transitionState", newSViv((IV) call->transitionState));
+    (void) hv_stores(args_hv, "initial",         clay_transition_data_to_sv(aTHX_ call->initial));
+    (void) hv_stores(args_hv, "target",          clay_transition_data_to_sv(aTHX_ call->target));
+    (void) hv_stores(args_hv, "current",         clay_transition_data_to_sv(aTHX_ *call->current));
+    (void) hv_stores(args_hv, "elapsedTime",     newSVnv(call->elapsedTime));
+    (void) hv_stores(args_hv, "duration",        newSVnv(call->duration));
+    (void) hv_stores(args_hv, "properties",      newSVuv((UV) call->properties));
+    args[0] = sv_2mortal(newRV_noinc((SV *) args_hv));
+    return 1;
+}
+
 bool clay_perl_transition_handler_trampoline(Clay_TransitionCallbackArguments args)
 {
     dTHX;
     clay_perl_context *ctx = clay_perl_active_transition_ctx;
-    if (!ctx || !ctx->transition_handler_cb) return true;
+    if (!ctx || !ctx->callbacks[CLAY_PERL_DISPATCH_TRANSITION_HANDLER].code) return true;
 
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
     result.complete        = true;
     result.transition_data = *args.current;
 
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    HV *args_hv = newHV();
-    (void) hv_stores(args_hv, "transitionState", newSViv((IV) args.transitionState));
-    (void) hv_stores(args_hv, "initial",         clay_transition_data_to_sv(aTHX_ args.initial));
-    (void) hv_stores(args_hv, "target",          clay_transition_data_to_sv(aTHX_ args.target));
-    (void) hv_stores(args_hv, "current",         clay_transition_data_to_sv(aTHX_ *args.current));
-    (void) hv_stores(args_hv, "elapsedTime",     newSVnv(args.elapsedTime));
-    (void) hv_stores(args_hv, "duration",        newSVnv(args.duration));
-    (void) hv_stores(args_hv, "properties",      newSVuv((UV) args.properties));
-    SV *call_args[2] = {
-        sv_2mortal(newRV_noinc((SV *) args_hv)),
-        userdata_arg(aTHX_ ctx->transition_userdata),
-    };
-    bool failed = call_dispatcher(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_HANDLER, &result,
-                                  ctx->transition_handler_cb, call_args, 2);
-    FREETMPS;
-    LEAVE;
-
-    if (failed) return true;
+    if (invoke_callback(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_HANDLER, &result,
+                        &ctx->callbacks[CLAY_PERL_DISPATCH_TRANSITION_HANDLER],
+                        transition_handler_args, &args)) {
+        return true;
+    }
     *args.current = result.transition_data;
     return result.complete;
 }
 
-static Clay_TransitionData dispatch_transition_state(pTHX_ clay_perl_context *ctx,
-                                                     clay_perl_dispatch_kind kind,
-                                                     SV *callback,
+typedef struct transition_state_call {
+    Clay_TransitionData     state;
+    Clay_TransitionProperty properties;
+} transition_state_call;
+
+static int transition_state_args(pTHX_ const void *data, SV **args)
+{
+    const transition_state_call *call = (const transition_state_call *) data;
+    args[0] = sv_2mortal(clay_transition_data_to_sv(aTHX_ call->state));
+    args[1] = sv_2mortal(newSVuv((UV) call->properties));
+    return 2;
+}
+
+/* setInitialState / setFinalState: the callback of `kind`, or `state`
+ * unchanged when none is installed or it failed. */
+static Clay_TransitionData dispatch_transition_state(clay_perl_dispatch_kind kind,
                                                      Clay_TransitionData state,
                                                      Clay_TransitionProperty properties)
 {
+    dTHX;
+    clay_perl_context *ctx = clay_perl_active_transition_ctx;
+    if (!ctx || !ctx->callbacks[kind].code) return state;
+
     clay_perl_dispatch_result result;
     memset(&result, 0, sizeof(result));
     result.transition_data = state;
-
-    ENTER;
-    SAVETMPS;
-    save_scalar(PL_errgv);
-    SV *args[3] = {
-        sv_2mortal(clay_transition_data_to_sv(aTHX_ state)),
-        sv_2mortal(newSVuv((UV) properties)),
-        userdata_arg(aTHX_ ctx->transition_userdata),
-    };
-    bool failed = call_dispatcher(aTHX_ ctx, kind, &result, callback, args, 3);
-    FREETMPS;
-    LEAVE;
-
+    transition_state_call call = { state, properties };
+    bool failed = invoke_callback(aTHX_ ctx, kind, &result, &ctx->callbacks[kind],
+                                  transition_state_args, &call);
     return failed ? state : result.transition_data;
 }
 
 Clay_TransitionData clay_perl_transition_set_initial_trampoline(
     Clay_TransitionData target, Clay_TransitionProperty properties)
 {
-    dTHX;
-    clay_perl_context *ctx = clay_perl_active_transition_ctx;
-    if (!ctx || !ctx->transition_set_initial_cb) return target;
-    return dispatch_transition_state(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL,
-                                     ctx->transition_set_initial_cb, target, properties);
+    return dispatch_transition_state(CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL, target, properties);
 }
 
 Clay_TransitionData clay_perl_transition_set_final_trampoline(
     Clay_TransitionData initial, Clay_TransitionProperty properties)
 {
-    dTHX;
-    clay_perl_context *ctx = clay_perl_active_transition_ctx;
-    if (!ctx || !ctx->transition_set_final_cb) return initial;
-    return dispatch_transition_state(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL,
-                                     ctx->transition_set_final_cb, initial, properties);
+    return dispatch_transition_state(CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL, initial, properties);
 }

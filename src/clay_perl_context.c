@@ -19,11 +19,6 @@
 /* Interned ids unused for this many frames may be swept. */
 #define INTERNED_ID_KEEP_FRAMES 2
 
-/* Hover entries registered this many frames ago are dropped. Entries of
- * the previous frame must survive: Clay_SetPointerState dispatches the
- * hover callbacks registered while declaring the last completed frame. */
-#define HOVER_KEEP_FRAMES 2
-
 static MGVTBL clay_perl_context_vtbl = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* ---------------------------------------------------------------------------
@@ -93,16 +88,7 @@ void clay_perl_context_free(pTHX_ clay_perl_context *self)
 {
     if (!self) return;
 
-    SvREFCNT_dec(self->measure_text_cb);
-    SvREFCNT_dec(self->measure_text_userdata);
-    SvREFCNT_dec(self->error_handler_cb);
-    SvREFCNT_dec(self->error_handler_userdata);
-    SvREFCNT_dec(self->query_scroll_offset_cb);
-    SvREFCNT_dec(self->query_scroll_offset_userdata);
-    SvREFCNT_dec(self->transition_handler_cb);
-    SvREFCNT_dec(self->transition_set_initial_cb);
-    SvREFCNT_dec(self->transition_set_final_cb);
-    SvREFCNT_dec(self->transition_userdata);
+    clay_perl_callbacks_free(aTHX_ self);
     SvREFCNT_dec(self->pending_error);
     SvREFCNT_dec((SV *) self->hover_callbacks);
     SvREFCNT_dec((SV *) self->interned_ids);
@@ -328,5 +314,5 @@ void clay_perl_context_begin_frame(pTHX_ clay_perl_context *self)
     if (!exits_running) {
         interned_ids_sweep(aTHX_ self);
     }
-    clay_perl_hover_registry_sweep(aTHX_ self, HOVER_KEEP_FRAMES);
+    clay_perl_hover_registry_sweep(aTHX_ self);
 }

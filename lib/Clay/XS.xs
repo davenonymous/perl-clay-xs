@@ -405,8 +405,7 @@ xs_Clay_Initialize(capacity_sv, dimensions_sv, error_handler_sv = &PL_sv_undef, 
         if (!ctx) {
             croak("Clay_Initialize: cannot allocate %" UVuf " bytes", (UV) capacity);
         }
-        clay_perl_replace_sv_slot(aTHX_ &ctx->error_handler_cb, error_handler);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->error_handler_userdata, error_userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_ERROR_HANDLER, error_handler, error_userdata_sv);
 
         handler.errorHandlerFunction = clay_perl_error_handler_trampoline;
         handler.userData             = ctx;
@@ -709,8 +708,7 @@ xs_Clay_SetMeasureTextFunction(cb_sv, userdata_sv = &PL_sv_undef)
     CODE:
         ctx = REQUIRE_CONTEXT("Clay_SetMeasureTextFunction");
         cb  = clay_perl_require_code(aTHX_ cb_sv, "Clay_SetMeasureTextFunction: callback", true);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->measure_text_cb, cb);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->measure_text_userdata, userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_MEASURE_TEXT, cb, userdata_sv);
         Clay_SetMeasureTextFunction(clay_perl_measure_text_trampoline, ctx);
         clay_perl_raise_pending_error(aTHX_ ctx);
 
@@ -874,8 +872,7 @@ xs_Clay_SetQueryScrollOffsetFunction(cb_sv, userdata_sv = &PL_sv_undef)
     CODE:
         ctx = REQUIRE_CONTEXT("Clay_SetQueryScrollOffsetFunction");
         cb  = clay_perl_require_code(aTHX_ cb_sv, "Clay_SetQueryScrollOffsetFunction: callback", true);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->query_scroll_offset_cb, cb);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->query_scroll_offset_userdata, userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET, cb, userdata_sv);
         Clay_SetQueryScrollOffsetFunction(clay_perl_query_scroll_offset_trampoline, ctx);
         clay_perl_raise_pending_error(aTHX_ ctx);
 
@@ -886,7 +883,7 @@ xs_Clay_SetExternalScrollHandlingEnabled(enabled)
         clay_perl_context *ctx;
     CODE:
         ctx = REQUIRE_CONTEXT("Clay_SetExternalScrollHandlingEnabled");
-        if (enabled && !ctx->query_scroll_offset_cb) {
+        if (enabled && !ctx->callbacks[CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET].code) {
             croak("Clay_SetExternalScrollHandlingEnabled: install a function with "
                   "Clay_SetQueryScrollOffsetFunction first");
         }
@@ -1099,10 +1096,9 @@ xs_Clay_SetTransitionHandlers(handler_sv = &PL_sv_undef, set_initial_sv = &PL_sv
         handler     = clay_perl_require_code(aTHX_ handler_sv, "Clay_SetTransitionHandlers: handler", true);
         set_initial = clay_perl_require_code(aTHX_ set_initial_sv, "Clay_SetTransitionHandlers: setInitialState", true);
         set_final   = clay_perl_require_code(aTHX_ set_final_sv, "Clay_SetTransitionHandlers: setFinalState", true);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->transition_handler_cb,     handler);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->transition_set_initial_cb, set_initial);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->transition_set_final_cb,   set_final);
-        clay_perl_replace_sv_slot(aTHX_ &ctx->transition_userdata,       userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_HANDLER,     handler,     userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL, set_initial, userdata_sv);
+        clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL,   set_final,   userdata_sv);
         clay_perl_raise_pending_error(aTHX_ ctx);
 
 # =============================================================================

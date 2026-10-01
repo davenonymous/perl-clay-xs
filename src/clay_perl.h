@@ -104,6 +104,33 @@ typedef struct clay_perl_string_arena {
  * handle to the context shares that one referent, so DESTROY runs once.
  * ------------------------------------------------------------------------ */
 
+/* ---------------------------------------------------------------------------
+ * Callback kinds and slots.
+ *
+ * Every Perl callback Clay can reach has a kind; it selects how the
+ * dispatcher parses the callback's result and, for the per-context kinds,
+ * the context slot holding the callback. Kinds start at 1 so a zeroed
+ * dispatch record names none.
+ * ------------------------------------------------------------------------ */
+
+typedef enum {
+    CLAY_PERL_DISPATCH_MEASURE_TEXT = 1,
+    CLAY_PERL_DISPATCH_ERROR_HANDLER,
+    CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET,
+    CLAY_PERL_DISPATCH_HOVER,
+    CLAY_PERL_DISPATCH_TRANSITION_HANDLER,
+    CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL,
+    CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL,
+    CLAY_PERL_DISPATCH_KIND_COUNT
+} clay_perl_dispatch_kind;
+
+/* A Perl callback and the userdata passed as its last argument; both are
+ * private copies, NULL when unset. */
+typedef struct clay_perl_callback {
+    SV *code;
+    SV *userdata;
+} clay_perl_callback;
+
 typedef struct clay_perl_context {
     /* Owning interpreter and the blessed referent (not ref-counted). */
     void *owner;
@@ -137,27 +164,19 @@ typedef struct clay_perl_context {
     uint32_t suppressed_errors;
     bool     measure_cache_poisoned;
 
-    /* Per-context callbacks. Each slot holds a private copy. */
-    SV *measure_text_cb;
-    SV *measure_text_userdata;
-    SV *error_handler_cb;
-    SV *error_handler_userdata;
-    SV *query_scroll_offset_cb;
-    SV *query_scroll_offset_userdata;
+    /* Per-context callbacks, indexed by kind (set and freed through
+     * clay_perl_callback_set / clay_perl_callbacks_free). The HOVER slot
+     * stays empty: hover callbacks are per element (hover_callbacks).
+     * Clay's transition callback signatures carry no element id (see the
+     * handler / setInitialState / setFinalState calls in Clay_EndLayout),
+     * so one handler set per context serves every transitioning element;
+     * Clay_SetTransitionHandlers stores its userdata in all three
+     * transition slots. */
+    clay_perl_callback callbacks[CLAY_PERL_DISPATCH_KIND_COUNT];
 
     /* Per-element hover callbacks, keyed by element id (decimal string).
      * Each value is an arrayref [coderef, userdata, generation]. */
     HV *hover_callbacks;
-
-    /* Transition callbacks. Clay's transition callback signatures carry
-     * no element id (see the handler / setInitialState / setFinalState
-     * calls in Clay_EndLayout), so one handler set per context serves
-     * every transitioning element; the handler dispatches on its
-     * arguments. */
-    SV *transition_handler_cb;
-    SV *transition_set_initial_cb;
-    SV *transition_set_final_cb;
-    SV *transition_userdata;
 } clay_perl_context;
 
 /* ---------------------------------------------------------------------------
@@ -302,16 +321,6 @@ SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length);
  * trampoline's G_EVAL and never unwinds through Clay's C frames.
  * ------------------------------------------------------------------------ */
 
-typedef enum {
-    CLAY_PERL_DISPATCH_MEASURE_TEXT = 1,
-    CLAY_PERL_DISPATCH_ERROR_HANDLER,
-    CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET,
-    CLAY_PERL_DISPATCH_HOVER,
-    CLAY_PERL_DISPATCH_TRANSITION_HANDLER,
-    CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL,
-    CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL
-} clay_perl_dispatch_kind;
-
 /* Result slot a trampoline hands to the dispatcher. The trampoline fills
  * in the defaults; the dispatcher overwrites the member for its kind. */
 typedef struct clay_perl_dispatch_result {
@@ -387,15 +396,19 @@ extern clay_perl_context *clay_perl_current_ctx;
  * Callback registries (src/callbacks.c).
  * ------------------------------------------------------------------------ */
 
-/* Replaces a callback or userdata slot with a copy of new_value (NULL for
- * undef), copying before the old value is released. */
-void clay_perl_replace_sv_slot(pTHX_ SV **slot, SV *new_value);
+/* Installs code and userdata (copies; undef or NULL clears) as the
+ * context's callback of the given kind. */
+void clay_perl_callback_set(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
+                            SV *code, SV *userdata);
+
+/* Releases every per-context callback slot. */
+void clay_perl_callbacks_free(pTHX_ clay_perl_context *ctx);
 
 void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
                               uint32_t element_id, SV *cb, SV *userdata);
 
-/* Drops hover entries registered more than keep_generations frames ago. */
-void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx,
-                                    uint32_t keep_generations);
+/* Drops the hover entries no frame can reach any more (called at the
+ * start of every frame). */
+void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx);
 
 #endif /* CLAY_PERL_H */
