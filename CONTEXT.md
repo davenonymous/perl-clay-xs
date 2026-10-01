@@ -71,5 +71,12 @@ _Avoid_: auto-synced state, mirrored state
 What one frame laid out (`Clay::UI::_FrameRegistry`): widgets by render-command
 userData and by Clay element id, walk order, and the scroll containers with the
 element ids they were declared under. The walk builds a new one, and it replaces
-the previous one only when the frame completes.
+the previous one only when the frame completes. It also turns its scroll
+containers' position changes into tracker input.
 _Avoid_: pending registries, id map
+
+**Scroll container**:
+A widget composing HasScroll. Only scroll containers get Clay's scroll offset
+injected while they are walked, and only they receive OnScroll. A widget that
+writes a `clip` slice without HasScroll is clipped but does not scroll.
+_Avoid_: clip element, scrollable

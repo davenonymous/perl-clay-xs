@@ -21,7 +21,6 @@ use Clay::XS qw(
 	Clay_GetPointerOverIds
 	Clay_UpdateScrollContainers
 	Clay_GetScrollOffset
-	Clay_GetScrollContainerData
 	Clay_BeginLayout
 	Clay_EndLayout
 	Clay_GetElementId
@@ -228,7 +227,7 @@ class Clay::UI :strict(params) {
 		my @under_pointer = $self->_widgets_under_pointer;
 		my $pointer_data  = Clay_GetPointerState();
 
-		my %scroll_before = $self->_scroll_positions;
+		my $scroll_before = $_frame->scroll_positions($self);
 		Clay_UpdateScrollContainers($frame->{drag}, $frame->{scroll_delta}, $frame->{delta_time});
 
 		my ($dispatch_error, $layout_error, $commands);
@@ -241,7 +240,7 @@ class Clay::UI :strict(params) {
 					down     => $state == CLAY_POINTER_DATA_PRESSED || $state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME,
 					x        => $pointer_data->{position}{x},
 					y        => $pointer_data->{position}{y},
-					scrolled => [ $self->_scroll_changes(\%scroll_before) ],
+					scrolled => [ $_frame->scroll_changes($scroll_before) ],
 				);
 				1;
 			} or $dispatch_error = $@ || 'unknown listener error';
@@ -313,31 +312,6 @@ class Clay::UI :strict(params) {
 		return @widgets;
 	}
 
-	# Scroll containers are looked up under the element id the last walk
-	# declared them with.
-	method _scroll_positions () {
-		my %positions;
-		for my $container (grep { $self->_belongs_here($_->[0]) } $_frame->scroll_containers) {
-			my ($widget, $element_id) = @$container;
-			my $data = Clay_GetScrollContainerData($element_id);
-			$positions{ refaddr $widget } = [ $widget, $element_id, $data->{scrollPosition} ] if $data->{found};
-		}
-		return %positions;
-	}
-
-	method _scroll_changes ($before) {
-		my @changes;
-		for my $entry (values %$before) {
-			my ($widget, $element_id, $old) = @$entry;
-			my $data = Clay_GetScrollContainerData($element_id);
-			next unless $data->{found};
-			my $new = $data->{scrollPosition};
-			my ($dx, $dy) = ($new->{x} - $old->{x}, $new->{y} - $old->{y});
-			push @changes, [ $widget, $dx, $dy ] if $dx != 0 || $dy != 0;
-		}
-		return @changes;
-	}
-
 	# Widgets sorted by their position in the last walk (pre-order); widgets
 	# the walk did not reach (removed ones) keep their relative order last.
 	method _in_tree_order (@widgets) {
@@ -399,7 +373,7 @@ class Clay::UI :strict(params) {
 		Clay__OpenElementWithId($element);
 		my $ok = eval {
 			my $clip = $camelized->{clip};
-			if ($clip && !exists $clip->{childOffset}) {
+			if ($frame->is_scroll_container($node) && $clip && !exists $clip->{childOffset}) {
 				$clip->{childOffset} = Clay_GetScrollOffset();
 			}
 			Clay__ConfigureOpenElement($camelized);
@@ -721,6 +695,12 @@ C<user_data> (into its own copy of the config the widget returned) so
 render commands carry a back-reference. A widget's C<to_config> (or
 C<text_config>) must therefore NOT set C<user_data> itself; C<render>
 dies with a clear message if it sees one already present.
+
+For a scroll container (a widget composing
+L<Clay::UI::Role::Layout::HasScroll>) without an explicit C<child_offset>,
+the walker also sets the C<clip> slice's C<childOffset> to Clay's scroll
+offset, so its children follow the scroll position. A C<clip> slice from
+any other widget is passed on as is: it clips, but does not scroll.
 
 Widgets without an C<id> get one derived from their position below the
 nearest ancestor that has one; see

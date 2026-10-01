@@ -13,6 +13,7 @@ use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
 
 use Object::Pad;
+use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Interaction::Pressable;
 use Clay::UI::Role::Layout::HasScroll;
@@ -22,6 +23,16 @@ use Clay::UI::Role::Style::HasBackground;
 class TestScrollBox :does(Clay::UI::Role::Layout::HasScroll)
                     :does(Clay::UI::Role::Layout::HasLayout)
 {}
+
+# Clips without composing HasScroll: not a scroll container.
+class TestClipBox :does(Clay::UI::Role::Core::Container)
+                  :does(Clay::UI::Role::Layout::HasLayout)
+{
+	method contribute_clip ($config) {
+		$config->{clip} = { vertical => 1 };
+		return;
+	}
+}
 
 class TestButton
 	:does(Clay::UI::Role::Core::Stateful)
@@ -306,6 +317,27 @@ subtest 'HasScroll content moves with scroll input' => sub {
 	$panel->child_offset({ x => 0, y => -40 });
 	$ui->render(pointer_state => { x => 50, y => 25, down => 0 });
 	is( $row0_y->(), -40, 'an explicit child_offset wins' );
+	is( scalar(@errors), 0, 'no Clay errors' );
+};
+
+subtest 'a clip slice without HasScroll clips but does not scroll' => sub {
+	@errors = ();
+	my $panel = TestClipBox->new(
+		id     => 'plain',
+		layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(50) }, layout_direction => CLAY_TOP_TO_BOTTOM },
+	);
+	$panel->add_child(map {
+		Clay::UI::Test::Box->new(id => "line$_",
+			layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(20) } })
+	} 0 .. 5);
+	my $ui = make_ui($panel);
+	my $line0_y = sub { Clay_GetElementData(Clay_GetElementId('line0'))->{boundingBox}{y} };
+
+	$ui->render;
+	$ui->render(pointer_state => { x => 50, y => 25, down => 0 });
+	my $cmds = $ui->render(pointer_state => { x => 50, y => 25, down => 0 }, scroll_delta => { x => 0, y => -1.5 });
+	ok( (grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START } @$cmds), 'the children are clipped' );
+	is( $line0_y->(), 0, 'a wheel delta does not move them' );
 	is( scalar(@errors), 0, 'no Clay errors' );
 };
 

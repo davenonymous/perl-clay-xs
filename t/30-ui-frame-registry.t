@@ -56,6 +56,12 @@ subtest 'scroll containers keep the element id they were declared with' => sub {
 	is( $containers[0][1], $id, 'its element id' );
 };
 
+subtest 'a scroll container is a widget composing HasScroll' => sub {
+	my $frame = Clay::UI::_FrameRegistry->new;
+	is( $frame->is_scroll_container(ScrollPanel->new(id => 'log')), 1, 'HasScroll' );
+	is( $frame->is_scroll_container(Clay::UI::Test::Box->new), 0, 'a plain box' );
+};
+
 subtest 'widget references are weak' => sub {
 	my $frame = Clay::UI::_FrameRegistry->new;
 	my $id    = element_id();

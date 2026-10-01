@@ -113,6 +113,10 @@ through Clay::UI and replaces `userData` with widget class and id.
   `focus_next` / `focus_previous` (live tree order, not frame order);
   detaching a subtree drops its interaction state (`OnHoverStopped`) and
   focus (`OnBlur`) at once.
+- A scroll container is a widget composing HasScroll
+  (`_FrameRegistry::is_scroll_container`): only it gets Clay's scroll
+  offset injected as `childOffset` and receives OnScroll. The frame
+  registry also snapshots and diffs scroll positions for `render`.
 - The walker injects `user_data => refaddr($widget)` so
   `$ui->widget_for($cmd->{userData})` works; a widget setting `user_data`
   itself is an error.

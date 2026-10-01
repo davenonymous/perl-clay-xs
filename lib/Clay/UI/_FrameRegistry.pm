@@ -11,6 +11,8 @@ use Scalar::Util qw(refaddr weaken);
 our $VERSION = '0.01';
 
 class Clay::UI::_FrameRegistry :strict(params) {
+	use Clay::XS qw(Clay_GetScrollContainerData);
+
 	# Every widget reference is weak: a widget freed after its frame looks
 	# like one the frame never saw.
 	field %_by_user_data;   # render-command userData (refaddr) -> widget
@@ -33,11 +35,17 @@ class Clay::UI::_FrameRegistry :strict(params) {
 		$_by_element{ $element_id->{id} } = $widget;
 		weaken $_by_element{ $element_id->{id} };
 		$_rank{ refaddr $widget } = scalar keys %_rank;
-		if ($widget->DOES('Clay::UI::Role::Layout::HasScroll')) {
+		if ($self->is_scroll_container($widget)) {
 			push @_scroll, [ $widget, $element_id ];
 			weaken $_scroll[-1][0];
 		}
 		return;
+	}
+
+	# A scroll container is a widget composing HasScroll: only it gets
+	# Clay's scroll offset injected and receives OnScroll.
+	method is_scroll_container ($widget) {
+		return $widget->DOES('Clay::UI::Role::Layout::HasScroll') ? 1 : 0;
 	}
 
 	method widget_for ($user_data) {
@@ -60,6 +68,36 @@ class Clay::UI::_FrameRegistry :strict(params) {
 	method scroll_containers () {
 		return map { [ @$_ ] } grep { defined $_->[0] } @_scroll;
 	}
+
+	# Where the scroll containers of $ui are now, looked up under the
+	# element id this frame declared them with: refaddr => [ widget,
+	# element id, position ]. Containers detached since are left out.
+	method scroll_positions ($ui) {
+		my %positions;
+		for my $container ($self->scroll_containers) {
+			my ($widget, $element_id) = @$container;
+			my $owner = $widget->ui;
+			next unless defined $owner && refaddr($owner) == refaddr($ui);
+			my $data = Clay_GetScrollContainerData($element_id);
+			$positions{ refaddr $widget } = [ $widget, $element_id, $data->{scrollPosition} ] if $data->{found};
+		}
+		return \%positions;
+	}
+
+	# [ widget, dx, dy ] for each container of an earlier scroll_positions
+	# that has moved since.
+	method scroll_changes ($before) {
+		my @changes;
+		for my $entry (values %$before) {
+			my ($widget, $element_id, $old) = @$entry;
+			my $data = Clay_GetScrollContainerData($element_id);
+			next unless $data->{found};
+			my $new = $data->{scrollPosition};
+			my ($dx, $dy) = ($new->{x} - $old->{x}, $new->{y} - $old->{y});
+			push @changes, [ $widget, $dx, $dy ] if $dx != 0 || $dy != 0;
+		}
+		return @changes;
+	}
 }
 
 1;
@@ -77,8 +115,12 @@ and replaces the previous one only when the frame completes, so a failed
 frame leaves the last good registry in place. It answers the questions
 the next frame's pointer and scroll handling asks about the last layout:
 which widget a render command's C<userData> or a Clay element id
-belongs to, where widgets came in the walk, and which scroll containers
-were declared under which element id.
+belongs to, where widgets came in the walk, which scroll containers were
+declared under which element id, and how far they have scrolled since.
+
+It also defines what a scroll container is: a widget composing
+L<Clay::UI::Role::Layout::HasScroll>. The walker injects Clay's scroll
+offset only into scroll containers, and only they receive C<OnScroll>.
 
 Widget references are weak.
 
@@ -92,6 +134,10 @@ This module is internal. The API is not part of the public contract.
 
 Records C<$widget>; returns the C<userData> value for its render
 commands.
+
+=item C<is_scroll_container($widget)>
+
+1 if C<$widget> is a scroll container, else 0.
 
 =item C<add_element($widget, $element_id)>
 
@@ -112,6 +158,18 @@ original order.
 
 List of C<[ $widget, $element_id ]> for the scroll containers that
 still exist, in walk order.
+
+=item C<scroll_positions($ui)>
+
+Hashref C<< refaddr => [ $widget, $element_id, $position ] >> for the
+scroll containers that still belong to C<$ui> and that Clay knows,
+with their current scroll position. Needs C<$ui>'s Clay context to be
+current.
+
+=item C<scroll_changes($positions)>
+
+List of C<[ $widget, $delta_x, $delta_y ]> for the containers of an
+earlier C<scroll_positions> result that have moved since.
 
 =back
 

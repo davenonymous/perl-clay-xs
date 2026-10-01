@@ -79,7 +79,11 @@ Clay::UI::Role::Layout::HasScroll - scrollable-container mixin for Clay::UI widg
 
 =head1 DESCRIPTION
 
-Mixin role that turns a widget into a Clay scroll container. Composes
+Mixin role that turns a widget into a scroll container. Only a widget
+composing this role is one: the walker gives only it Clay's scroll offset,
+and only it receives L<Clay::UI::Events::OnScroll>. A widget that writes
+a C<clip> slice itself, without this role, is clipped but does not
+scroll. Composes
 L<Clay::UI::Role::Core::Stateful> (an C<id> is mandatory because Clay
 needs a stable address to track scroll state across frames),
 L<Clay::UI::Role::Core::Container> (the scrolled content is added with
