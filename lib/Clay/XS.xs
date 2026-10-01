@@ -917,6 +917,16 @@ xs_set_scroll_position(id_sv, position_sv)
         *data.scrollPosition = position;
         clay_perl_raise_pending_error(aTHX_ ctx);
 
+# Check mode: needs no context and never calls into Clay.
+void
+xs_check_struct(type, value, root_sv = &PL_sv_undef)
+        const char *type
+        SV *value
+        SV *root_sv
+    CODE:
+        SvGETMAGIC(root_sv);
+        clay_perl_check_struct(aTHX_ type, value, SvOK(root_sv) ? SvPV_nomg_nolen(root_sv) : NULL);
+
 # =============================================================================
 # Debug, culling, capacity, ease helper.
 # =============================================================================

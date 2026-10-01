@@ -125,6 +125,7 @@ subtest 'out-of-range values croak with struct and field' => sub {
     like( configure_error({ layout => { padding => { left => -8 } } }),
         qr/Clay_ElementDeclaration\.layout\.padding\.left: expected an integer in 0\.\.65535, got '-8'/,
         'negative padding (uint16)' );
+    isa_ok( configure_error({ layout => { childGap => -1 } }), 'Clay::XS::StructError' );
     like( configure_error({ layout => { childGap => 70000 } }),
         qr/layout\.childGap: expected an integer in 0\.\.65535/, 'childGap above 65535' );
     like( configure_error({ layout => { layoutDirection => 257 } }),

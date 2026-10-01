@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional required validate_flag validate_vector2);
+use Clay::UI::_validate qw(optional required clay_struct clay_field);
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Events::Emitter;
@@ -24,24 +24,24 @@ role Clay::UI::Role::Layout::HasScroll
 	field $child_offset :param = undef;
 
 	ADJUST {
-		$horizontal   = required(\&validate_flag,    horizontal   => $horizontal);
-		$vertical     = required(\&validate_flag,    vertical     => $vertical);
-		$child_offset = optional(\&validate_vector2, child_offset => $child_offset);
+		$horizontal   = required(clay_field('Clay_ClipElementConfig', 'horizontal'),    horizontal   => $horizontal);
+		$vertical     = required(clay_field('Clay_ClipElementConfig', 'vertical'),    vertical     => $vertical);
+		$child_offset = optional(clay_struct('Clay_Vector2'), child_offset => $child_offset);
 	}
 
 	method horizontal (@new) {
 		return $horizontal unless @new;
-		return $horizontal = required(\&validate_flag, horizontal => @new);
+		return $horizontal = required(clay_field('Clay_ClipElementConfig', 'horizontal'), horizontal => @new);
 	}
 
 	method vertical (@new) {
 		return $vertical unless @new;
-		return $vertical = required(\&validate_flag, vertical => @new);
+		return $vertical = required(clay_field('Clay_ClipElementConfig', 'vertical'), vertical => @new);
 	}
 
 	method child_offset (@new) {
 		return $child_offset unless @new;
-		return $child_offset = optional(\&validate_vector2, child_offset => @new);
+		return $child_offset = optional(clay_struct('Clay_Vector2'), child_offset => @new);
 	}
 
 	method contribute_clip ($config) {

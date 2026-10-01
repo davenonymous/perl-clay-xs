@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional validate_color);
+use Clay::UI::_validate qw(optional clay_struct);
 
 our $VERSION = '0.01';
 
@@ -15,12 +15,12 @@ role Clay::UI::Role::Style::HasBackground {
 	field $background_color :param = undef;
 
 	ADJUST {
-		$background_color = optional(\&validate_color, background_color => $background_color);
+		$background_color = optional(clay_struct('Clay_Color'), background_color => $background_color);
 	}
 
 	method background_color (@new) {
 		return $background_color unless @new;
-		return $background_color = optional(\&validate_color, background_color => @new);
+		return $background_color = optional(clay_struct('Clay_Color'), background_color => @new);
 	}
 
 	method contribute_background ($config) {

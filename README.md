@@ -141,7 +141,8 @@ for my $command (@$render_commands) {
 Attributes use `snake_case` keys (`background_color`, `layout_direction`);
 Clay::UI converts them to Clay's field names. They are validated where
 they are set - in the constructor and in the read/write accessors - so a
-misspelled key or a wrong-typed value dies at that point. `:strict(params)`
+misspelled key, a wrong-typed value or an out-of-range number dies at that
+point, with the same rules Clay::XS applies (`check_struct`). `:strict(params)`
 on your classes makes misspelled constructor parameters die too.
 `widget_for` maps a render command back to the widget that produced it.
 

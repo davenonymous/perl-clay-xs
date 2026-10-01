@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::XS qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
-use Clay::UI::_validate qw(required validate_number);
+use Clay::UI::_validate qw(required clay_field);
 use Clay::UI::Grid::Row;
 use Clay::UI::Grid::Cell;
 use Clay::UI::Role::Core::Element;
@@ -105,8 +105,8 @@ role Clay::UI::Grid
 	field @_row_height_ids;   # row    index -> packed height-axis group id
 
 	ADJUST {
-		$cell_gap    = required(\&validate_number, cell_gap => $cell_gap);
-		$row_gap     = required(\&validate_number, row_gap  => $row_gap);
+		$cell_gap    = required(clay_field('Clay_LayoutConfig', 'childGap'), cell_gap => $cell_gap);
+		$row_gap     = required(clay_field('Clay_LayoutConfig', 'childGap'), row_gap  => $row_gap);
 		$_grid_lease = Clay::UI::Grid::_IdLease->new;
 	}
 
@@ -118,14 +118,14 @@ role Clay::UI::Grid
 
 	method row_gap (@new) {
 		return $row_gap unless @new;
-		return $row_gap = required(\&validate_number, row_gap => @new);
+		return $row_gap = required(clay_field('Clay_LayoutConfig', 'childGap'), row_gap => @new);
 	}
 
 	# The inter-cell gap is baked into each row's layout when the row is
 	# built, so a write updates every existing row as well.
 	method cell_gap (@new) {
 		return $cell_gap unless @new;
-		$cell_gap = required(\&validate_number, cell_gap => @new);
+		$cell_gap = required(clay_field('Clay_LayoutConfig', 'childGap'), cell_gap => @new);
 		$_->layout({ %{ $_->layout }, child_gap => $cell_gap }) for @{ $self->children };
 		return $cell_gap;
 	}

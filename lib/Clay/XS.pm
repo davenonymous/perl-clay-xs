@@ -14,8 +14,8 @@ XSLoader::load(__PACKAGE__, $VERSION);
 
 # -----------------------------------------------------------------------------
 # Re-export every Clay_* / Clay__* / sizing_* / padding_* / border_* /
-# corner_radius_* / Clay_Set* helper as its bare name, plus the constants
-# the BOOT block installed.
+# corner_radius_* / Clay_Set* / check_struct helper as its bare name,
+# plus the constants the BOOT block installed.
 #
 # The export tag :all gives a caller a flat namespace identical to the
 # C header. Most users will want this. Use individual imports if you
@@ -74,6 +74,7 @@ our @EXPORT_OK = qw(
     sizing_fit sizing_grow sizing_fixed sizing_percent
     padding_all border_all border_outside corner_radius_all
     set_scroll_position
+    check_struct
 
     CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM
     CLAY_ALIGN_X_LEFT CLAY_ALIGN_X_RIGHT CLAY_ALIGN_X_CENTER
@@ -142,6 +143,31 @@ our %EXPORT_TAGS = (
 # inherit a copy: its DESTROY would free the parent's context.
 package Clay::XS::Context {
     sub CLONE_SKIP { 1 }
+}
+
+# What src/marshal.c croaks for a struct value it cannot use. Always true,
+# so `$@ || ...` keeps it; stringifies like a plain croak message.
+package Clay::XS::StructError {
+    use overload '""' => \&as_string, bool => sub { 1 }, fallback => 1;
+
+    sub path         ($self) { $self->{path} }
+    sub expected     ($self) { $self->{expected} }
+    sub got          ($self) { $self->{got} }
+    sub hint         ($self) { $self->{hint} }
+    sub unknown_keys ($self) { $self->{unknown_keys} }
+    sub known_keys   ($self) { $self->{known_keys} }
+    sub file         ($self) { $self->{file} }
+    sub line         ($self) { $self->{line} }
+
+    sub message ($self) {
+        my $message = join('.', @{ $self->{path} }) . ": expected $self->{expected}, got $self->{got}";
+        $message .= " ($self->{hint})" if defined $self->{hint};
+        return $message;
+    }
+
+    sub as_string ($self, @) {
+        return $self->message . " at $self->{file} line $self->{line}.\n";
+    }
 }
 
 1;
@@ -310,10 +336,76 @@ Clay__OpenElement/Clay__CloseElement)>. The next frame works normally.
 Every struct field is parsed when it crosses into Clay: wrong reference
 types (at any nesting level), non-numeric or non-finite numbers, and
 integers outside the C field's range (for example negative padding or an
-enum value Clay does not define) croak with the struct and field name,
-e.g. C<Clay_ElementDeclaration.layout.padding.left: expected an integer
-in 0..65535, got '-8'>. C<floating =E<gt> { parentId =E<gt> ... }> accepts
-a numeric id or an element-id hash from C<Clay_GetElementId>.
+enum value Clay does not define) croak a L</STRUCT ERRORS> object naming
+the struct and field, e.g. C<Clay_ElementDeclaration.layout.padding.left:
+expected an integer in 0..65535, got '-8'>. Unknown keys are ignored, as
+are extra array elements. C<floating =E<gt> { parentId =E<gt> ... }>
+accepts a numeric id or an element-id hash from C<Clay_GetElementId>.
+
+=head1 CHECKING STRUCTS
+
+    check_struct('Clay_LayoutConfig', $layout);
+    check_struct('Clay_Padding', $padding, 'layout.padding');
+
+C<check_struct($type, $value, $root)> validates C<$value> as the struct
+named by its exact C type (C<Clay_ElementDeclaration>,
+C<Clay_LayoutConfig>, C<Clay_TextElementConfig>, C<Clay_Color>,
+C<Clay_SizingAxis>, ...: every struct a function argument or a
+declaration field takes) without a context or a frame. It returns
+nothing and croaks a L</STRUCT ERRORS> object for the first problem; an
+unknown type name croaks a plain string. The error path starts at
+C<$root>, or at the type name when C<$root> is undef.
+
+It applies the same rules as the parse that runs when the value crosses
+into Clay, and is stricter in three ways: unknown keys croak (the error
+lists the known ones), an arrayref must have exactly one element per
+field (four for a colour), and a boolean field must not be a reference.
+Shape errors of a few structs carry a hint, for example C<(padding_all(N)
+builds one)>. An undef C<$value> is accepted: it means the zero struct.
+
+=head1 STRUCT ERRORS
+
+Struct values that cannot be used croak a C<Clay::XS::StructError>, both
+when they cross into Clay and from L</CHECKING STRUCTS>. The object is true
+in boolean context and stringifies like a plain croak message,
+C<< <path>: expected <what>, got <value>[ (<hint>)] at <file> line <n>. >>
+Its readers:
+
+=over 4
+
+=item C<path>
+
+Arrayref of names from the root (the struct or function argument) to
+the field, e.g. C<['Clay_ElementDeclaration', 'layout', 'padding', 'left']>.
+
+=item C<expected>, C<got>
+
+What the field takes (C<an integer in 0..65535>) and how the value was
+seen (C<'-8'>, C<undef>, C<a HASH reference>).
+
+=item C<hint>
+
+A hint for building the value, or undef (only L</CHECKING STRUCTS> sets it).
+
+=item C<unknown_keys>, C<known_keys>
+
+For an unknown-key error: arrayrefs of the offending keys (sorted) and
+of the keys the struct takes; undef otherwise.
+
+=item C<message>
+
+The message without the location.
+
+=item C<file>, C<line>
+
+Where the croak happened.
+
+=back
+
+Errors raised inside a callback (for example a bad transition handler
+result) are re-thrown unchanged as described in L</ERRORS FROM
+CALLBACKS>. Plain function arguments that are not structs (counts,
+floats, callbacks) croak plain strings.
 
 =head1 STRINGS
 
@@ -468,7 +560,9 @@ re-throws a held error as well.
 =back
 
 Only the first error is kept; later ones are counted and the message
-gains C< (and N more callback errors this frame)>. After a measure
+gains C< (and N more callback errors this frame)>. Exception objects
+(including a L</STRUCT ERRORS> object for a malformed callback result)
+are re-thrown unchanged, without either suffix. After a measure
 function fails, text is measured as 0x0 without calling Perl again until
 the error has been re-thrown, and Clay's measurement cache is reset so
 the next frame measures afresh. The render commands of a frame whose

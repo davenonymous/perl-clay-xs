@@ -34,7 +34,10 @@ through Clay::UI and replaces `userData` with widget class and id.
 
 - `lib/Clay/XS.xs` + `src/*.c` + `src/clay_perl.h` are the binding;
   `src/marshal.c` converts Perl hashes to Clay structs (keys are the exact
-  camelCase field names from clay.h) and range-checks every argument.
+  camelCase field names from clay.h) and range-checks every argument. Each
+  input struct is one schema table there; the same tables run in parse
+  mode (lenient, per frame) and check mode (`check_struct`, strict), and
+  both croak `Clay::XS::StructError`. Add a field by extending its table.
 - `src/clay/clay.h.orig` is the pristine upstream header (committed).
   `make` generates the gitignored `src/clay/clay.h` from it plus
   `patches/0001-clay-sizing-groups.patch`, which adds sizing groups
@@ -97,8 +100,9 @@ through Clay::UI and replaces `userData` with widget class and id.
   attached once, ever. `$widget->ui` walks to the root, which a Clay::UI
   stamps at construction (write-once).
 - Attributes are validated where set (accessors and `ADJUST` via
-  `Clay::UI::_validate`, whose key tables mirror `src/marshal.c`). Classes
-  are `:strict(params)`. User ids must not start with `anon:`; user
+  `Clay::UI::_validate`). Clay values go through `check_struct`, the
+  strict check mode of the struct schemas in `src/marshal.c`, so there is
+  no Perl copy of Clay's keys or ranges. Classes are `:strict(params)`. User ids must not start with `anon:`; user
   sizing-group ids are `0 .. 2**20 - 1` (higher ones belong to `Grid`).
 
 ## Conventions

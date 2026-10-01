@@ -69,32 +69,36 @@ subtest 'render arguments are validated' => sub {
 # -----------------------------------------------------------------------------
 
 my @invalid = (
-	[ 'Clay::UI::Test::Box',  background_color => 'red',                       qr/'background_color' must be a colour/ ],
-	[ 'Clay::UI::Test::Box',  background_color => [1, 2, 3],                   qr/'background_color' must be a colour/ ],
-	[ 'Clay::UI::Test::Box',  background_color => { red => 1 },                qr/'background_color' has unknown key 'red'/ ],
-	[ 'Clay::UI::Test::Box',  border_color     => [1, 2, 'x', 4],              qr/'border_color\[2\]' must be a finite number/ ],
+	[ 'Clay::UI::Test::Box',  background_color => 'red',                       qr/'background_color' expected a hash or array reference, got 'red'/ ],
+	[ 'Clay::UI::Test::Box',  background_color => [1, 2, 3],                   qr/'background_color' expected an array of 4 numbers, got an array of 3 elements/ ],
+	[ 'Clay::UI::Test::Box',  background_color => { red => 1 },                qr/'background_color' has unknown key 'red' \(known keys: r, g, b, a\)/ ],
+	[ 'Clay::UI::Test::Box',  border_color     => [1, 2, 'x', 4],              qr/'border_color\.b' expected a finite number, got 'x'/ ],
 	[ 'Clay::UI::Test::Box',  border_width     => { lft => 1 },                qr/'border_width' has unknown key 'lft'/ ],
-	[ 'Clay::UI::Test::Box',  corner_radius    => 'round',                     qr/'corner_radius' must be a finite number/ ],
-	[ 'Clay::UI::Test::Box',  layout           => [],                          qr/'layout' must be a hashref/ ],
-	[ 'Clay::UI::Test::Box',  layout           => { padding => 8 },            qr/'layout\.padding' must be a hashref/ ],
-	[ 'Clay::UI::Test::Box',  layout           => { child_gapp => 50 },        qr/'layout' has unknown key 'child_gapp'/ ],
-	[ 'Clay::UI::Test::Box',  layout           => { sizing => { width => 5 } }, qr/'layout\.sizing\.width' must be a sizing hashref/ ],
-	[ 'Clay::UI::Test::Box',  layout           => { layout_direction => 7 },   qr/'layout\.layout_direction' must be one of the Clay constants 0\.\.1/ ],
+	[ 'Clay::UI::Test::Box',  border_width     => -1,                          qr/'border_width' expected an integer in 0\.\.65535, got '-1'/ ],
+	[ 'Clay::UI::Test::Box',  corner_radius    => 'round',                     qr/'corner_radius' expected a finite number, got 'round'/ ],
+	[ 'Clay::UI::Test::Box',  layout           => [],                          qr/'layout' expected a hash reference, got a ARRAY reference/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { padding => 8 },            qr/'layout\.padding' expected a hash reference, got '8' \(padding_all\(N\) builds one\)/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { padding => { left => -5 } }, qr/'layout\.padding\.left' expected an integer in 0\.\.65535, got '-5'/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { child_gap => 70000 },      qr/'layout\.child_gap' expected an integer in 0\.\.65535, got '70000'/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { child_gapp => 50 },        qr/'layout' has unknown key 'child_gapp' \(known keys: sizing, padding, child_gap, child_alignment, layout_direction\)/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { sizing => { width => 5 } }, qr/'layout\.sizing\.width' expected a hash reference, got '5' \(sizing_fit, sizing_grow, sizing_fixed or sizing_percent build one\)/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { layout_direction => 7 },   qr/'layout\.layout_direction' expected an integer in 0\.\.1, got '7'/ ],
 	[ 'Clay::UI::Test::Box',  floating         => { attach_too => 1 },         qr/'floating' has unknown key 'attach_too'/ ],
-	[ 'Clay::UI::Test::Box',  floating         => { offset => 'up' },          qr/'floating\.offset' must be \[x, y\]/ ],
+	[ 'Clay::UI::Test::Box',  floating         => { offset => 'up' },          qr/'floating\.offset' expected a hash or array reference, got 'up'/ ],
 	[ 'Clay::UI::Test::Box',  width_group      => -1,                          qr/'width_group' must be an integer in 0\.\.1048575/ ],
 	[ 'Clay::UI::Test::Box',  height_group     => 2**20,                       qr/'height_group' must be an integer in 0\.\.1048575/ ],
 	[ 'Clay::UI::Test::Box',  id               => '',                          qr/'id' must be a non-empty string/ ],
 	[ 'Clay::UI::Test::Box',  id               => 'anon:0:/0',                 qr/'id' must not start with 'anon:'/ ],
-	[ 'ScrollPanel',          child_offset     => 5,                           qr/'child_offset' must be \[x, y\]/ ],
-	[ 'ScrollPanel',          vertical         => [],                          qr/'vertical' must be a plain boolean value/ ],
+	[ 'ScrollPanel',          child_offset     => 5,                           qr/'child_offset' expected a hash or array reference, got '5'/ ],
+	[ 'ScrollPanel',          vertical         => [],                          qr/'vertical' expected a plain boolean value, got a ARRAY reference/ ],
 	[ 'Clay::UI::Test::Text', text             => undef,                       qr/'text' must be a defined string/ ],
-	[ 'Clay::UI::Test::Text', font_size        => 'big',                       qr/'font_size' must be a finite number/ ],
-	[ 'Clay::UI::Test::Text', text_color       => 'black',                     qr/'text_color' must be a colour/ ],
-	[ 'Clay::UI::Test::Text', wrap_mode        => 9,                           qr/'wrap_mode' must be one of the Clay constants 0\.\.2/ ],
-	[ 'Clay::UI::Test::Text', text_alignment   => 'left',                      qr/'text_alignment' must be one of the Clay constants/ ],
-	[ 'Clay::UI::Test::Grid', row_gap          => 'wide',                      qr/'row_gap' must be a finite number/ ],
-	[ 'Clay::UI::Test::Grid', cell_gap         => undef,                       qr/'cell_gap' must be a finite number/ ],
+	[ 'Clay::UI::Test::Text', font_size        => 'big',                       qr/'font_size' expected an integer in 0\.\.65535, got 'big'/ ],
+	[ 'Clay::UI::Test::Text', font_size        => 70000,                       qr/'font_size' expected an integer in 0\.\.65535, got '70000'/ ],
+	[ 'Clay::UI::Test::Text', text_color       => 'black',                     qr/'text_color' expected a hash or array reference, got 'black'/ ],
+	[ 'Clay::UI::Test::Text', wrap_mode        => 9,                           qr/'wrap_mode' expected an integer in 0\.\.2, got '9'/ ],
+	[ 'Clay::UI::Test::Text', text_alignment   => 'left',                      qr/'text_alignment' expected an integer in 0\.\.2, got 'left'/ ],
+	[ 'Clay::UI::Test::Grid', row_gap          => 'wide',                      qr/'row_gap' expected an integer in 0\.\.65535, got 'wide'/ ],
+	[ 'Clay::UI::Test::Grid', cell_gap         => undef,                       qr/'cell_gap' must be defined/ ],
 );
 
 subtest 'user ids cannot collide with derived ids' => sub {
@@ -119,42 +123,9 @@ subtest 'invalid attributes die at construction and through accessors' => sub {
 	}
 };
 
-# Every key src/marshal.c reads is accepted, in snake_case and camelCase.
-my %marshal_keys = (
-	layout          => [qw(sizing padding child_gap child_alignment layout_direction)],
-	padding         => [qw(left right top bottom)],
-	child_alignment => [qw(x y)],
-	sizing_axis     => [qw(type min max percent)],
-	floating        => [qw(offset expand parent_id z_index attach_points pointer_capture_mode attach_to clip_to)],
-	attach_points   => [qw(element parent)],
-	color           => [qw(r g b a)],
-	border_width    => [qw(left right top bottom between_children)],
-	corner_radius   => [qw(top_left top_right bottom_left bottom_right)],
-);
-my %sample = (
-	sizing => { width => sizing_fit() }, padding => padding_all(1), child_alignment => { x => 1 },
-	offset => [1, 2], expand => { width => 1, height => 2 }, attach_points => { element => 1 },
-);
-
-subtest 'every key Clay::XS reads is accepted' => sub {
-	for my $style ('snake_case', 'camelCase') {
-		my $key = sub ($snake) { $style eq 'snake_case' ? $snake : Clay::UI::_keys::camelize_string($snake) };
-		my %layout = map { $key->($_) => $sample{$_} // 1 } @{ $marshal_keys{layout} };
-		$layout{ $key->('padding') } = { map { $key->($_) => 1 } @{ $marshal_keys{padding} } };
-		$layout{ $key->('child_alignment') } = { map { $key->($_) => 1 } @{ $marshal_keys{child_alignment} } };
-		$layout{sizing} = { width => { map { $key->($_) => 1 } @{ $marshal_keys{sizing_axis} } } };
-		my %floating = map { $key->($_) => $sample{$_} // 1 } @{ $marshal_keys{floating} };
-		$floating{ $key->('attach_points') } = { map { $key->($_) => 1 } @{ $marshal_keys{attach_points} } };
-		ok( lives {
-			Clay::UI::Test::Box->new(
-				layout           => \%layout,
-				floating         => \%floating,
-				background_color => { map { $_ => 1 } @{ $marshal_keys{color} } },
-				border_width     => { map { $key->($_) => 1 } @{ $marshal_keys{border_width} } },
-				corner_radius    => { map { $key->($_) => 1 } @{ $marshal_keys{corner_radius} } },
-			);
-		}, "$style keys" ) or diag $@;
-	}
+subtest 'Clay keys are accepted in snake_case and camelCase' => sub {
+	ok( lives { Clay::UI::Test::Box->new(layout => { child_gap => 4, layout_direction => 1 }) }, 'snake_case' );
+	ok( lives { Clay::UI::Test::Box->new(layout => { childGap => 4, layoutDirection => 1 }) }, 'camelCase' );
 };
 
 subtest 'hover roles cannot be composed onto a text node' => sub {

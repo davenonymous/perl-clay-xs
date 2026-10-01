@@ -227,10 +227,11 @@ void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx);
  *   *_from_sv  : Perl value -> C struct (used at function entry)
  *   *_to_sv    : C struct  -> Perl value (used at function return)
  *
- * All _from_sv helpers croak on invalid input (wrong reference type,
- * non-numeric or non-finite numbers, integers out of the C field's
- * range) naming the struct and field. They never return half-initialised
- * structs. All _to_sv helpers return a new, non-mortal SV.
+ * All _from_sv helpers croak a Clay::XS::StructError on invalid input
+ * (wrong reference type, non-numeric or non-finite numbers, integers out
+ * of the C field's range) naming the struct and field. They never return
+ * half-initialised structs. The clay_perl_parse_* scalar helpers croak
+ * plain strings. All _to_sv helpers return a new, non-mortal SV.
  * ------------------------------------------------------------------------ */
 
 /* Scalar parsing shared by the XS wrappers. */
@@ -260,6 +261,13 @@ Clay_TextElementConfig  clay_text_element_config_from_sv(pTHX_ SV *sv);
 SV                     *clay_text_element_config_to_sv(pTHX_ Clay_TextElementConfig value);
 
 Clay_ElementDeclaration clay_element_declaration_from_sv(pTHX_ SV *sv);
+
+/* Check mode: walks value against the schema of the named struct (exact
+ * C type name) without building anything for Clay. Strict about unknown
+ * keys, array lengths and references used as booleans; croaks a
+ * Clay::XS::StructError whose path starts at root (default: the type
+ * name). An unknown type name croaks a plain string. */
+void clay_perl_check_struct(pTHX_ const char *type, SV *value, const char *root);
 
 /* Transition data: from_sv starts from base and overrides the keys present
  * in the hash; undef returns base unchanged. */

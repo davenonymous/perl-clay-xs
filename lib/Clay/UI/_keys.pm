@@ -9,7 +9,7 @@ use Scalar::Util qw(blessed reftype);
 use Exporter 'import';
 
 our $VERSION   = '0.01';
-our @EXPORT_OK = qw(camelize_keys camelize_string);
+our @EXPORT_OK = qw(camelize_keys camelize_string snake_string);
 
 sub camelize_string ($key) {
 	return $key unless $key =~ /_/;
@@ -21,6 +21,10 @@ sub camelize_string ($key) {
 		substr($part, 0, 1) = uc $first if $first =~ /[a-z]/;
 	}
 	return join '', $head, @parts;
+}
+
+sub snake_string ($key) {
+	return $key =~ s/([A-Z])/_\l$1/gr;
 }
 
 sub camelize_keys ($node) {
@@ -74,6 +78,12 @@ This module is internal. The API is not part of the public contract.
 
 Returns the camelCase form of a snake_case string. Keys containing no
 underscore are returned unchanged.
+
+=head2 snake_string($key)
+
+Returns the snake_case form of a camelCase string, the inverse of
+C<camelize_string> for keys Clay uses (C<childGap> becomes C<child_gap>).
+Used to report Clay paths in the spelling Clay::UI users write.
 
 =head2 camelize_keys($node)
 
