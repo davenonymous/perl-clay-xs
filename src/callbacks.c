@@ -97,7 +97,7 @@ void clay_perl_stash_error_message(pTHX_ clay_perl_context *ctx, const char *mes
 SV *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note)
 {
     SV *error = ctx->pending_error;
-    if (!error) return NULL;
+    if (!error || clay_perl_callback_depth > 0) return NULL;
 
     uint32_t suppressed = ctx->suppressed_errors;
     ctx->pending_error     = NULL;

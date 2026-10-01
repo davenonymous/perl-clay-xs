@@ -23,17 +23,18 @@
  *     element id strings are interned. The caller never needs to keep
  *     input strings alive.
  *
- *   - Every wrapper that touches Clay state first checks for a usable
- *     current context (require_context), so a missing, destroyed or
- *     foreign context croaks instead of crashing inside Clay.
+ *   - Every wrapper applies its wrapper guard (CLAY_PERL_WRAPPERS):
+ *     wrapper_enter checks for a usable current context, so a missing,
+ *     destroyed or foreign context croaks instead of crashing inside
+ *     Clay, and refuses mutating calls from inside a callback.
  *
  *   - Open/close balance is tracked per context: closing or configuring
  *     with nothing open croaks, and Clay_EndLayout closes any element
  *     left open (so Clay's state stays consistent), then croaks.
  *
- *   - Exceptions thrown by Perl callbacks while Clay runs are deferred
- *     (src/callbacks.c) and re-thrown by the wrapper once Clay has
- *     returned. The element-construction wrappers never re-throw deferred
+ *   - Exceptions thrown by Perl callbacks while Clay runs are held
+ *     (src/callbacks.c) and re-thrown by wrapper_leave once Clay has
+ *     returned. The element-construction wrappers never re-throw held
  *     errors (Clay_EndLayout does), so callers can keep open/close
  *     balanced.
  */
@@ -52,27 +53,119 @@ static void install_iv_const(pTHX_ const char *name, IV value)
 }
 
 /* ===========================================================================
- * Context guards.
+ * Wrapper guards.
  *
- * clay_perl_current_ctx mirrors Clay's process-wide current context. The
- * guard croaks unless it is set, belongs to this interpreter and - with
- * GUARD_COUNTS - still has the element / measure-cache word counts
- * Clay_Initialize sized its arena for (Clay keeps its persistent arrays at
- * those sizes and indexes some of them without range checks).
+ * Every Clay::XS function has one descriptor in CLAY_PERL_WRAPPERS below;
+ * wrapper_enter and wrapper_leave apply it, and Clay::XS::_wrapper_guards
+ * returns the whole table (t/19 and the POD are checked against it).
  *
- * While a Clay callback runs (clay_perl_callback_depth > 0) Clay is in the
- * middle of one of its own functions: GUARD_MUTATES wrappers - everything
- * that changes Clay's state or current context - croak then. The croak
- * lands in the trampoline's eval and is re-thrown by the wrapper that
- * called into Clay. Queries that only read finished state stay allowed.
+ *   context  CURRENT:  croaks unless clay_perl_current_ctx (which mirrors
+ *                      Clay's process-wide current context) is set, usable
+ *                      and owned by this interpreter.
+ *            OPTIONAL: the same checks when a current context is set;
+ *                      without one the wrapper gets NULL.
+ *            NONE:     the wrapper needs no context.
+ *   mutates  The wrapper changes Clay's state or current context, so it
+ *            croaks while a Clay callback runs (clay_perl_callback_depth >
+ *            0): Clay is then in the middle of one of its own functions.
+ *            The croak lands in the trampoline's eval and is re-thrown by
+ *            the wrapper that called into Clay. Queries stay allowed.
+ *   counts   Croaks unless Clay still has the element / measure-cache word
+ *            counts Clay_Initialize sized the arena for (Clay keeps its
+ *            persistent arrays at those sizes and indexes some of them
+ *            without range checks).
+ *   frame    IN_FRAME: between Clay_BeginLayout and Clay_EndLayout;
+ *            OPEN_ELEMENT: with an element open.
+ *   rethrow  AFTER:  wrapper_leave re-throws the context's held error once
+ *                    the Clay call has returned (never while a callback
+ *                    runs, see clay_perl_take_pending_error).
+ *            NEVER:  element construction keeps open/close balanced, and
+ *                    context management and configuration hold no layout
+ *                    state.
+ *            CUSTOM: the wrapper takes the held error itself
+ *                    (Clay_Initialize, Clay_BeginLayout).
  *
  * The guard also pins the context until the calling statement ends, so a
  * callback that drops the last reference to it cannot free it while Clay
  * is still using it.
  * ======================================================================== */
 
-#define GUARD_COUNTS  0x1
-#define GUARD_MUTATES 0x2
+typedef enum { WRAP_CONTEXT_NONE, WRAP_CONTEXT_OPTIONAL, WRAP_CONTEXT_CURRENT } wrapper_context;
+typedef enum { WRAP_FRAME_NONE, WRAP_FRAME_IN_FRAME, WRAP_FRAME_OPEN_ELEMENT } wrapper_frame;
+typedef enum { WRAP_RETHROW_NEVER, WRAP_RETHROW_AFTER, WRAP_RETHROW_CUSTOM } wrapper_rethrow;
+
+typedef struct {
+    const char     *name;
+    wrapper_context context;
+    bool            mutates;
+    bool            counts;
+    wrapper_frame   frame;
+    wrapper_rethrow rethrow;
+} clay_perl_wrapper;
+
+/* name, context, mutates, counts, frame, rethrow. Clay_EndLayout checks
+ * its frame itself, for its own message. */
+#define CLAY_PERL_WRAPPERS(W) \
+    W(Clay_MinMemorySize,                      NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_Initialize,                         OPTIONAL, 1, 0, NONE,         CUSTOM) \
+    W(Clay_SetCurrentContext,                  NONE,     1, 0, NONE,         NEVER)  \
+    W(Clay_GetCurrentContext,                  OPTIONAL, 0, 0, NONE,         NEVER)  \
+    W(Clay_SetLayoutDimensions,                CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_GetLayoutDimensions,                CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_BeginLayout,                        CURRENT,  1, 1, NONE,         CUSTOM) \
+    W(Clay_EndLayout,                          CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay__OpenElement,                       CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay__OpenElementWithId,                 CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay__CloseElement,                      CURRENT,  1, 1, OPEN_ELEMENT, NEVER)  \
+    W(Clay__ConfigureOpenElement,              CURRENT,  1, 1, OPEN_ELEMENT, NEVER)  \
+    W(Clay__OpenTextElement,                   CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay__HashString,                        NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay__HashStringWithOffset,              NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_GetElementId,                       NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_GetElementIdWithIndex,              NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_GetOpenElementId,                   CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay_GetElementData,                     CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_SetMeasureTextFunction,             CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_ResetMeasureTextCache,              CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_SetPointerState,                    CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_GetPointerState,                    CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_Hovered,                            CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay_OnHover,                            CURRENT,  1, 1, OPEN_ELEMENT, NEVER)  \
+    W(Clay_PointerOver,                        CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_GetPointerOverIds,                  CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_UpdateScrollContainers,             CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_GetScrollOffset,                    CURRENT,  1, 1, IN_FRAME,     NEVER)  \
+    W(Clay_GetScrollContainerData,             CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_SetQueryScrollOffsetFunction,       CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_SetExternalScrollHandlingEnabled,   CURRENT,  1, 1, NONE,         AFTER)  \
+    W(set_scroll_position,                     CURRENT,  1, 1, NONE,         AFTER)  \
+    W(check_struct,                            NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_SetDebugModeEnabled,                CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_IsDebugModeEnabled,                 CURRENT,  0, 1, NONE,         AFTER)  \
+    W(Clay_SetCullingEnabled,                  CURRENT,  1, 1, NONE,         AFTER)  \
+    W(Clay_GetMaxElementCount,                 CURRENT,  0, 0, NONE,         NEVER)  \
+    W(Clay_SetMaxElementCount,                 OPTIONAL, 1, 0, NONE,         NEVER)  \
+    W(Clay_GetMaxMeasureTextCacheWordCount,    CURRENT,  0, 0, NONE,         NEVER)  \
+    W(Clay_SetMaxMeasureTextCacheWordCount,    OPTIONAL, 1, 0, NONE,         NEVER)  \
+    W(Clay_EaseOut,                            NONE,     0, 0, NONE,         NEVER)  \
+    W(Clay_SetTransitionHandlers,              CURRENT,  1, 1, NONE,         AFTER)  \
+    W(sizing_fit,                              NONE,     0, 0, NONE,         NEVER)  \
+    W(sizing_grow,                             NONE,     0, 0, NONE,         NEVER)  \
+    W(sizing_fixed,                            NONE,     0, 0, NONE,         NEVER)  \
+    W(sizing_percent,                          NONE,     0, 0, NONE,         NEVER)  \
+    W(padding_all,                             NONE,     0, 0, NONE,         NEVER)  \
+    W(border_all,                              NONE,     0, 0, NONE,         NEVER)  \
+    W(border_outside,                          NONE,     0, 0, NONE,         NEVER)  \
+    W(corner_radius_all,                       NONE,     0, 0, NONE,         NEVER)
+
+#define CLAY_PERL_WRAPPER_DESCRIPTOR(name, context, mutates, counts, frame, rethrow) \
+    static const clay_perl_wrapper GUARD_##name = {                                  \
+        #name, WRAP_CONTEXT_##context, mutates, counts, WRAP_FRAME_##frame, WRAP_RETHROW_##rethrow \
+    };
+CLAY_PERL_WRAPPERS(CLAY_PERL_WRAPPER_DESCRIPTOR)
+
+#define CLAY_PERL_WRAPPER_ENTRY(name, context, mutates, counts, frame, rethrow) &GUARD_##name,
+static const clay_perl_wrapper *const all_wrappers[] = { CLAY_PERL_WRAPPERS(CLAY_PERL_WRAPPER_ENTRY) };
 
 static void forbid_in_callback(pTHX_ const char *func)
 {
@@ -88,43 +181,46 @@ static void pin_context(pTHX_ clay_perl_context *ctx)
     }
 }
 
-static clay_perl_context *require_context(pTHX_ const char *func, int guards)
+static void require_frame(pTHX_ const clay_perl_wrapper *w, clay_perl_context *ctx)
 {
-    if (guards & GUARD_MUTATES) forbid_in_callback(aTHX_ func);
+    if (w->frame == WRAP_FRAME_IN_FRAME && !ctx->in_frame) {
+        croak("%s: called outside Clay_BeginLayout/Clay_EndLayout", w->name);
+    }
+    if (w->frame == WRAP_FRAME_OPEN_ELEMENT && ctx->open_depth == 0) {
+        croak("%s: no element is open (unbalanced Clay__OpenElement/Clay__CloseElement)", w->name);
+    }
+}
+
+/* Applies a descriptor before the wrapper's work; returns the context it
+ * acquired (NULL for NONE, and for OPTIONAL without a current context). */
+static clay_perl_context *wrapper_enter(pTHX_ const clay_perl_wrapper *w)
+{
+    if (w->mutates) forbid_in_callback(aTHX_ w->name);
+    if (w->context == WRAP_CONTEXT_NONE) return NULL;
+
     clay_perl_context *ctx = clay_perl_current_ctx;
+    if (!ctx && w->context == WRAP_CONTEXT_OPTIONAL) return NULL;
     if (!ctx || !ctx->clay_ctx) {
-        croak("%s: no current Clay context; call Clay_Initialize first", func);
+        croak("%s: no current Clay context; call Clay_Initialize first", w->name);
     }
     if (ctx->owner != CLAY_PERL_THIS_INTERPRETER) {
-        croak("%s: Clay::XS context used from a different interpreter/thread", func);
+        croak("%s: Clay::XS context used from a different interpreter/thread", w->name);
     }
-    if ((guards & GUARD_COUNTS)
+    if (w->counts
         && (Clay_GetMaxElementCount() != ctx->max_element_count
             || Clay_GetMaxMeasureTextCacheWordCount() != ctx->max_measure_text_cache_word_count)) {
-        croak("%s: element/word counts changed since Clay_Initialize; call Clay_Initialize again", func);
+        croak("%s: element/word counts changed since Clay_Initialize; call Clay_Initialize again", w->name);
     }
     pin_context(aTHX_ ctx);
+    require_frame(aTHX_ w, ctx);
     return ctx;
 }
 
-/* Wrappers that change Clay's state. */
-#define REQUIRE_CONTEXT(func) require_context(aTHX_ (func), GUARD_COUNTS | GUARD_MUTATES)
-
-/* Read-only queries, allowed inside callbacks. */
-#define REQUIRE_CONTEXT_QUERY(func) require_context(aTHX_ (func), GUARD_COUNTS)
-
-static void require_frame(pTHX_ clay_perl_context *ctx, const char *func)
+/* Applies a descriptor once the wrapper's Clay call has returned. */
+static void wrapper_leave(pTHX_ const clay_perl_wrapper *w, clay_perl_context *ctx)
 {
-    if (!ctx->in_frame) {
-        croak("%s: called outside Clay_BeginLayout/Clay_EndLayout", func);
-    }
-}
-
-static void require_open_element(pTHX_ clay_perl_context *ctx, const char *func)
-{
-    if (ctx->open_depth == 0) {
-        croak("%s: no element is open (unbalanced Clay__OpenElement/Clay__CloseElement)", func);
-    }
+    if (w->rethrow != WRAP_RETHROW_AFTER) return;
+    clay_perl_raise_pending_error(aTHX_ ctx);
 }
 
 /* ===========================================================================
@@ -378,13 +474,8 @@ xs_Clay_Initialize(capacity_sv, dimensions_sv, error_handler_sv = &PL_sv_undef, 
         int32_t word_count;
         SV *failure;
     CODE:
-        forbid_in_callback(aTHX_ "Clay_Initialize");
-        previous_ctx = clay_perl_current_ctx;
-        if (previous_ctx && previous_ctx->owner != CLAY_PERL_THIS_INTERPRETER) {
-            croak("Clay_Initialize: Clay::XS context used from a different interpreter/thread");
-        }
-        /* It is restored if initialisation fails. */
-        pin_context(aTHX_ previous_ctx);
+        /* Pinned by the guard; it is restored if initialisation fails. */
+        previous_ctx  = wrapper_enter(aTHX_ &GUARD_Clay_Initialize);
         previous_clay = Clay_GetCurrentContext();
         configured_counts(&element_count, &word_count);
         require_counts_fit(aTHX_ "Clay_Initialize", element_count, word_count);
@@ -436,7 +527,7 @@ xs_Clay_SetCurrentContext(ctx_sv)
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        forbid_in_callback(aTHX_ "Clay_SetCurrentContext");
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_SetCurrentContext);
         ctx = clay_perl_context_from_sv(aTHX_ ctx_sv);
         if (ctx->owner != CLAY_PERL_THIS_INTERPRETER) {
             croak("Clay_SetCurrentContext: Clay::XS context used from a different interpreter/thread");
@@ -446,12 +537,11 @@ xs_Clay_SetCurrentContext(ctx_sv)
 
 SV *
 xs_Clay_GetCurrentContext()
+    PREINIT:
+        clay_perl_context *ctx;
     CODE:
-        if (!clay_perl_current_ctx) {
-            RETVAL = &PL_sv_undef;
-        } else {
-            RETVAL = clay_perl_context_to_sv(aTHX_ require_context(aTHX_ "Clay_GetCurrentContext", 0));
-        }
+        ctx    = wrapper_enter(aTHX_ &GUARD_Clay_GetCurrentContext);
+        RETVAL = ctx ? clay_perl_context_to_sv(aTHX_ ctx) : &PL_sv_undef;
     OUTPUT:
         RETVAL
 
@@ -462,19 +552,21 @@ xs_Clay_SetLayoutDimensions(dimensions_sv)
         clay_perl_context *ctx;
         Clay_Dimensions dim;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetLayoutDimensions");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetLayoutDimensions);
         dim = clay_dimensions_from_sv(aTHX_ dimensions_sv, "Clay_SetLayoutDimensions: dimensions");
         Clay_SetLayoutDimensions(dim);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetLayoutDimensions, ctx);
 
 SV *
 xs_Clay_GetLayoutDimensions()
     PREINIT:
         clay_perl_context *ctx;
+        Clay_Dimensions dim;
     CODE:
-        ctx = REQUIRE_CONTEXT_QUERY("Clay_GetLayoutDimensions");
-        clay_perl_raise_pending_error(aTHX_ ctx);
-        RETVAL = clay_dimensions_to_sv(aTHX_ Clay_GetLayoutDimensions());
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_GetLayoutDimensions);
+        dim = Clay_GetLayoutDimensions();
+        wrapper_leave(aTHX_ &GUARD_Clay_GetLayoutDimensions, ctx);
+        RETVAL = clay_dimensions_to_sv(aTHX_ dim);
     OUTPUT:
         RETVAL
 
@@ -484,7 +576,7 @@ xs_Clay_BeginLayout()
         clay_perl_context *ctx;
         SV *leftover;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_BeginLayout");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_BeginLayout);
         leftover = clay_perl_take_pending_error(aTHX_ ctx, " (from the previous unfinished frame)");
         if (leftover) {
             ctx->in_frame   = false;
@@ -506,7 +598,7 @@ xs_Clay_EndLayout(delta_time_sv = &PL_sv_undef)
         float delta_time;
         int32_t still_open;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_EndLayout");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_EndLayout);
         if (!ctx->in_frame) {
             croak("Clay_EndLayout: called without a matching Clay_BeginLayout");
         }
@@ -528,13 +620,13 @@ xs_Clay_EndLayout(delta_time_sv = &PL_sv_undef)
         if (still_open > 0) {
             croak_unbalanced(aTHX_ ctx, still_open);
         }
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_EndLayout, ctx);
         RETVAL = clay_render_command_array_to_sv(aTHX_ &cmds);
     OUTPUT:
         RETVAL
 
 # =============================================================================
-# Element open/close. These never re-throw deferred callback errors; see the
+# Element open/close. These never re-throw held callback errors; see the
 # file header.
 # =============================================================================
 
@@ -543,8 +635,7 @@ xs_Clay__OpenElement()
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay__OpenElement");
-        require_frame(aTHX_ ctx, "Clay__OpenElement");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenElement);
         Clay__OpenElement();
         ctx->open_depth++;
 
@@ -558,8 +649,7 @@ xs_Clay__OpenElementWithId(id_sv)
         STRLEN len;
         const char *bytes;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay__OpenElementWithId");
-        require_frame(aTHX_ ctx, "Clay__OpenElementWithId");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenElementWithId);
         id = clay_element_id_from_sv(aTHX_ id_sv, "Clay__OpenElementWithId: element id");
         string_slot = hv_fetchs((HV *) SvRV(id_sv), "stringId", 0);
         if (string_slot && *string_slot) {
@@ -577,8 +667,7 @@ xs_Clay__CloseElement()
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay__CloseElement");
-        require_open_element(aTHX_ ctx, "Clay__CloseElement");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay__CloseElement);
         Clay__CloseElement();
         ctx->open_depth--;
 
@@ -586,11 +675,9 @@ void
 xs_Clay__ConfigureOpenElement(decl_sv)
         SV *decl_sv
     PREINIT:
-        clay_perl_context *ctx;
         Clay_ElementDeclaration decl;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay__ConfigureOpenElement");
-        require_open_element(aTHX_ ctx, "Clay__ConfigureOpenElement");
+        (void) wrapper_enter(aTHX_ &GUARD_Clay__ConfigureOpenElement);
         decl = clay_element_declaration_from_sv(aTHX_ decl_sv);
         Clay__ConfigureOpenElement(decl);
 
@@ -603,8 +690,7 @@ xs_Clay__OpenTextElement(text_sv, config_sv = &PL_sv_undef)
         Clay_String text;
         Clay_TextElementConfig config;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay__OpenTextElement");
-        require_frame(aTHX_ ctx, "Clay__OpenTextElement");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenTextElement);
         config = clay_text_element_config_from_sv(aTHX_ config_sv);
         text = clay_perl_arena_copy_text(aTHX_ ctx, text_sv, "Clay__OpenTextElement");
         Clay__OpenTextElement(text, config);
@@ -669,11 +755,8 @@ xs_Clay_GetElementIdWithIndex(id_string_sv, index_sv)
 
 UV
 xs_Clay_GetOpenElementId()
-    PREINIT:
-        clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_GetOpenElementId");
-        require_frame(aTHX_ ctx, "Clay_GetOpenElementId");
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_GetOpenElementId);
         RETVAL = (UV) Clay_GetOpenElementId();
     OUTPUT:
         RETVAL
@@ -686,10 +769,10 @@ xs_Clay_GetElementData(id_sv)
         Clay_ElementId id;
         Clay_ElementData data;
     CODE:
-        ctx  = REQUIRE_CONTEXT_QUERY("Clay_GetElementData");
+        ctx  = wrapper_enter(aTHX_ &GUARD_Clay_GetElementData);
         id   = clay_element_id_from_sv(aTHX_ id_sv, "Clay_GetElementData: element id");
         data = Clay_GetElementData(id);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_GetElementData, ctx);
         RETVAL = clay_element_data_to_sv(aTHX_ data);
     OUTPUT:
         RETVAL
@@ -706,20 +789,20 @@ xs_Clay_SetMeasureTextFunction(cb_sv, userdata_sv = &PL_sv_undef)
         clay_perl_context *ctx;
         SV *cb;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetMeasureTextFunction");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetMeasureTextFunction);
         cb  = clay_perl_require_code(aTHX_ cb_sv, "Clay_SetMeasureTextFunction: callback", true);
         clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_MEASURE_TEXT, cb, userdata_sv);
         Clay_SetMeasureTextFunction(clay_perl_measure_text_trampoline, ctx);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetMeasureTextFunction, ctx);
 
 void
 xs_Clay_ResetMeasureTextCache()
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_ResetMeasureTextCache");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_ResetMeasureTextCache);
         Clay_ResetMeasureTextCache();
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_ResetMeasureTextCache, ctx);
 
 # =============================================================================
 # Pointer & interaction.
@@ -733,29 +816,28 @@ xs_Clay_SetPointerState(position_sv, pointerDown)
         clay_perl_context *ctx;
         Clay_Vector2 pos;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetPointerState");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetPointerState);
         pos = clay_vector2_from_sv(aTHX_ position_sv, "Clay_SetPointerState: position");
         Clay_SetPointerState(pos, pointerDown);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetPointerState, ctx);
 
 SV *
 xs_Clay_GetPointerState()
     PREINIT:
         clay_perl_context *ctx;
+        Clay_PointerData pointer;
     CODE:
-        ctx = REQUIRE_CONTEXT_QUERY("Clay_GetPointerState");
-        clay_perl_raise_pending_error(aTHX_ ctx);
-        RETVAL = clay_pointer_data_to_sv(aTHX_ Clay_GetPointerState());
+        ctx     = wrapper_enter(aTHX_ &GUARD_Clay_GetPointerState);
+        pointer = Clay_GetPointerState();
+        wrapper_leave(aTHX_ &GUARD_Clay_GetPointerState, ctx);
+        RETVAL = clay_pointer_data_to_sv(aTHX_ pointer);
     OUTPUT:
         RETVAL
 
 bool
 xs_Clay_Hovered()
-    PREINIT:
-        clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_Hovered");
-        require_frame(aTHX_ ctx, "Clay_Hovered");
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_Hovered);
         RETVAL = Clay_Hovered();
     OUTPUT:
         RETVAL
@@ -769,8 +851,7 @@ xs_Clay_OnHover(cb_sv, userdata_sv = &PL_sv_undef)
         SV *cb;
         uint32_t open_id;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_OnHover");
-        require_open_element(aTHX_ ctx, "Clay_OnHover");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_OnHover);
         cb = clay_perl_require_code(aTHX_ cb_sv, "Clay_OnHover: callback", false);
         open_id = Clay_GetOpenElementId();
         if (open_id == 0) {
@@ -786,10 +867,10 @@ xs_Clay_PointerOver(id_sv)
         clay_perl_context *ctx;
         Clay_ElementId id;
     CODE:
-        ctx = REQUIRE_CONTEXT_QUERY("Clay_PointerOver");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_PointerOver);
         id  = clay_element_id_from_sv(aTHX_ id_sv, "Clay_PointerOver: element id");
         RETVAL = Clay_PointerOver(id);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_PointerOver, ctx);
     OUTPUT:
         RETVAL
 
@@ -801,9 +882,9 @@ xs_Clay_GetPointerOverIds()
         AV *av;
         int32_t i;
     CODE:
-        ctx = REQUIRE_CONTEXT_QUERY("Clay_GetPointerOverIds");
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_GetPointerOverIds);
         ids = Clay_GetPointerOverIds();
+        wrapper_leave(aTHX_ &GUARD_Clay_GetPointerOverIds, ctx);
         av  = newAV();
         if (ids.length > 0) {
             av_extend(av, ids.length - 1);
@@ -829,19 +910,16 @@ xs_Clay_UpdateScrollContainers(enable_drag_scrolling, scroll_delta_sv, delta_tim
         Clay_Vector2 delta;
         float delta_time;
     CODE:
-        ctx        = REQUIRE_CONTEXT("Clay_UpdateScrollContainers");
+        ctx        = wrapper_enter(aTHX_ &GUARD_Clay_UpdateScrollContainers);
         delta      = clay_vector2_from_sv(aTHX_ scroll_delta_sv, "Clay_UpdateScrollContainers: scrollDelta");
         delta_time = (float) clay_perl_parse_float(aTHX_ delta_time_sv, "Clay_UpdateScrollContainers: deltaTime");
         Clay_UpdateScrollContainers(enable_drag_scrolling, delta, delta_time);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_UpdateScrollContainers, ctx);
 
 SV *
 xs_Clay_GetScrollOffset()
-    PREINIT:
-        clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_GetScrollOffset");
-        require_frame(aTHX_ ctx, "Clay_GetScrollOffset");
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_GetScrollOffset);
         RETVAL = clay_vector2_to_sv(aTHX_ Clay_GetScrollOffset());
     OUTPUT:
         RETVAL
@@ -854,10 +932,10 @@ xs_Clay_GetScrollContainerData(id_sv)
         Clay_ElementId id;
         Clay_ScrollContainerData data;
     CODE:
-        ctx  = REQUIRE_CONTEXT_QUERY("Clay_GetScrollContainerData");
+        ctx  = wrapper_enter(aTHX_ &GUARD_Clay_GetScrollContainerData);
         id   = clay_element_id_from_sv(aTHX_ id_sv, "Clay_GetScrollContainerData: element id");
         data = Clay_GetScrollContainerData(id);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_GetScrollContainerData, ctx);
         RETVAL = clay_scroll_container_data_to_sv(aTHX_ data);
     OUTPUT:
         RETVAL
@@ -870,11 +948,11 @@ xs_Clay_SetQueryScrollOffsetFunction(cb_sv, userdata_sv = &PL_sv_undef)
         clay_perl_context *ctx;
         SV *cb;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetQueryScrollOffsetFunction");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetQueryScrollOffsetFunction);
         cb  = clay_perl_require_code(aTHX_ cb_sv, "Clay_SetQueryScrollOffsetFunction: callback", true);
         clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET, cb, userdata_sv);
         Clay_SetQueryScrollOffsetFunction(clay_perl_query_scroll_offset_trampoline, ctx);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetQueryScrollOffsetFunction, ctx);
 
 void
 xs_Clay_SetExternalScrollHandlingEnabled(enabled)
@@ -882,7 +960,7 @@ xs_Clay_SetExternalScrollHandlingEnabled(enabled)
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetExternalScrollHandlingEnabled");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetExternalScrollHandlingEnabled);
         if (enabled && !ctx->callbacks[CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET].code) {
             croak("Clay_SetExternalScrollHandlingEnabled: install a function with "
                   "Clay_SetQueryScrollOffsetFunction first");
@@ -891,7 +969,7 @@ xs_Clay_SetExternalScrollHandlingEnabled(enabled)
          * external handling is on; make sure it is ours. */
         Clay_SetQueryScrollOffsetFunction(clay_perl_query_scroll_offset_trampoline, ctx);
         Clay_SetExternalScrollHandlingEnabled(enabled);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetExternalScrollHandlingEnabled, ctx);
 
 void
 xs_set_scroll_position(id_sv, position_sv)
@@ -903,7 +981,7 @@ xs_set_scroll_position(id_sv, position_sv)
         Clay_Vector2 position;
         Clay_ScrollContainerData data;
     CODE:
-        ctx      = REQUIRE_CONTEXT("set_scroll_position");
+        ctx      = wrapper_enter(aTHX_ &GUARD_set_scroll_position);
         id       = clay_element_id_from_sv(aTHX_ id_sv, "set_scroll_position: element id");
         position = clay_vector2_from_sv(aTHX_ position_sv, "set_scroll_position: position");
         data     = Clay_GetScrollContainerData(id);
@@ -912,7 +990,7 @@ xs_set_scroll_position(id_sv, position_sv)
                   "(declare it with clip enabled and complete a frame first)", (unsigned) id.id);
         }
         *data.scrollPosition = position;
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_set_scroll_position, ctx);
 
 # Check mode: needs no context and never calls into Clay.
 void
@@ -934,18 +1012,18 @@ xs_Clay_SetDebugModeEnabled(enabled)
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetDebugModeEnabled");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetDebugModeEnabled);
         Clay_SetDebugModeEnabled(enabled);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetDebugModeEnabled, ctx);
 
 bool
 xs_Clay_IsDebugModeEnabled()
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT_QUERY("Clay_IsDebugModeEnabled");
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        ctx    = wrapper_enter(aTHX_ &GUARD_Clay_IsDebugModeEnabled);
         RETVAL = Clay_IsDebugModeEnabled();
+        wrapper_leave(aTHX_ &GUARD_Clay_IsDebugModeEnabled, ctx);
     OUTPUT:
         RETVAL
 
@@ -955,14 +1033,14 @@ xs_Clay_SetCullingEnabled(enabled)
     PREINIT:
         clay_perl_context *ctx;
     CODE:
-        ctx = REQUIRE_CONTEXT("Clay_SetCullingEnabled");
+        ctx = wrapper_enter(aTHX_ &GUARD_Clay_SetCullingEnabled);
         Clay_SetCullingEnabled(enabled);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetCullingEnabled, ctx);
 
 IV
 xs_Clay_GetMaxElementCount()
     CODE:
-        (void) require_context(aTHX_ "Clay_GetMaxElementCount", 0);
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_GetMaxElementCount);
         RETVAL = (IV) Clay_GetMaxElementCount();
     OUTPUT:
         RETVAL
@@ -971,11 +1049,12 @@ void
 xs_Clay_SetMaxElementCount(count_sv)
         SV *count_sv
     PREINIT:
+        clay_perl_context *ctx;
         int32_t count;
     CODE:
-        forbid_in_callback(aTHX_ "Clay_SetMaxElementCount");
+        ctx   = wrapper_enter(aTHX_ &GUARD_Clay_SetMaxElementCount);
         count = parse_count(aTHX_ count_sv, "Clay_SetMaxElementCount", 1);
-        if (!clay_perl_current_ctx) {
+        if (!ctx) {
             /* Clay derives the default word count from the element count. */
             if (count > INT32_MAX / 2) {
                 croak("Clay_SetMaxElementCount: %d elements would overflow Clay's default "
@@ -983,7 +1062,6 @@ xs_Clay_SetMaxElementCount(count_sv)
             }
             require_counts_fit(aTHX_ "Clay_SetMaxElementCount", count, count * 2);
         } else {
-            (void) require_context(aTHX_ "Clay_SetMaxElementCount", GUARD_MUTATES);
             require_counts_fit(aTHX_ "Clay_SetMaxElementCount", count, Clay_GetMaxMeasureTextCacheWordCount());
         }
         Clay_SetMaxElementCount(count);
@@ -991,7 +1069,7 @@ xs_Clay_SetMaxElementCount(count_sv)
 IV
 xs_Clay_GetMaxMeasureTextCacheWordCount()
     CODE:
-        (void) require_context(aTHX_ "Clay_GetMaxMeasureTextCacheWordCount", 0);
+        (void) wrapper_enter(aTHX_ &GUARD_Clay_GetMaxMeasureTextCacheWordCount);
         RETVAL = (IV) Clay_GetMaxMeasureTextCacheWordCount();
     OUTPUT:
         RETVAL
@@ -1000,16 +1078,16 @@ void
 xs_Clay_SetMaxMeasureTextCacheWordCount(count_sv)
         SV *count_sv
     PREINIT:
+        clay_perl_context *ctx;
         int32_t count;
         int32_t element_count;
         int32_t unused_word_count;
     CODE:
-        forbid_in_callback(aTHX_ "Clay_SetMaxMeasureTextCacheWordCount");
+        ctx   = wrapper_enter(aTHX_ &GUARD_Clay_SetMaxMeasureTextCacheWordCount);
         count = parse_count(aTHX_ count_sv, "Clay_SetMaxMeasureTextCacheWordCount", MIN_MEASURE_TEXT_CACHE_WORDS);
-        if (!clay_perl_current_ctx) {
+        if (!ctx) {
             clay_perl_clay_default_counts(&element_count, &unused_word_count);
         } else {
-            (void) require_context(aTHX_ "Clay_SetMaxMeasureTextCacheWordCount", GUARD_MUTATES);
             element_count = Clay_GetMaxElementCount();
         }
         require_counts_fit(aTHX_ "Clay_SetMaxMeasureTextCacheWordCount", element_count, count);
@@ -1092,14 +1170,14 @@ xs_Clay_SetTransitionHandlers(handler_sv = &PL_sv_undef, set_initial_sv = &PL_sv
         SV *set_initial;
         SV *set_final;
     CODE:
-        ctx         = REQUIRE_CONTEXT("Clay_SetTransitionHandlers");
+        ctx         = wrapper_enter(aTHX_ &GUARD_Clay_SetTransitionHandlers);
         handler     = clay_perl_require_code(aTHX_ handler_sv, "Clay_SetTransitionHandlers: handler", true);
         set_initial = clay_perl_require_code(aTHX_ set_initial_sv, "Clay_SetTransitionHandlers: setInitialState", true);
         set_final   = clay_perl_require_code(aTHX_ set_final_sv, "Clay_SetTransitionHandlers: setFinalState", true);
         clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_HANDLER,     handler,     userdata_sv);
         clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_INITIAL, set_initial, userdata_sv);
         clay_perl_callback_set(aTHX_ ctx, CLAY_PERL_DISPATCH_TRANSITION_SET_FINAL,   set_final,   userdata_sv);
-        clay_perl_raise_pending_error(aTHX_ ctx);
+        wrapper_leave(aTHX_ &GUARD_Clay_SetTransitionHandlers, ctx);
 
 # =============================================================================
 # Sizing, padding, border and corner helpers (replacements for the
@@ -1255,6 +1333,36 @@ xs__dispatch(...)
 
         clay_perl_dispatch_store_result(aTHX_ dispatch.kind, dispatch.result, ret, args_sv);
         XSRETURN_EMPTY;
+
+# =============================================================================
+# Internal: the wrapper guard table, for the tests. Returns
+# { name => { context, mutates, counts, frame, rethrow } }.
+# =============================================================================
+
+SV *
+xs__wrapper_guards()
+    PREINIT:
+        static const char *const contexts[] = { "none", "optional", "current" };
+        static const char *const frames[]   = { "none", "in_frame", "open_element" };
+        static const char *const rethrows[] = { "never", "after", "custom" };
+        HV *table;
+        HV *guard;
+        size_t i;
+    CODE:
+        table = newHV();
+        for (i = 0; i < sizeof(all_wrappers) / sizeof(all_wrappers[0]); i++) {
+            const clay_perl_wrapper *w = all_wrappers[i];
+            guard = newHV();
+            (void) hv_stores(guard, "context", newSVpv(contexts[w->context], 0));
+            (void) hv_stores(guard, "mutates", newSVuv(w->mutates ? 1 : 0));
+            (void) hv_stores(guard, "counts",  newSVuv(w->counts ? 1 : 0));
+            (void) hv_stores(guard, "frame",   newSVpv(frames[w->frame], 0));
+            (void) hv_stores(guard, "rethrow", newSVpv(rethrows[w->rethrow], 0));
+            (void) hv_store(table, w->name, (I32) strlen(w->name), newRV_noinc((SV *) guard), 0);
+        }
+        RETVAL = newRV_noinc((SV *) table);
+    OUTPUT:
+        RETVAL
 
 # =============================================================================
 # Lifecycle: explicit free hook for the context.

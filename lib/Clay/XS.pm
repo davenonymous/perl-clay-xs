@@ -509,17 +509,20 @@ C<Clay_UpdateScrollContainers>, C<set_scroll_position>, every setter
 C<Clay_ResetMeasureTextCache>, C<Clay_SetQueryScrollOffsetFunction>,
 C<Clay_SetExternalScrollHandlingEnabled>, C<Clay_SetTransitionHandlers>,
 C<Clay_SetDebugModeEnabled>, C<Clay_SetCullingEnabled>,
-C<Clay_SetMaxElementCount>, C<Clay_SetMaxMeasureTextCacheWordCount>) and
-an explicit C<DESTROY> of the context the callback runs in. This applies
-to every context, not only the running one: Clay has a single current
-context.
+C<Clay_SetMaxElementCount>, C<Clay_SetMaxMeasureTextCacheWordCount>).
+
+So does an explicit C<DESTROY> of the context the callback runs in. This
+applies to every context, not only the running one: Clay has a single
+current context.
 
 Read-only queries work: C<Clay_GetCurrentContext>,
 C<Clay_GetLayoutDimensions>, C<Clay_GetElementData>,
 C<Clay_GetPointerState>, C<Clay_PointerOver>, C<Clay_GetPointerOverIds>,
-C<Clay_GetScrollContainerData>, C<Clay_IsDebugModeEnabled>, the count
-getters, and the helpers that need no context (ids, hashing,
-C<Clay_EaseOut>, C<sizing_*> ...).
+C<Clay_GetScrollContainerData>, C<Clay_IsDebugModeEnabled>,
+C<Clay_GetMaxElementCount>, C<Clay_GetMaxMeasureTextCacheWordCount> and
+the helpers that need no context (ids, hashing, the ease function, the
+sizing helpers ...). A query called inside a callback never re-throws a
+held error; see L</ERRORS FROM CALLBACKS>.
 
 Dropping the last reference to the running context inside a callback is
 safe: every Clay::XS call keeps its context alive until the statement
@@ -547,17 +550,36 @@ C<Clay_SetPointerState> re-throws errors from hover callbacks.
 
 =item *
 
-The element-construction functions (C<Clay__OpenElement>,
-C<Clay__OpenElementWithId>, C<Clay__ConfigureOpenElement>,
-C<Clay__OpenTextElement>, C<Clay__CloseElement>, C<Clay_OnHover>) and the
-in-element queries (C<Clay_GetOpenElementId>, C<Clay_Hovered>,
-C<Clay_GetScrollOffset>) never re-throw held errors, so declarations stay
-balanced; C<Clay_EndLayout> reports them. An error held when a frame is
-abandoned is re-thrown by the next C<Clay_BeginLayout> with the suffix
-C< (from the previous unfinished frame)>. Every other Clay::XS function
-re-throws a held error as well.
+An error held when a frame is abandoned is re-thrown by the next
+C<Clay_BeginLayout> with the suffix C< (from the previous unfinished
+frame)>. A C<Clay_Initialize> whose error handler failed croaks with that
+error and leaves the previous context current.
+
+=item *
+
+These never re-throw a held error: the element-construction functions
+(C<Clay__OpenElement>, C<Clay__OpenElementWithId>,
+C<Clay__ConfigureOpenElement>, C<Clay__OpenTextElement>,
+C<Clay__CloseElement>, C<Clay_OnHover>) and the in-element queries
+(C<Clay_GetOpenElementId>, C<Clay_Hovered>, C<Clay_GetScrollOffset>), so
+declarations stay balanced and their errors surface when the frame ends;
+and the functions that manage contexts and configuration rather than
+layout state (C<Clay_SetCurrentContext>, C<Clay_GetCurrentContext>,
+C<Clay_MinMemorySize>, C<Clay_GetMaxElementCount>,
+C<Clay_SetMaxElementCount>, C<Clay_GetMaxMeasureTextCacheWordCount>,
+C<Clay_SetMaxMeasureTextCacheWordCount>). Neither do the helpers that
+need no context.
+
+=item *
+
+Every other Clay::XS function re-throws a held error once its Clay call
+has returned, so its own effect (a setter's new value, say) has already
+taken place.
 
 =back
+
+Nothing is re-thrown while a callback runs: a query called from a
+callback leaves a held error in place for the function that invoked Clay.
 
 Only the first error is kept; later ones are counted and the message
 gains C< (and N more callback errors this frame)>. Exception objects

@@ -30,6 +30,20 @@ mode croak. It carries the field path, the expected value, the value received
 and an optional hint, and it stringifies to the C-style message.
 _Avoid_: marshal error, validation error
 
+### Binding
+
+**Held error**:
+The first exception a Perl callback raised while Clay was running, kept on
+the context until a wrapper rethrows it once Clay has returned. Later ones
+are only counted. Nothing takes it while a callback is still running.
+_Avoid_: pending error, deferred error, stashed error
+
+**Wrapper guard**:
+The per-XSUB descriptor and the checks it drives: which context the wrapper
+needs, whether it mutates Clay (forbidden inside callbacks) or only queries,
+whether it needs an open frame or element, and when it rethrows a held error.
+_Avoid_: REQUIRE_CONTEXT, guard flags
+
 ### Interaction
 
 **Interaction tracker**:

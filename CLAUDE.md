@@ -63,14 +63,19 @@ through Clay::UI and replaces `userData` with widget class and id.
 - **Callbacks never croak through Clay.** Trampolines make one `G_EVAL`
   call into `Clay::XS::_dispatch` through `invoke_callback`
   (`src/callbacks.c`), which owns the temporaries scope, `$@` and the
-  trailing userdata argument; errors are stashed on the context and
-  rethrown by the XS wrapper after Clay returns. Per-context callbacks
+  trailing userdata argument; errors are held on the context and
+  rethrown by the XS wrapper after Clay returns (never while a callback
+  still runs). Per-context callbacks
   live in `ctx->callbacks[kind]` (set with `clay_perl_callback_set`); a
   new kind needs an enum entry, a `store_result` case and a trampoline
   with its argument builder.
-- **Callbacks cannot re-enter Clay.** Every wrapper that calls into Clay
-  must use `REQUIRE_CONTEXT` (mutating) or `REQUIRE_CONTEXT_QUERY`
-  (read-only); both also pin the context for the statement.
+- **Callbacks cannot re-enter Clay.** Every XSUB has a wrapper guard in
+  `CLAY_PERL_WRAPPERS` (`lib/Clay/XS.xs`): context, mutating or query,
+  counts check, frame requirement, rethrow policy. Wrappers call
+  `wrapper_enter` (refuses mutating calls inside callbacks, pins the
+  context) and, when the rethrow policy is AFTER, `wrapper_leave`. A new
+  XSUB needs a table row; t/19 checks the table against the exports and
+  the POD.
 - **Never give Clay a pointer into an SV buffer.** Text goes into a
   per-context chunked arena that lives an extra frame (longer while exit
   transitions run); element id strings are interned.

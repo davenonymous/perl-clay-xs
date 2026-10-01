@@ -233,7 +233,10 @@ void clay_perl_stash_error_message(pTHX_ clay_perl_context *ctx, const char *mes
  * nothing is pending. A string message gains " (and N more callback
  * errors this frame)" when N > 0 and then the optional note. Resets
  * Clay's measure-text cache when a failed measurement may have been
- * cached. Call only while ctx is Clay's current context. */
+ * cached. Returns NULL while a Clay callback runs: Clay is then inside
+ * one of its own functions, and the held error stays held until the
+ * wrapper that called into Clay has Clay's result. Call only while ctx is
+ * Clay's current context. */
 SV  *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note);
 
 /* Croaks with the pending error, if any. */

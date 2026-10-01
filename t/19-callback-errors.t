@@ -175,6 +175,54 @@ subtest 'an error left by an abandoned frame is raised by the next Clay_BeginLay
 	ok( lives { Clay_EndLayout() }, 'the following frame works' );
 };
 
+subtest 'a query inside a hover callback leaves the held error alone' => sub {
+	my $ctx = fresh_context();
+	my ($calls, $query_error) = (0, undef);
+	my $hover = sub {
+		die "first hover\n" if $calls++ == 0;
+		eval { Clay_GetPointerState(); 1 } or $query_error = $@;
+	};
+	Clay_BeginLayout();
+	box('outer');
+	Clay_OnHover($hover);
+	box('inner');
+	Clay_OnHover($hover);
+	Clay__CloseElement();
+	Clay__CloseElement();
+	Clay_EndLayout();
+	like( dies { Clay_SetPointerState([10, 10], 0) }, qr/^first hover$/,
+		'Clay_SetPointerState re-throws the first error' );
+	is( $calls, 2, 'both hover callbacks ran' );
+	is( $query_error, undef, 'the query in the second callback did not take it' );
+};
+
+subtest 'a query inside a transition handler leaves the held error alone' => sub {
+	my $ctx = fresh_context(measure => sub ($text, $config, $userdata) {
+		die "measure failed\n" if $text eq 'bad';
+		return { width => 1, height => 1 };
+	});
+	my ($handled, $query_error) = (0, undef);
+	Clay_SetTransitionHandlers(sub ($args, $userdata) {
+		$handled++;
+		eval { Clay_GetPointerState(); 1 } or $query_error = $@;
+		return 1;
+	});
+	my $frame = sub ($colour, $text) {
+		Clay_BeginLayout();
+		box('fading', backgroundColor => $colour,
+			transition => { duration => 1, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR });
+		Clay__OpenTextElement($text, {});
+		Clay__CloseElement();
+		return Clay_EndLayout(0.1);
+	};
+	$frame->([255, 0, 0, 255], 'good');
+	like( dies { $frame->([0, 0, 255, 255], 'bad') }, qr/^measure failed$/,
+		'Clay_EndLayout re-throws the measure error' );
+	ok( $handled, 'the transition handler ran' );
+	is( $query_error, undef, 'the query in the handler did not take it' );
+	Clay_SetTransitionHandlers();
+};
+
 # -----------------------------------------------------------------------------
 # A callback runs in the middle of a Clay function: it cannot free the
 # context Clay is using, and calls that change Clay's state croak (the croak
@@ -219,19 +267,32 @@ subtest 'a callback cannot destroy the running context explicitly' => sub {
 	ok( Clay_GetCurrentContext(), 'the context is still alive' );
 };
 
+# The wrapper guard table (Clay::XS::_wrapper_guards) says which functions
+# change Clay's state. Arguments are never parsed before the guard refuses
+# the call, so a call needs only the right number of them.
+my $GUARDS = Clay::XS::_wrapper_guards();
+my %ARGC = (
+	Clay_Initialize => 2, Clay_SetPointerState => 2, set_scroll_position => 2,
+	Clay_UpdateScrollContainers => 3,
+	map { $_ => 1 } qw(
+		Clay_SetCurrentContext Clay_SetLayoutDimensions Clay__OpenElementWithId
+		Clay__ConfigureOpenElement Clay__OpenTextElement Clay_SetMeasureTextFunction
+		Clay_OnHover Clay_SetQueryScrollOffsetFunction Clay_SetExternalScrollHandlingEnabled
+		Clay_SetDebugModeEnabled Clay_SetCullingEnabled Clay_SetMaxElementCount
+		Clay_SetMaxMeasureTextCacheWordCount
+	),
+);
+
+sub guarded ($predicate) {
+	return sort grep { $predicate->($GUARDS->{$_}) } keys %$GUARDS;
+}
+
 subtest 'calls that change Clay state croak inside callbacks' => sub {
-	my %calls = (
-		Clay_BeginLayout       => sub { Clay_BeginLayout() },
-		Clay_EndLayout         => sub { Clay_EndLayout() },
-		Clay_Initialize        => sub { my $other = Clay_Initialize(Clay_MinMemorySize(), [10, 10]) },
-		Clay_SetCurrentContext => sub { Clay_SetCurrentContext(Clay_GetCurrentContext()) },
-		Clay__OpenElement      => sub { Clay__OpenElement() },
-		Clay_SetPointerState   => sub { Clay_SetPointerState([0, 0], 0) },
-		Clay_ResetMeasureTextCache => sub { Clay_ResetMeasureTextCache() },
-	);
-	for my $name (sort keys %calls) {
+	for my $name (guarded(sub ($guard) { $guard->{mutates} })) {
+		my $call = Clay::XS->can($name);
+		my @args = (undef) x ($ARGC{$name} // 0);
 		my $ctx = fresh_context(measure => sub ($text, $config, $userdata) {
-			$calls{$name}->();
+			$call->(@args);
 			return { width => 1, height => 1 };
 		});
 		like( dies { text_frame() }, qr/^\Q$name\E: cannot be called from inside a Clay callback/,
@@ -260,13 +321,43 @@ subtest 'calls that change Clay state croak inside callbacks' => sub {
 };
 
 subtest 'read-only queries work inside callbacks' => sub {
-	my @seen;
+	my $id = Clay_GetElementId('somewhere');
+	my %args = map { $_ => [$id] } qw(Clay_GetElementData Clay_PointerOver Clay_GetScrollContainerData);
+	my @queries = guarded(sub ($guard) { !$guard->{mutates} && $guard->{context} ne 'none' });
+	my %failed;
 	my $ctx = fresh_context(measure => sub ($text, $config, $userdata) {
-		push @seen, Clay_GetLayoutDimensions()->{width}, scalar @{ Clay_GetPointerOverIds() };
+		for my $name (@queries) {
+			eval { Clay::XS->can($name)->(@{ $args{$name} // [] }); 1 } or $failed{$name} = $@;
+		}
 		return { width => 1, height => 1 };
 	});
 	ok( lives { text_frame() }, 'the frame completes' );
-	is( [ @seen[0, 1] ], [ 300, 0 ], 'the queries returned the context state' );
+	ok( scalar @queries, 'the table lists queries' );
+	is( \%failed, {}, 'every query worked' );
+};
+
+subtest 'the wrapper guard table covers every function and matches the POD' => sub {
+	is( [ sort keys %$GUARDS ], [ sort grep { !/^CLAY_/ } @Clay::XS::EXPORT_OK ],
+		'one guard per exported function' );
+
+	open my $fh, '<', $INC{'Clay/XS.pm'} or die "cannot read Clay/XS.pm: $!";
+	my @paragraphs = split /\n\s*\n/, do { local $/; <$fh> };
+	my $named = sub ($marker) {
+		my ($paragraph) = grep { /\Q$marker\E/ } @paragraphs;
+		return sort grep { exists $GUARDS->{$_} } $paragraph =~ /C<(\w+)>/g;
+	};
+
+	is( [ $named->('cannot be called from inside a Clay callback') ],
+		[ guarded(sub ($guard) { $guard->{mutates} }) ], 'the POD names every mutating function' );
+	is( [ $named->('Read-only queries work') ],
+		[ guarded(sub ($guard) { !$guard->{mutates} && $guard->{context} ne 'none' }) ],
+		'the POD names every query' );
+	my %never = map { $_ => 1 } guarded(sub ($guard) { $guard->{rethrow} eq 'never' });
+	my @named_never = $named->('These never re-throw a held error');
+	is( [ grep { !$never{$_} } @named_never ], [], 'what the POD says never re-throws does not' );
+	my %named_never = map { $_ => 1 } @named_never;
+	is( [ grep { !$named_never{$_} } guarded(sub ($guard) { $guard->{rethrow} eq 'never' && $guard->{context} ne 'none' }) ],
+		[], 'the POD names every function with a context that never re-throws' );
 };
 
 subtest 'an exception object with a dying bool overload is re-thrown as is' => sub {
