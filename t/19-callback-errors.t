@@ -371,6 +371,28 @@ subtest 'an exception object with a dying bool overload is re-thrown as is' => s
 	is( Scalar::Util::refaddr($error), Scalar::Util::refaddr($exception), 'with the same object' );
 };
 
+subtest 'a held exception object survives elements left open' => sub {
+	my $exception = bless {}, 'My::Exception';
+	my $ctx = fresh_context(measure => sub { die $exception });
+	Clay_BeginLayout();
+	box('left-open');
+	Clay__OpenTextElement('hello', {});
+	my $ok    = eval { Clay_EndLayout(); 1 };
+	my $error = $@;
+	ok( !defined $ok, 'Clay_EndLayout dies' );
+	is( Scalar::Util::refaddr($error), Scalar::Util::refaddr($exception), 'with the held object' );
+	Clay_SetMeasureTextFunction(sub { return { width => 1, height => 1 } });
+	ok( lives { text_frame() }, 'the open element was closed' );
+};
+
+subtest 'destroying a context with a held error warns' => sub {
+	my $ctx = fresh_context(measure => sub { die "measure failed\n" });
+	Clay_BeginLayout();
+	Clay__OpenTextElement('abandoned', {});
+	like( warning { undef $ctx }, qr/^Clay::XS: context destroyed with a held callback error: measure failed$/,
+		'the error is not lost' );
+};
+
 subtest 'Clay::XS::_dispatch cannot be called directly' => sub {
 	like( dies { Clay::XS::_dispatch(1, 0, sub { [1, 2] }) }, qr/_dispatch is internal/, 'outside a callback' );
 	my $inner;

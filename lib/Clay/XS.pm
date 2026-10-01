@@ -291,7 +291,9 @@ to the same object) or undef.
 
 The context is freed when the last reference to it goes away. Copies
 made with L<Storable> and hand-blessed objects are not contexts and
-croak when used.
+croak when used. Freeing a context that still holds a callback error (a
+frame was abandoned) warns C<Clay::XS: context destroyed with a held
+callback error: ...>.
 
 Clay keeps one process-wide current context, so contexts belong to the
 interpreter that created them: they are not copied into new threads,
@@ -329,7 +331,9 @@ C<Clay_EndLayout> croaks without a matching C<Clay_BeginLayout>. If
 elements are still open (for example because an exception interrupted a
 declaration), it closes them, lets Clay finish the frame, and croaks
 C<N element(s) still open at Clay_EndLayout (unbalanced
-Clay__OpenElement/Clay__CloseElement)>. The next frame works normally.
+Clay__OpenElement/Clay__CloseElement)>, followed by C<; callback error:>
+and the message when a callback error is held as well. A held exception
+object is re-thrown unchanged instead. The next frame works normally.
 
 =back
 

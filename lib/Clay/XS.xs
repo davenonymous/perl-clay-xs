@@ -78,7 +78,7 @@ static void install_iv_const(pTHX_ const char *name, IV value)
  *            OPEN_ELEMENT: with an element open.
  *   rethrow  AFTER:  wrapper_leave re-throws the context's held error once
  *                    the Clay call has returned (never while a callback
- *                    runs, see clay_perl_take_pending_error).
+ *                    runs, see clay_perl_take_held_error).
  *            NEVER:  element construction keeps open/close balanced, and
  *                    context management and configuration hold no layout
  *                    state.
@@ -220,7 +220,7 @@ static clay_perl_context *wrapper_enter(pTHX_ const clay_perl_wrapper *w)
 static void wrapper_leave(pTHX_ const clay_perl_wrapper *w, clay_perl_context *ctx)
 {
     if (w->rethrow != WRAP_RETHROW_AFTER) return;
-    clay_perl_raise_pending_error(aTHX_ ctx);
+    clay_perl_raise_held_error(aTHX_ ctx);
 }
 
 /* ===========================================================================
@@ -307,18 +307,22 @@ static Clay_String borrowed_id_string(pTHX_ SV *sv, const char *func)
  * Clay_EndLayout helpers.
  * ======================================================================== */
 
-/* Croaks for elements left open at Clay_EndLayout, appending a deferred
- * callback error when one is pending as well. */
+/* Croaks for elements left open at Clay_EndLayout, appending a held
+ * callback error message when one is held as well. A held exception
+ * object is re-thrown unchanged instead (the elements are closed either
+ * way). */
 static void croak_unbalanced(pTHX_ clay_perl_context *ctx, int32_t still_open)
 {
+    SV *held = clay_perl_take_held_error(aTHX_ ctx, NULL);
+    if (held && SvROK(held)) croak_sv(held);
+
     SV *message = sv_2mortal(newSVpvf(
         "%d element%s still open at Clay_EndLayout "
         "(unbalanced Clay__OpenElement/Clay__CloseElement)",
         (int) still_open, still_open == 1 ? "" : "s"));
-    SV *pending = clay_perl_take_pending_error(aTHX_ ctx, NULL);
-    if (pending) {
+    if (held) {
         sv_catpvs(message, "; callback error: ");
-        sv_catsv(message, pending);
+        sv_catsv(message, held);
     }
     croak_sv(message);
 }
@@ -509,7 +513,7 @@ xs_Clay_Initialize(capacity_sv, dimensions_sv, error_handler_sv = &PL_sv_undef, 
             ctx->max_element_count                 = Clay_GetMaxElementCount();
             ctx->max_measure_text_cache_word_count = Clay_GetMaxMeasureTextCacheWordCount();
             clay_perl_current_ctx = ctx;
-            failure = clay_perl_take_pending_error(aTHX_ ctx, NULL);
+            failure = clay_perl_take_held_error(aTHX_ ctx, NULL);
         }
         if (failure) {
             Clay_SetCurrentContext(previous_clay);
@@ -577,7 +581,7 @@ xs_Clay_BeginLayout()
         SV *leftover;
     CODE:
         ctx = wrapper_enter(aTHX_ &GUARD_Clay_BeginLayout);
-        leftover = clay_perl_take_pending_error(aTHX_ ctx, " (from the previous unfinished frame)");
+        leftover = clay_perl_take_held_error(aTHX_ ctx, " (from the previous unfinished frame)");
         if (leftover) {
             ctx->in_frame   = false;
             ctx->open_depth = 0;
@@ -1394,6 +1398,11 @@ xs_ctx_DESTROY(self_sv)
         }
         if (clay_perl_current_ctx == ctx) {
             clay_perl_current_ctx = NULL;
+        }
+        /* An abandoned frame can leave a held error no wrapper re-threw. */
+        if (ctx->held_error) {
+            warn("Clay::XS: context destroyed with a held callback error: %" SVf,
+                 SVfARG(ctx->held_error));
         }
         clay_perl_context_free(aTHX_ ctx);
         mg->mg_ptr = NULL;

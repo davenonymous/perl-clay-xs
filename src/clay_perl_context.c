@@ -16,8 +16,9 @@
 
 #define MIN_STRING_CHUNK_BYTES 4096
 
-/* Interned ids unused for this many frames may be swept. */
-#define INTERNED_ID_KEEP_FRAMES 2
+/* The sweep at the start of a frame keeps the interned ids used by the
+ * last this many completed frames (see clay_perl_context_begin_frame). */
+#define INTERNED_ID_KEEP_COMPLETED_FRAMES 2
 
 static MGVTBL clay_perl_context_vtbl = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -89,7 +90,7 @@ void clay_perl_context_free(pTHX_ clay_perl_context *self)
     if (!self) return;
 
     clay_perl_callbacks_free(aTHX_ self);
-    SvREFCNT_dec(self->pending_error);
+    SvREFCNT_dec(self->held_error);
     SvREFCNT_dec((SV *) self->hover_callbacks);
     SvREFCNT_dec((SV *) self->interned_ids);
 
@@ -277,8 +278,8 @@ static bool id_is_pointer_over(Clay_ElementIdArray over, const char *chars)
 
 static void interned_ids_sweep(pTHX_ clay_perl_context *self)
 {
-    if (self->frame_generation < INTERNED_ID_KEEP_FRAMES) return;
-    IV cutoff = (IV) (self->frame_generation - INTERNED_ID_KEEP_FRAMES);
+    if (self->frame_generation < INTERNED_ID_KEEP_COMPLETED_FRAMES) return;
+    IV cutoff = (IV) (self->frame_generation - INTERNED_ID_KEEP_COMPLETED_FRAMES);
     Clay_ElementIdArray over = Clay_GetPointerOverIds();
 
     /* Collect first, delete afterwards: deleting invalidates the iterator. */

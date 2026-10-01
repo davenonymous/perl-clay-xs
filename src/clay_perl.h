@@ -156,11 +156,11 @@ typedef struct clay_perl_context {
     clay_perl_string_arena strings;
     HV *interned_ids;
 
-    /* Deferred callback error: the first exception raised by a Perl
+    /* Held callback error: the first exception raised by a Perl
      * callback while Clay was running, re-thrown at the next safe point.
      * Later errors of the same period are only counted. */
     CV      *dispatch_cv;
-    SV      *pending_error;
+    SV      *held_error;
     uint32_t suppressed_errors;
     bool     measure_cache_poisoned;
 
@@ -208,8 +208,11 @@ clay_perl_context *clay_perl_context_peek(pTHX_ SV *sv, MAGIC **magic_out);
  * Frame lifecycle, string arena and id interning (src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
-/* Called at Clay_BeginLayout: recycles the string arena, sweeps unused
- * interned ids and stale hover entries, advances frame_generation. */
+/* Called at Clay_BeginLayout: advances frame_generation, recycles the
+ * string arena and sweeps interned ids and hover entries. Both sweeps keep
+ * what the last N completed frames used (N per table: 2 for ids, 1 for
+ * hover); an entry stamped with generation g survives while
+ * g >= frame_generation - N. */
 void        clay_perl_context_begin_frame(pTHX_ clay_perl_context *self);
 
 /* Copies the (UTF-8) bytes of sv into the arena. Croaks if sv is undef. */
@@ -219,28 +222,28 @@ Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, con
 Clay_String clay_perl_intern_id(pTHX_ clay_perl_context *self, const char *bytes, STRLEN len);
 
 /* ---------------------------------------------------------------------------
- * Deferred callback errors (src/callbacks.c).
+ * Held callback errors (src/callbacks.c).
  * ------------------------------------------------------------------------ */
 
-/* Stashes the current $@ as the context's pending error (or counts it if
- * one is already pending) and clears $@. */
-void clay_perl_stash_callback_error(pTHX_ clay_perl_context *ctx);
+/* Holds the current $@ as the context's held error (or counts it if one
+ * is already held) and clears $@. */
+void clay_perl_hold_callback_error(pTHX_ clay_perl_context *ctx);
 
-/* Stashes a plain message as the pending error (or counts it). */
-void clay_perl_stash_error_message(pTHX_ clay_perl_context *ctx, const char *message);
+/* Holds a plain message as the held error (or counts it). */
+void clay_perl_hold_error_message(pTHX_ clay_perl_context *ctx, const char *message);
 
-/* Removes and returns the pending error as a mortal SV, or NULL when
- * nothing is pending. A string message gains " (and N more callback
+/* Removes and returns the held error as a mortal SV, or NULL when
+ * nothing is held. A string message gains " (and N more callback
  * errors this frame)" when N > 0 and then the optional note. Resets
  * Clay's measure-text cache when a failed measurement may have been
  * cached. Returns NULL while a Clay callback runs: Clay is then inside
  * one of its own functions, and the held error stays held until the
  * wrapper that called into Clay has Clay's result. Call only while ctx is
  * Clay's current context. */
-SV  *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note);
+SV  *clay_perl_take_held_error(pTHX_ clay_perl_context *ctx, const char *note);
 
-/* Croaks with the pending error, if any. */
-void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx);
+/* Croaks with the held error, if any. */
+void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx);
 
 /* ---------------------------------------------------------------------------
  * HV/AV <-> Clay struct converters (src/marshal.c).

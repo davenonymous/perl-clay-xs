@@ -1,6 +1,6 @@
 /*
  * callbacks.c - C trampolines that forward Clay's function-pointer
- * callbacks into Perl coderefs, and the deferred-error slot they report
+ * callbacks into Perl coderefs, and the held-error slot they report
  * failures through.
  *
  * Clay holds several function-pointer slots that user code provides:
@@ -22,10 +22,10 @@
  * the user's coderef and parses its return value into a C result slot;
  * any exception - from the callback, from overloaded or tied return
  * values, from FATAL warnings, or from a malformed result - lands in that
- * G_EVAL. The trampoline then stashes it as the context's pending error
- * and returns a neutral value to Clay. The XS wrapper that called into
- * Clay re-throws the pending error once Clay has returned (see
- * clay_perl_raise_pending_error and the wrappers in lib/Clay/XS.xs).
+ * G_EVAL. The trampoline then holds it as the context's held error and
+ * returns a neutral value to Clay. The XS wrapper that called into Clay
+ * re-throws the held error once Clay has returned (see
+ * clay_perl_raise_held_error and the wrappers in lib/Clay/XS.xs).
  *
  * Threading the active context to the trampolines:
  *
@@ -72,35 +72,35 @@ CLAY_PERL_THREAD_LOCAL uint32_t clay_perl_callback_depth = 0;
 CLAY_PERL_THREAD_LOCAL clay_perl_active_dispatch clay_perl_pending_dispatch = { 0, NULL };
 
 /* ---------------------------------------------------------------------------
- * Deferred callback errors.
+ * Held callback errors.
  * ------------------------------------------------------------------------ */
 
-void clay_perl_stash_callback_error(pTHX_ clay_perl_context *ctx)
+void clay_perl_hold_callback_error(pTHX_ clay_perl_context *ctx)
 {
-    if (ctx->pending_error) {
+    if (ctx->held_error) {
         ctx->suppressed_errors++;
     } else {
-        ctx->pending_error = newSVsv(ERRSV);
+        ctx->held_error = newSVsv(ERRSV);
     }
     sv_setpvs(ERRSV, "");
 }
 
-void clay_perl_stash_error_message(pTHX_ clay_perl_context *ctx, const char *message)
+void clay_perl_hold_error_message(pTHX_ clay_perl_context *ctx, const char *message)
 {
-    if (ctx->pending_error) {
+    if (ctx->held_error) {
         ctx->suppressed_errors++;
         return;
     }
-    ctx->pending_error = newSVpv(message, 0);
+    ctx->held_error = newSVpv(message, 0);
 }
 
-SV *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note)
+SV *clay_perl_take_held_error(pTHX_ clay_perl_context *ctx, const char *note)
 {
-    SV *error = ctx->pending_error;
+    SV *error = ctx->held_error;
     if (!error || clay_perl_callback_depth > 0) return NULL;
 
     uint32_t suppressed = ctx->suppressed_errors;
-    ctx->pending_error     = NULL;
+    ctx->held_error     = NULL;
     ctx->suppressed_errors = 0;
     sv_2mortal(error);
 
@@ -126,9 +126,9 @@ SV *clay_perl_take_pending_error(pTHX_ clay_perl_context *ctx, const char *note)
     return message;
 }
 
-void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx)
+void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx)
 {
-    SV *error = clay_perl_take_pending_error(aTHX_ ctx, NULL);
+    SV *error = clay_perl_take_held_error(aTHX_ ctx, NULL);
     if (error) croak_sv(error);
 }
 
@@ -142,7 +142,7 @@ void clay_perl_raise_pending_error(pTHX_ clay_perl_context *ctx)
  * while a callback runs) work. It runs inside invoke_callback's
  * ENTER/SAVETMPS ... FREETMPS/LEAVE, with $@ localised there, so the
  * caller's $@ survives the callback. Returns true on failure (the error
- * is stashed on ctx).
+ * is held on ctx).
  * ------------------------------------------------------------------------ */
 
 static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
@@ -172,7 +172,7 @@ static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
      * with an overloaded bool could itself die here, outside any eval. */
     SV *error = ERRSV;
     if (!SvROK(error) && !SvTRUE_nomg(error)) return false;
-    clay_perl_stash_callback_error(aTHX_ ctx);
+    clay_perl_hold_callback_error(aTHX_ ctx);
     return true;
 }
 
@@ -186,7 +186,7 @@ typedef int (*callback_args_builder)(pTHX_ const void *data, SV **args);
 /* Calls a Perl callback for a trampoline: builds its arguments (plus the
  * userdata, always last) inside a temporaries scope of their own, with $@
  * localised, and dispatches. Returns true on failure (the error is
- * stashed on ctx). */
+ * held on ctx). */
 static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
                             clay_perl_dispatch_result *result, const clay_perl_callback *callback,
                             callback_args_builder build_args, const void *data)
@@ -294,10 +294,11 @@ static clay_perl_context *context_or_current(void *userData)
  * The hover registry.
  * ------------------------------------------------------------------------ */
 
-/* Hover entries registered this many frames ago are dropped. Entries of
- * the previous frame must survive: Clay_SetPointerState dispatches the
- * hover callbacks registered while declaring the last completed frame. */
-#define HOVER_KEEP_FRAMES 2
+/* The sweep at the start of a frame keeps the hover entries registered by
+ * the last this many completed frames: Clay_SetPointerState dispatches
+ * the hover callbacks registered while declaring the last completed
+ * frame. Same convention as INTERNED_ID_KEEP_COMPLETED_FRAMES. */
+#define HOVER_KEEP_COMPLETED_FRAMES 1
 
 static void make_id_key(uint32_t id, char buf[16])
 {
@@ -319,8 +320,8 @@ void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
 
 void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx)
 {
-    if (ctx->frame_generation < HOVER_KEEP_FRAMES) return;
-    uint32_t cutoff = ctx->frame_generation - HOVER_KEEP_FRAMES;
+    if (ctx->frame_generation < HOVER_KEEP_COMPLETED_FRAMES) return;
+    uint32_t cutoff = ctx->frame_generation - HOVER_KEEP_COMPLETED_FRAMES;
 
     /* Collect first, delete afterwards: deleting invalidates the iterator. */
     HV *hv = ctx->hover_callbacks;
@@ -331,7 +332,7 @@ void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx)
     while ((he = hv_iternext(hv)) != NULL) {
         AV *entry = (AV *) SvRV(HeVAL(he));
         SV **gen_slot = av_fetch(entry, 2, 0);
-        if ((uint32_t) SvUV(*gen_slot) <= cutoff) {
+        if ((uint32_t) SvUV(*gen_slot) < cutoff) {
             av_push(stale, newSVhek(HeKEY_hek(he)));
         }
     }
@@ -374,13 +375,13 @@ Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
 
     clay_perl_context *ctx = context_or_current(userData);
     if (!ctx) return zero;
-    if (ctx->pending_error) {
+    if (ctx->held_error) {
         ctx->measure_cache_poisoned = true;
         return zero;
     }
     const clay_perl_callback *callback = &ctx->callbacks[CLAY_PERL_DISPATCH_MEASURE_TEXT];
     if (!callback->code) {
-        clay_perl_stash_error_message(aTHX_ ctx,
+        clay_perl_hold_error_message(aTHX_ ctx,
             "Clay::XS: text measured but no measure_text function is installed for this context");
         ctx->measure_cache_poisoned = true;
         return zero;
@@ -451,7 +452,7 @@ Clay_Vector2 clay_perl_query_scroll_offset_trampoline(uint32_t element_id,
     if (!ctx) return zero;
     const clay_perl_callback *callback = &ctx->callbacks[CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET];
     if (!callback->code) {
-        clay_perl_stash_error_message(aTHX_ ctx,
+        clay_perl_hold_error_message(aTHX_ ctx,
             "Clay::XS: external scroll handling is enabled but no query_scroll_offset function is installed for this context");
         return zero;
     }
