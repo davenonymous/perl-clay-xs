@@ -49,3 +49,12 @@ The state names `hovered`, `pressed` and `focused`. HasStates answers them
 live from the interaction tracker and the UI's focus, and they are read-only.
 All other state names are user states.
 _Avoid_: auto-synced state, mirrored state
+
+### Frames
+
+**Frame registry**:
+What one frame laid out (`Clay::UI::_FrameRegistry`): widgets by render-command
+userData and by Clay element id, walk order, and the scroll containers with the
+element ids they were declared under. The walk builds a new one, and it replaces
+the previous one only when the frame completes.
+_Avoid_: pending registries, id map

@@ -88,7 +88,10 @@ through Clay::UI and replaces `userData` with widget class and id.
   names must be unique across composed roles.
 - `render` does all pointer work before `Clay_BeginLayout` (no element
   open, so listeners may change the tree): it maps `Clay_GetPointerOverIds`
-  through the last frame's id registry and hands the widgets, the down
+  through the last frame's registry (`Clay::UI::_FrameRegistry`: built by
+  the walk, swapped in only when a frame completes; it also holds walk
+  order, `widget_for` back-references and scroll containers with their
+  element ids) and hands the widgets, the down
   flag and scroll changes to `Clay::UI::Interaction` (`$ui->interaction`),
   which owns hover / armed / pressed state and fires the events. Widgets
   hold no interaction state; `is_hovered`, `is_pressed` and the derived

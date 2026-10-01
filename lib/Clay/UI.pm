@@ -34,6 +34,7 @@ use Clay::XS qw(
 );
 use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::Interaction;
+use Clay::UI::_FrameRegistry;
 
 use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
@@ -57,18 +58,8 @@ class Clay::UI :strict(params) {
 	field $_focused   = undef;
 	field $_rendering = 0;
 
-	# Registries of the last completed frame (values are weak references):
-	# render-command userData -> widget, Clay element id -> widget, widget
-	# -> position in the walk (pre-order), and the scroll containers
-	# walked. The _pending_* versions are filled during the walk.
-	field $_widget_by_refaddr = {};
-	field $_widget_by_id      = {};
-	field $_walk_order        = {};
-	field $_scroll_widgets    = [];
-	field $_pending_by_refaddr;
-	field $_pending_by_id;
-	field $_pending_order;
-	field $_pending_scroll;
+	# What the last completed frame laid out (see Clay::UI::_FrameRegistry).
+	field $_frame = Clay::UI::_FrameRegistry->new;
 
 	# The last pointer state passed to render, and the tracker that owns
 	# hover, armed and pressed state.
@@ -274,16 +265,10 @@ class Clay::UI :strict(params) {
 	}
 
 	method _layout_frame ($delta_time) {
-		# Stage registry writes; commit them only after a complete frame so a
-		# failed frame leaves the registries of the last good one in place.
-		my %staged_by_refaddr;
-		my %staged_by_id;
-		my %staged_order;
-		my @staged_scroll;
-		$_pending_by_refaddr = \%staged_by_refaddr;
-		$_pending_by_id      = \%staged_by_id;
-		$_pending_order      = \%staged_order;
-		$_pending_scroll     = \@staged_scroll;
+		# The walk fills a new registry; it replaces the current one only
+		# after a complete frame, so a failed frame leaves the last good one
+		# in place.
+		my $next_frame = Clay::UI::_FrameRegistry->new;
 
 		# A listener may have used another Clay::UI, which switches Clay's
 		# current context.
@@ -292,17 +277,13 @@ class Clay::UI :strict(params) {
 		Clay_BeginLayout();
 		{
 			local $@;
-			eval { $self->_walk($root, '', []); 1 } or $walk_error = $@ || 'unknown walker error';
+			eval { $self->_walk($next_frame, $root, '', []); 1 } or $walk_error = $@ || 'unknown walker error';
 		}
 		{
 			local $@;
 			eval { $commands = Clay_EndLayout($delta_time); 1 }
 				or $end_error = $@ || 'unknown Clay_EndLayout error';
 		}
-		$_pending_by_refaddr = undef;
-		$_pending_by_id      = undef;
-		$_pending_order      = undef;
-		$_pending_scroll     = undef;
 
 		if (defined $walk_error) {
 			$walk_error .= "(Clay_EndLayout also failed: $end_error)"
@@ -311,10 +292,7 @@ class Clay::UI :strict(params) {
 		}
 		die $end_error if defined $end_error;
 
-		$_widget_by_refaddr = \%staged_by_refaddr;
-		$_widget_by_id      = \%staged_by_id;
-		$_walk_order        = \%staged_order;
-		$_scroll_widgets    = \@staged_scroll;
+		$_frame = $next_frame;
 		return $commands;
 	}
 
@@ -333,17 +311,20 @@ class Clay::UI :strict(params) {
 	method _widgets_under_pointer () {
 		my @widgets;
 		for my $id (@{ Clay_GetPointerOverIds() }) {
-			my $widget = $_widget_by_id->{ $id->{id} };
+			my $widget = $_frame->widget_for_element($id->{id});
 			push @widgets, $widget if defined $widget && $self->_belongs_here($widget);
 		}
 		return @widgets;
 	}
 
+	# Scroll containers are looked up under the element id the last walk
+	# declared them with.
 	method _scroll_positions () {
 		my %positions;
-		for my $widget (grep { defined && $self->_belongs_here($_) } @$_scroll_widgets) {
-			my $data = Clay_GetScrollContainerData(Clay_GetElementId($widget->id));
-			$positions{ refaddr $widget } = [ $widget, $data->{scrollPosition} ] if $data->{found};
+		for my $container (grep { $self->_belongs_here($_->[0]) } $_frame->scroll_containers) {
+			my ($widget, $element_id) = @$container;
+			my $data = Clay_GetScrollContainerData($element_id);
+			$positions{ refaddr $widget } = [ $widget, $element_id, $data->{scrollPosition} ] if $data->{found};
 		}
 		return %positions;
 	}
@@ -351,8 +332,8 @@ class Clay::UI :strict(params) {
 	method _scroll_changes ($before) {
 		my @changes;
 		for my $entry (values %$before) {
-			my ($widget, $old) = @$entry;
-			my $data = Clay_GetScrollContainerData(Clay_GetElementId($widget->id));
+			my ($widget, $element_id, $old) = @$entry;
+			my $data = Clay_GetScrollContainerData($element_id);
 			next unless $data->{found};
 			my $new = $data->{scrollPosition};
 			my ($dx, $dy) = ($new->{x} - $old->{x}, $new->{y} - $old->{y});
@@ -364,13 +345,12 @@ class Clay::UI :strict(params) {
 	# Widgets sorted by their position in the last walk (pre-order); widgets
 	# the walk did not reach (removed ones) keep their relative order last.
 	method _in_tree_order (@widgets) {
-		my $rank = sub ($widget) { $_walk_order->{ refaddr $widget } // 9**9**9 };
-		return map { $_->[1] } sort { $a->[0] <=> $b->[0] } map { [ $rank->($_), $_ ] } @widgets;
+		return $_frame->in_tree_order(@widgets);
 	}
 
 	method widget_for ($user_data) {
 		return undef unless defined $user_data && $user_data;
-		return $_widget_by_refaddr->{$user_data};
+		return $_frame->widget_for($user_data);
 	}
 
 	# ---------------------------------------------------------------------
@@ -532,33 +512,20 @@ class Clay::UI :strict(params) {
 		return $self->_step_focus($from, -1);
 	}
 
-	# Injects the refaddr back-reference into a config hash the walker owns
-	# (a copy of what the widget returned) and stages the registry entry.
-	method _attach_back_reference ($config, $node) {
+	# Injects the back-reference into a config hash the walker owns (a
+	# copy of what the widget returned) and records it in $frame.
+	sub _attach_back_reference ($frame, $config, $node) {
 		if (exists $config->{user_data} || exists $config->{userData}) {
 			die "Clay::UI: widget " . ref($node)
 				. " set user_data in its config; Clay::UI auto-injects a refaddr"
 				. " back-reference here. Use one mechanism or the other, not both.";
 		}
-		my $addr = refaddr($node);
-		$config->{user_data} = $addr;
-		$_pending_by_refaddr->{$addr} = $node;
-		weaken $_pending_by_refaddr->{$addr};
+		$config->{user_data} = $frame->add_back_reference($node);
 		return;
 	}
 
-	method _register_element ($element_id, $node) {
-		$_pending_by_id->{$element_id} = $node;
-		weaken $_pending_by_id->{$element_id};
-		$_pending_order->{ refaddr $node } = scalar keys %$_pending_order;
-		if ($node->DOES('Clay::UI::Role::Layout::HasScroll')) {
-			push @$_pending_scroll, $node;
-			weaken $_pending_scroll->[-1];
-		}
-		return;
-	}
-
-	# Declares $node and its subtree. $base is the nearest ancestor-or-self
+	# Declares $node and its subtree, recording it in $frame (the registry
+	# of the frame being laid out). $base is the nearest ancestor-or-self
 	# user id ('' if none) and $indices the child indices below it; they
 	# name anonymous elements (see Element::resolve_id).
 	#
@@ -568,14 +535,14 @@ class Clay::UI :strict(params) {
 	# always runs and the first error is rethrown after it: Clay's
 	# open-element stack stays balanced whatever fails. No listener runs
 	# during the walk.
-	method _walk ($node, $base, $indices) {
+	method _walk ($frame, $node, $base, $indices) {
 		unless (blessed $node) {
 			die "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
 		}
 
 		if ($node->DOES('Clay::UI::Role::Core::TextNode')) {
 			my %text_config = %{ $node->text_config };
-			$self->_attach_back_reference(\%text_config, $node);
+			_attach_back_reference($frame, \%text_config, $node);
 			Clay__OpenTextElement($node->text, camelize_keys(\%text_config));
 			return;
 		}
@@ -585,11 +552,11 @@ class Clay::UI :strict(params) {
 		}
 
 		my %config = %{ $node->to_config };
-		$self->_attach_back_reference(\%config, $node);
+		_attach_back_reference($frame, \%config, $node);
 		my $camelized = camelize_keys(\%config);
 
 		my $element = Clay_GetElementId($node->resolve_id($base, $indices));
-		$self->_register_element($element->{id}, $node);
+		$frame->add_element($node, $element);
 		my ($child_base, $child_indices) = defined $node->id ? ($node->id, []) : ($base, $indices);
 
 		Clay__OpenElementWithId($element);
@@ -602,7 +569,7 @@ class Clay::UI :strict(params) {
 
 			my @children = @{ $node->children };
 			for my $index (0 .. $#children) {
-				$self->_walk($children[$index], $child_base, [ @$child_indices, $index ]);
+				$self->_walk($frame, $children[$index], $child_base, [ @$child_indices, $index ]);
 			}
 			1;
 		};
