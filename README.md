@@ -241,10 +241,14 @@ The events:
 (`Clay::UI::Enum::Bubble`: `ALWAYS`, `IF_CONTINUE`, `NEVER`). If a
 listener dies, the frame's remaining events still fire, the layout pass
 still runs, and then `render` dies with the first error (the frame's
-render commands are discarded). The
-`hovered`, `pressed` and `focused` states (`Clay::UI::Role::Style::HasStates`)
-and the `is_hovered` / `is_pressed` / `is_focused` readers follow the
-events. `Clay::UI`'s POD (section POINTER EVENTS) has the details.
+render commands are discarded). Hover and press state lives in the UI's
+interaction tracker (`$ui->interaction`, `Clay::UI::Interaction`), which
+`render` feeds every frame and which also takes synthetic input. The
+`is_hovered` / `is_pressed` / `is_focused` readers and the derived,
+read-only `hovered`, `pressed` and `focused` states
+(`Clay::UI::Role::Style::HasStates`) ask it and the UI's focus. A hovered
+widget removed from the tree gets `OnHoverStopped` at once. `Clay::UI`'s
+POD (section POINTER EVENTS) has the details.
 
 ### Scrolling
 

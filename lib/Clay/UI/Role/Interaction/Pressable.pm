@@ -14,25 +14,11 @@ use Clay::UI::Events::OnRelease;
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Interaction::Pressable :does(Clay::UI::Role::Interaction::Hoverable) {
-	field $is_pressed :reader = 0;
-
-	# Set when a press starts over the widget, cleared by any release. Only
-	# an armed widget can receive OnRelease.
-	field $_armed = 0;
-
-	method _is_armed () { $_armed }
-
-	method _set_armed ($armed) {
-		$_armed = $armed ? 1 : 0;
-		return;
-	}
-
-	# Set by Clay::UI while it dispatches pointer input; keeps the
-	# 'pressed' state in step with is_pressed.
-	method _set_pressed ($pressed) {
-		$is_pressed = $pressed ? 1 : 0;
-		$pressed ? $self->add_state('pressed') : $self->remove_state('pressed');
-		return;
+	# The UI's interaction tracker owns the state; a widget outside a
+	# UI is never pressed.
+	method is_pressed () {
+		my $ui = $self->ui;
+		return defined $ui ? $ui->interaction->is_pressed($self) : 0;
 	}
 }
 
@@ -70,14 +56,16 @@ widgets are also hover-trackable). Adds:
 =item C<is_pressed> (reader)
 
 True while a press that started on the widget is held with the pointer
-over it, as of the last L<Clay::UI/render>. The C<pressed> state follows
-it. Dragging off the widget clears it; dragging back on (still held)
-sets it again.
+over it, as of the last L<Clay::UI/render> (or synthetic
+L<Clay::UI::Interaction/update>); 0 for a widget outside a Clay::UI.
+It asks the UI's interaction tracker, as does the derived C<pressed>
+state. Dragging off the widget clears it; dragging back on (still held)
+sets it again; removing the widget from the tree drops it.
 
 =back
 
-L<Clay::UI/render> fires the events, in the frame in which it sees the
-pointer go down or up (see L<Clay::UI/POINTER EVENTS> for the full
+The UI's interaction tracker fires the events, in the frame in which it
+sees the pointer go down or up (see L<Clay::UI/POINTER EVENTS> for the full
 rules):
 
 =over 4

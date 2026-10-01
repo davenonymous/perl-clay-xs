@@ -7,6 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Events::OnHoverStart;
@@ -14,22 +15,20 @@ use Clay::UI::Events::OnHoverStopped;
 
 our $VERSION = '0.01';
 
-role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Events::Emitter)
+role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Layout::HasParent)
+                                            :does(Clay::UI::Role::Events::Emitter)
                                             :does(Clay::UI::Role::Style::HasStates) {
-	field $is_hovered :reader = 0;
-
 	ADJUST {
 		die "Clay::UI: " . ref($self) . " composes Clay::UI::Role::Interaction::Hoverable on a text node;"
 			. " Clay cannot report the pointer over text elements - wrap the text in an Element"
 			if $self->DOES('Clay::UI::Role::Core::TextNode');
 	}
 
-	# Set by Clay::UI while it dispatches pointer input; keeps the
-	# 'hovered' state in step with is_hovered.
-	method _set_hovered ($hovered) {
-		$is_hovered = $hovered ? 1 : 0;
-		$hovered ? $self->add_state('hovered') : $self->remove_state('hovered');
-		return;
+	# The UI's interaction tracker owns the state; a widget outside a
+	# UI is never hovered.
+	method is_hovered () {
+		my $ui = $self->ui;
+		return defined $ui ? $ui->interaction->is_hovered($self) : 0;
 	}
 }
 
@@ -67,14 +66,16 @@ Composing widgets get:
 =item C<is_hovered> (reader)
 
 True while the pointer is over the widget, as of the last
-L<Clay::UI/render>. The C<hovered> state (see
-L<Clay::UI::Role::Style::HasStates>) follows it.
+L<Clay::UI/render> (or synthetic L<Clay::UI::Interaction/update>); 0
+for a widget outside a Clay::UI. It asks the UI's interaction tracker,
+as does the derived C<hovered> state of
+L<Clay::UI::Role::Style::HasStates>.
 
 =item Events
 
 L<Clay::UI::Events::OnHoverStart> when the pointer enters the widget and
-L<Clay::UI::Events::OnHoverStopped> when it leaves (or when the widget is
-removed from the tree while hovered). Like the DOM's C<mouseenter> /
+L<Clay::UI::Events::OnHoverStopped> when it leaves (or at once, when the
+widget is removed from the tree while hovered). Like the DOM's C<mouseenter> /
 C<mouseleave>, they do not bubble by default: every hovered widget -
 nested ones included - gets its own event.
 
@@ -90,7 +91,8 @@ L<Clay::UI::Role::Interaction::Pressable>) onto a text node dies at
 construction, because Clay does not report the pointer over text
 elements. Wrap the text in an Element and make that hoverable.
 
-Hoverable composes L<Clay::UI::Role::Events::Emitter> and
+Hoverable composes L<Clay::UI::Role::Layout::HasParent>,
+L<Clay::UI::Role::Events::Emitter> and
 L<Clay::UI::Role::Style::HasStates> transitively.
 
 =cut

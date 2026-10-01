@@ -21,8 +21,8 @@ use Clay::UI::Role::Layout::HasLayout;
 
 # -----------------------------------------------------------------------------
 # Widget composing every interaction role, and HasStates explicitly:
-# 'hovered', 'pressed', and 'focused' show up in states() on edge
-# transitions automatically.
+# 'hovered', 'pressed', and 'focused' are derived states - answered live
+# from the interaction tracker and the UI's focus, never stored.
 # -----------------------------------------------------------------------------
 
 class TestStateWidget
@@ -177,6 +177,19 @@ subtest 'all three states coexist on a fully interactive widget' => sub {
 		[sort qw(focused hovered pressed)],
 		'states() reflects every active condition',
 	);
+};
+
+subtest 'derived states sit beside user states and cannot be written' => sub {
+	my $w = TestStateWidget->new(id => 'mixed');
+	my $ui = make_ui($w);
+	$w->add_state('selected');
+	$ui->set_focused_widget($w);
+	is( [ sort $w->states ], [qw(focused selected)], 'states() lists user and derived states' );
+	$w->clear_states;
+	is( [ $w->states ], ['focused'], 'clear_states clears only user states' );
+	like( dies { $w->remove_state('focused') }, qr/state 'focused' is derived/, 'derived states are read-only' );
+	$ui->set_focused_widget(undef);
+	ok( !$w->has_state('focused'), 'and follow the UI' );
 };
 
 done_testing;

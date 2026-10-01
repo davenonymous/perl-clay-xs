@@ -87,10 +87,10 @@ subtest 'render commands carry refaddr in userData' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# get_hovered returns the widget objects under the pointer.
+# The interaction tracker reports the widget objects under the pointer.
 # -----------------------------------------------------------------------------
 
-subtest 'get_hovered returns widget objects' => sub {
+subtest 'under_pointer returns widget objects' => sub {
 	@errors = ();
 
 	my $child_box = Clay::UI::Test::Box->new(
@@ -108,10 +108,10 @@ subtest 'get_hovered returns widget objects' => sub {
 	$ui->render;  # the pointer is tested against the previous layout
 	$ui->render( pointer_state => { x => 40, y => 20, down => 0 } );
 
-	my $hovered = $ui->get_hovered;
+	my $hovered = $ui->interaction->under_pointer;
 	ok( scalar(@$hovered) >= 1, 'at least one hovered widget' );
 	my %by_addr = map { refaddr($_) => $_ } @$hovered;
-	ok( $by_addr{ refaddr $child_box }, 'child widget recovered via get_hovered' );
+	ok( $by_addr{ refaddr $child_box }, 'child widget recovered via under_pointer' );
 };
 
 # -----------------------------------------------------------------------------

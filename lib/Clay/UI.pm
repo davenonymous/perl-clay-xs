@@ -31,17 +31,12 @@ use Clay::XS qw(
 	Clay__OpenTextElement
 	CLAY_POINTER_DATA_PRESSED
 	CLAY_POINTER_DATA_PRESSED_THIS_FRAME
-	CLAY_POINTER_DATA_RELEASED_THIS_FRAME
 );
 use Clay::UI::_keys qw(camelize_keys);
+use Clay::UI::Interaction;
 
 use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
-use Clay::UI::Events::OnHoverStart;
-use Clay::UI::Events::OnHoverStopped;
-use Clay::UI::Events::OnPress;
-use Clay::UI::Events::OnRelease;
-use Clay::UI::Events::OnScroll;
 
 our $VERSION = '0.02';
 
@@ -75,12 +70,10 @@ class Clay::UI :strict(params) {
 	field $_pending_order;
 	field $_pending_scroll;
 
-	# Pointer bookkeeping: the last pointer state passed to render, the
-	# widgets under the pointer (weak), and every widget currently hovered,
-	# armed or pressed, keyed by refaddr (weak).
+	# The last pointer state passed to render, and the tracker that owns
+	# hover, armed and pressed state.
 	field $_last_pointer;
-	field @_under_pointer;
-	field %_tracked;
+	field $interaction :reader;
 
 	ADJUST {
 		unless (blessed $root
@@ -127,6 +120,7 @@ class Clay::UI :strict(params) {
 		# frame"; settle it so the first real pointer frame is no click.
 		Clay_SetPointerState({ x => -1, y => -1 }, 0);
 
+		$interaction = Clay::UI::Interaction->new(ui => $self);
 		$root->_set_ui_controller($self);
 	}
 
@@ -254,8 +248,14 @@ class Clay::UI :strict(params) {
 		{
 			local $@;
 			eval {
-				my @scrolled = $self->_scroll_changes(\%scroll_before);
-				$self->_dispatch_pointer_events(\@under_pointer, $pointer_data, \@scrolled);
+				my $state = $pointer_data->{state};
+				$interaction->update(
+					over     => \@under_pointer,
+					down     => $state == CLAY_POINTER_DATA_PRESSED || $state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME,
+					x        => $pointer_data->{position}{x},
+					y        => $pointer_data->{position}{y},
+					scrolled => [ $self->_scroll_changes(\%scroll_before) ],
+				);
 				1;
 			} or $dispatch_error = $@ || 'unknown listener error';
 		}
@@ -361,90 +361,6 @@ class Clay::UI :strict(params) {
 		return @changes;
 	}
 
-	# The widget a press or release belongs to: the first Pressable in
-	# pointer-over order, replaced by each following Pressable that is its
-	# descendant. The innermost widget of the topmost stack wins.
-	sub _event_origin (@pressables) {
-		my $origin = shift @pressables;
-		for my $next (@pressables) {
-			last unless _is_descendant($next, $origin);
-			$origin = $next;
-		}
-		return $origin;
-	}
-
-	sub _is_descendant ($widget, $ancestor) {
-		for (my $node = $widget->parent; defined $node; $node = $node->parent) {
-			return 1 if refaddr($node) == refaddr($ancestor);
-		}
-		return 0;
-	}
-
-	method _dispatch_pointer_events ($under_pointer, $pointer_data, $scrolled) {
-		my $state = $pointer_data->{state};
-		my $down  = $state == CLAY_POINTER_DATA_PRESSED || $state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME;
-		my %over  = map { refaddr($_) => $_ } grep { $_->DOES('Clay::UI::Role::Interaction::Hoverable') } @$under_pointer;
-		my @over_pressables = grep { $_->DOES('Clay::UI::Role::Interaction::Pressable') } @$under_pointer;
-
-		# Everything whose state may change: what is under the pointer now
-		# plus what was hovered, armed or pressed before.
-		my %candidates = (
-			(map { refaddr($_) => $_ } grep { defined } values %_tracked),
-			%over,
-		);
-		my @candidates = values %candidates;
-		my @pressables = grep { $_->DOES('Clay::UI::Role::Interaction::Pressable') } @candidates;
-
-		my (@hover_stopped, @hover_started);
-		for my $widget (@candidates) {
-			my $is_over = exists $over{ refaddr $widget };
-			if ($is_over && !$widget->is_hovered) {
-				$widget->_set_hovered(1);
-				push @hover_started, $widget;
-			} elsif (!$is_over && $widget->is_hovered) {
-				$widget->_set_hovered(0);
-				push @hover_stopped, $widget;
-			}
-		}
-
-		my ($press_origin, $release_origin);
-		if ($state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-			$_->_set_armed(1) for @over_pressables;
-			$press_origin = _event_origin(@over_pressables);
-		} elsif ($state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME) {
-			$release_origin = _event_origin(grep { $_->_is_armed } @over_pressables);
-			$_->_set_armed(0) for @pressables;
-		}
-		for my $widget (@pressables) {
-			$widget->_set_pressed($widget->_is_armed && exists $over{ refaddr $widget } && $down);
-		}
-
-		%_tracked = ();
-		for my $widget (@candidates) {
-			my $active = $widget->is_hovered
-				|| ($widget->DOES('Clay::UI::Role::Interaction::Pressable') && ($widget->_is_armed || $widget->is_pressed));
-			next unless $active;
-			$_tracked{ refaddr $widget } = $widget;
-			weaken $_tracked{ refaddr $widget };
-		}
-		@_under_pointer = @$under_pointer;
-		weaken $_ for @_under_pointer;
-
-		my $position = $pointer_data->{position};
-		my @events = (
-			(map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $self->_in_tree_order(@hover_stopped)),
-			(map { [ $_, Clay::UI::Events::OnHoverStart->new ] }   $self->_in_tree_order(@hover_started)),
-			(defined $press_origin
-				? [ $press_origin, Clay::UI::Events::OnPress->new(x => $position->{x}, y => $position->{y}) ] : ()),
-			(defined $release_origin
-				? [ $release_origin, Clay::UI::Events::OnRelease->new(x => $position->{x}, y => $position->{y}) ] : ()),
-			(map { [ $_->[0], Clay::UI::Events::OnScroll->new(delta_x => $_->[1], delta_y => $_->[2]) ] }
-				$self->_in_tree_order_entries(@$scrolled)),
-		);
-		_fire_all(@events);
-		return;
-	}
-
 	# Widgets sorted by their position in the last walk (pre-order); widgets
 	# the walk did not reach (removed ones) keep their relative order last.
 	method _in_tree_order (@widgets) {
@@ -452,31 +368,9 @@ class Clay::UI :strict(params) {
 		return map { $_->[1] } sort { $a->[0] <=> $b->[0] } map { [ $rank->($_), $_ ] } @widgets;
 	}
 
-	method _in_tree_order_entries (@entries) {
-		my %entry_of = map { refaddr($_->[0]) => $_ } @entries;
-		return map { $entry_of{ refaddr $_ } } $self->_in_tree_order(map { $_->[0] } @entries);
-	}
-
-	# Fires every event even if a listener dies, then rethrows the first
-	# exception.
-	sub _fire_all (@events) {
-		my $first_error;
-		for my $event (@events) {
-			my ($widget, $object) = @$event;
-			my $ok = eval { $widget->fire_event($object); 1 };
-			$first_error //= ($@ || 'unknown listener error') unless $ok;
-		}
-		die $first_error if defined $first_error;
-		return;
-	}
-
 	method widget_for ($user_data) {
 		return undef unless defined $user_data && $user_data;
 		return $_widget_by_refaddr->{$user_data};
-	}
-
-	method get_hovered () {
-		return [ grep { defined } @_under_pointer ];
 	}
 
 	# ---------------------------------------------------------------------
@@ -487,9 +381,24 @@ class Clay::UI :strict(params) {
 		return $_focused;
 	}
 
-	# Called by a widget whose child $top leaves the tree: focus held
-	# inside that subtree is released (the focused widget gets OnBlur).
+	# Called by a widget whose child $top leaves the tree: the interaction
+	# tracker drops the subtree (hovered widgets get OnHoverStopped), then
+	# focus held inside it is released (the focused widget gets OnBlur).
+	# Both run even if a listener dies; the first error is rethrown.
 	method _subtree_detached ($top) {
+		my $error;
+		{
+			local $@;
+			eval { $interaction->_subtree_detached($top); 1 }
+				or $error = $@ || 'unknown listener error';
+			eval { $self->_release_focus_within($top); 1 }
+				or $error //= $@ || 'unknown listener error';
+		}
+		die $error if defined $error;
+		return;
+	}
+
+	method _release_focus_within ($top) {
 		return unless defined $_focused;
 		for (my $node = $_focused; defined $node; $node = $node->parent) {
 			next unless refaddr($node) == refaddr($top);
@@ -520,15 +429,13 @@ class Clay::UI :strict(params) {
 				unless $widget->can_focus;
 		}
 
-		# Both states and the focused widget change before any listener
-		# runs; a dying OnBlur listener still lets OnFocus fire.
+		# The focused widget changes before any listener runs; a dying
+		# OnBlur listener still lets OnFocus fire.
 		my $previous = $_focused;
 		$_focused = $widget;
 		weaken $_focused if defined $_focused;
-		$previous->remove_state('focused') if defined $previous;
-		$widget->add_state('focused')      if defined $widget;
 
-		_fire_all(
+		Clay::UI::Interaction::_fire_all(
 			(defined $previous ? [ $previous, Clay::UI::Events::OnBlur->new ]  : ()),
 			(defined $widget   ? [ $widget,   Clay::UI::Events::OnFocus->new ] : ()),
 		);
@@ -745,7 +652,7 @@ Clay::UI - Perl-idiomatic high-level layer over Clay::XS
 		pointer_state => { x => 120, y => 80, down => 0 },
 	);
 
-	my $hovered = $ui->get_hovered;  # arrayref of widget objects
+	my $hovered = $ui->interaction->under_pointer;  # arrayref of widget objects
 
 =head1 DESCRIPTION
 
@@ -898,14 +805,15 @@ falsy or unknown).
 		# dispatch on ref $widget, read its fields, etc.
 	}
 
-=head2 get_hovered
+=head2 interaction
 
-Returns an arrayref of the widgets of this UI that were under the
-pointer at the last C<render>, in Clay's pointer-over order (see
-L</POINTER EVENTS>). Widgets that do not compose
-L<Clay::UI::Role::Interaction::Hoverable> are included; the Hoverable
-ones are exactly those whose C<is_hovered> is true. Widgets that have
-been garbage-collected since are skipped.
+Returns this UI's L<Clay::UI::Interaction>, which owns hover, armed and
+pressed state. C<< $ui->interaction->under_pointer >> lists the widgets
+that were under the pointer at the last C<render>, in Clay's
+pointer-over order (see L</POINTER EVENTS>), Hoverable or not; widgets
+that have been garbage-collected or removed from the tree since are
+skipped. C<< $ui->interaction->update(...) >> takes synthetic pointer
+input between renders.
 
 =head2 get_focused_widget
 
@@ -1004,8 +912,11 @@ the scroll container under the pointer.
 
 =item 3.
 
-The widget states are updated (C<hovered>, C<pressed>, see below), then
-the events fire in this order: every OnHoverStopped, every
+The widgets under the pointer, whether the pointer is down and the
+scroll containers that moved go to the interaction tracker
+(C<< $ui->interaction->update >>, see L<Clay::UI::Interaction>). It
+updates the widget states first (C<hovered>, C<pressed>, see below),
+then the events fire in this order: every OnHoverStopped, every
 OnHoverStart, OnPress, OnRelease, every OnScroll. Events of one kind
 fire in tree order (depth-first pre-order of the last layout).
 
@@ -1022,8 +933,10 @@ The events:
 =item L<Clay::UI::Events::OnHoverStart>, L<Clay::UI::Events::OnHoverStopped>
 
 A L<Clay::UI::Role::Interaction::Hoverable> gets OnHoverStart when it
-comes under the pointer and OnHoverStopped when it leaves it or is
-removed from the tree. They do not bubble: every hovered widget, nested
+comes under the pointer and OnHoverStopped when it leaves it. A hovered
+widget removed from the tree gets OnHoverStopped at once, during the
+removal (as a focused one gets OnBlur); a removed armed or pressed
+Pressable is dropped without events. They do not bubble: every hovered widget, nested
 ones included, gets its own event.
 
 =item L<Clay::UI::Events::OnPress>

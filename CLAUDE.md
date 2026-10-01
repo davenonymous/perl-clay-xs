@@ -88,10 +88,16 @@ through Clay::UI and replaces `userData` with widget class and id.
   names must be unique across composed roles.
 - `render` does all pointer work before `Clay_BeginLayout` (no element
   open, so listeners may change the tree): it maps `Clay_GetPointerOverIds`
-  through the last frame's id registry and fires hover / press / release /
-  scroll events. Clay::UI registers no `Clay_OnHover` callbacks. Every
-  queued event fires, the layout pass always runs, then the first listener
-  error is rethrown. Focus events fire only from `set_focused_widget`.
+  through the last frame's id registry and hands the widgets, the down
+  flag and scroll changes to `Clay::UI::Interaction` (`$ui->interaction`),
+  which owns hover / armed / pressed state and fires the events. Widgets
+  hold no interaction state; `is_hovered`, `is_pressed` and the derived
+  `hovered` / `pressed` / `focused` states ask the tracker and the UI.
+  Clay::UI registers no `Clay_OnHover` callbacks. Every queued event
+  fires, the layout pass always runs, then the first listener error is
+  rethrown. Focus events fire only from `set_focused_widget`; detaching a
+  subtree drops its interaction state (`OnHoverStopped`) and focus
+  (`OnBlur`) at once.
 - The walker injects `user_data => refaddr($widget)` so
   `$ui->widget_for($cmd->{userData})` works; a widget setting `user_data`
   itself is an error.

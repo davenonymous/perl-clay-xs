@@ -16,29 +16,29 @@ class TestStatesWidget :does(Clay::UI::Role::Core::Element)
 subtest 'fresh widget has no states' => sub {
 	my $w = TestStatesWidget->new;
 	is( [ $w->states ], [], 'states() returns empty list' );
-	ok( !$w->has_state('hovered'), 'has_state is false for arbitrary name' );
+	ok( !$w->has_state('selected'), 'has_state is false for arbitrary name' );
 };
 
 subtest 'add_state and has_state' => sub {
 	my $w = TestStatesWidget->new;
-	$w->add_state('hovered');
-	ok( $w->has_state('hovered'), 'state is now active' );
-	ok( !$w->has_state('pressed'), 'other states stay inactive' );
+	$w->add_state('selected');
+	ok( $w->has_state('selected'), 'state is now active' );
+	ok( !$w->has_state('disabled'), 'other states stay inactive' );
 };
 
 subtest 'add_state is idempotent and dedupes' => sub {
 	my $w = TestStatesWidget->new;
-	$w->add_state('hovered');
-	$w->add_state('hovered');
-	$w->add_state('hovered');
-	is( [ sort $w->states ], ['hovered'], 'duplicate adds collapse to one entry' );
+	$w->add_state('selected');
+	$w->add_state('selected');
+	$w->add_state('selected');
+	is( [ sort $w->states ], ['selected'], 'duplicate adds collapse to one entry' );
 };
 
 subtest 'remove_state' => sub {
 	my $w = TestStatesWidget->new;
-	$w->add_state('pressed');
-	$w->remove_state('pressed');
-	ok( !$w->has_state('pressed'), 'state is gone after remove' );
+	$w->add_state('disabled');
+	$w->remove_state('disabled');
+	ok( !$w->has_state('disabled'), 'state is gone after remove' );
 };
 
 subtest 'remove_state is idempotent on absent names' => sub {
@@ -49,10 +49,10 @@ subtest 'remove_state is idempotent on absent names' => sub {
 
 subtest 'toggle_state flips presence' => sub {
 	my $w = TestStatesWidget->new;
-	$w->toggle_state('selected');
-	ok( $w->has_state('selected'), 'toggle adds when absent' );
-	$w->toggle_state('selected');
-	ok( !$w->has_state('selected'), 'toggle removes when present' );
+	$w->toggle_state('open');
+	ok( $w->has_state('open'), 'toggle adds when absent' );
+	$w->toggle_state('open');
+	ok( !$w->has_state('open'), 'toggle removes when present' );
 };
 
 subtest 'clear_states empties the set' => sub {
@@ -66,9 +66,9 @@ subtest 'clear_states empties the set' => sub {
 
 subtest 'states() returns active names' => sub {
 	my $w = TestStatesWidget->new;
-	$w->add_state('hovered');
-	$w->add_state('focused');
-	is( [ sort $w->states ], ['focused', 'hovered'], 'states() lists active names' );
+	$w->add_state('selected');
+	$w->add_state('active');
+	is( [ sort $w->states ], ['active', 'selected'], 'states() lists active names' );
 };
 
 subtest 'mutators chain via returned $self' => sub {
@@ -88,9 +88,20 @@ subtest 'state names are free-form strings' => sub {
 subtest 'state-sets are per-instance' => sub {
 	my $w1 = TestStatesWidget->new;
 	my $w2 = TestStatesWidget->new;
-	$w1->add_state('hovered');
-	ok( $w1->has_state('hovered'),  'w1 has hovered' );
-	ok( !$w2->has_state('hovered'), 'w2 does not bleed state from w1' );
+	$w1->add_state('selected');
+	ok( $w1->has_state('selected'),  'w1 has selected' );
+	ok( !$w2->has_state('selected'), 'w2 does not bleed state from w1' );
+};
+
+subtest 'derived state names are read-only' => sub {
+	my $w = TestStatesWidget->new;
+	for my $name (qw(hovered pressed focused)) {
+		for my $mutator (qw(add_state remove_state toggle_state)) {
+			like( dies { $w->$mutator($name) }, qr/state '$name' is derived from interaction and cannot be set/,
+				"$mutator('$name') dies" );
+		}
+		ok( !$w->has_state($name), "$name is false without the interaction role" );
+	}
 };
 
 done_testing;

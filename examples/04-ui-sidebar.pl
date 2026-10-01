@@ -109,7 +109,7 @@ printf "Frame 1: %d render commands\n", scalar @$frame1;
 # Frame 2: hover the third sidebar item.
 my $frame2 = $ui->render( pointer_state => { x => 160, y => 320, down => 0 } );
 
-my $hovered = $ui->get_hovered;
+my $hovered = $ui->interaction->under_pointer;
 printf "Frame 2: %d widgets under pointer\n", scalar @$hovered;
 for my $widget (@$hovered) {
 	printf "  %s\n", ref $widget;

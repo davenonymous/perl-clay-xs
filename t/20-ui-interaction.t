@@ -22,9 +22,10 @@ use Clay::UI::Role::Layout::HasFloating;
 use Clay::UI::Role::Layout::HasScroll;
 
 # -----------------------------------------------------------------------------
-# Pointer and scroll events are dispatched by render, before the layout
-# pass: one origin per press, clicks only when press and release happen
-# on the same widget, hover events that do not bubble.
+# render feeds the real pointer to the interaction tracker before the
+# layout pass. The tracker's own rules are tested with synthetic input in
+# t/29-ui-interaction-tracker.t; these tests cover what render adds:
+# Clay's pointer-over order, listeners running between frames, scroll.
 # -----------------------------------------------------------------------------
 
 class HoverBox :strict(params)
@@ -108,28 +109,7 @@ subtest 'render without pointer_state keeps the pointer' => sub {
 	$ui->render;
 	is( \@log, [], 'no hover events without new input' );
 	is( $box->is_hovered, 1, 'still hovered' );
-	ok( ( grep { refaddr($_) == refaddr($box) } @{ $ui->get_hovered } ), 'get_hovered agrees' );
-};
-
-subtest 'a nested press has one origin and bubbles to the ancestor' => sub {
-	my $card  = Button->new(id => 'card',  layout => fixed(200, 100));
-	my $inner = Button->new(id => 'inner', layout => fixed(50, 50));
-	$card->add_child($inner);
-	my @log;
-	my $inner_result = Clay::UI::Enum::Result->CONTINUE;
-	$inner->on('OnPress', sub ($e) { push @log, 'inner'; return $inner_result });
-	$card->on('OnPress',  sub ($e) { push @log, 'card(target=' . $e->target->id . ')'; return });
-	my $ui = make_ui($card);
-	$ui->render;
-	pointer($ui, 10, 10);
-	pointer($ui, 10, 10, 1);
-	is( \@log, [ 'inner', 'card(target=inner)' ], 'the button fires once, the card sees only the bubbled event' );
-
-	@log = ();
-	$inner_result = Clay::UI::Enum::Result->HANDLED;
-	pointer($ui, 10, 10, 0);
-	pointer($ui, 10, 10, 1);
-	is( \@log, ['inner'], 'HANDLED stops the event at the button' );
+	ok( ( grep { refaddr($_) == refaddr($box) } @{ $ui->interaction->under_pointer } ), 'under_pointer agrees' );
 };
 
 subtest 'overlapping Pressables that are not nested get one press' => sub {
@@ -146,20 +126,6 @@ subtest 'overlapping Pressables that are not nested get one press' => sub {
 	ok( $under->is_hovered && $over->is_hovered, 'both are hovered' );
 };
 
-subtest 'a release after dragging in fires nothing' => sub {
-	my $button = Button->new(id => 'btn', layout => fixed(100, 40));
-	my @log;
-	log_events(\@log, $button, qw(OnPress OnRelease));
-	my $ui = make_ui(page($button));
-	$ui->render;
-	pointer($ui, 250, 150);
-	pointer($ui, 250, 150, 1);
-	pointer($ui, 50, 20, 1);
-	is( $button->is_pressed, 0, 'a press that started elsewhere does not press the button' );
-	pointer($ui, 50, 20, 0);
-	is( \@log, [], 'no OnPress and no OnRelease' );
-};
-
 subtest 'a dying listener makes render die after all events fired' => sub {
 	my $a = Button->new(id => 'a', layout => fixed(50, 50));
 	my @log;
@@ -172,25 +138,6 @@ subtest 'a dying listener makes render die after all events fired' => sub {
 	is( \@log, ['press'], 'the event queued after the failing one still fired' );
 	is( $a->is_pressed, 1, 'state was updated before the events' );
 	ok( lives { pointer($ui, 10, 10, 1) }, 'the next render works' );
-};
-
-subtest 'a dying OnPress listener makes render die' => sub {
-	my $button = Button->new(id => 'btn', layout => fixed(50, 50));
-	$button->on('OnPress', sub ($e) { die "press handler bug\n" });
-	my $ui = make_ui(page($button));
-	$ui->render;
-	pointer($ui, 10, 10);
-	like( dies { pointer($ui, 10, 10, 1) }, qr/^press handler bug$/, 'the error propagates out of render' );
-};
-
-subtest 'a dying hover listener does not crash' => sub {
-	my $box = HoverBox->new(id => 'hb', layout => fixed(50, 50));
-	$box->on('OnHoverStart', sub ($e) { die "listener bug\n" });
-	my $ui = make_ui(page($box));
-	$ui->render;
-	pointer($ui, -10, -10);
-	like( dies { pointer($ui, 10, 10) }, qr/^listener bug$/, 'render dies cleanly' );
-	ok( lives { pointer($ui, 10, 10) }, 'and renders again' );
 };
 
 subtest 'a hover listener may change the tree' => sub {
@@ -219,7 +166,7 @@ subtest 'a listener may render another Clay::UI' => sub {
 	is( $late->is_hovered, 1, 'the frame with the new widget was laid out in this UI\'s context' );
 };
 
-subtest 'a removed hovered widget gets OnHoverStopped' => sub {
+subtest 'a removed hovered widget gets OnHoverStopped at once' => sub {
 	my $box = HoverBox->new(id => 'hb', layout => fixed(50, 50));
 	my @log;
 	log_events(\@log, $box, 'OnHoverStopped');
@@ -228,9 +175,10 @@ subtest 'a removed hovered widget gets OnHoverStopped' => sub {
 	$ui->render;
 	pointer($ui, 10, 10);
 	$root->remove_child('hb');
-	$ui->render;
-	is( \@log, ['hb:OnHoverStopped'], 'hover stopped on the next render' );
+	is( \@log, ['hb:OnHoverStopped'], 'hover stopped during remove_child' );
 	is( $box->is_hovered, 0, 'and is_hovered cleared' );
+	$ui->render;
+	is( \@log, ['hb:OnHoverStopped'], 'the next render fires nothing more' );
 };
 
 subtest 'hover events do not bubble' => sub {
