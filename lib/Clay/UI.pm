@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Scalar::Util qw(blessed refaddr weaken looks_like_number);
+use Scalar::Util qw(blessed refaddr looks_like_number);
 
 use Clay::XS qw(
 	Clay_Initialize
@@ -36,9 +36,6 @@ use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
 
-use Clay::UI::Events::OnFocus;
-use Clay::UI::Events::OnBlur;
-
 our $VERSION = '0.02';
 
 my %RENDER_ARGS  = map { $_ => 1 } qw(pointer_state delta_time scroll_delta enable_drag_scrolling);
@@ -55,14 +52,13 @@ class Clay::UI :strict(params) {
 	field $measure_text   :param = undef;
 
 	field $_ctx;
-	field $_focused   = undef;
 	field $_rendering = 0;
 
 	# What the last completed frame laid out (see Clay::UI::_FrameRegistry).
 	field $_frame = Clay::UI::_FrameRegistry->new;
 
 	# The last pointer state passed to render, and the tracker that owns
-	# hover, armed and pressed state.
+	# hover, armed, pressed and focus state.
 	field $_last_pointer;
 	field $interaction :reader;
 
@@ -353,165 +349,6 @@ class Clay::UI :strict(params) {
 		return $_frame->widget_for($user_data);
 	}
 
-	# ---------------------------------------------------------------------
-	# Focus.
-	# ---------------------------------------------------------------------
-
-	method get_focused_widget () {
-		return $_focused;
-	}
-
-	# Called by a widget whose child $top leaves the tree: the interaction
-	# tracker drops the subtree (hovered widgets get OnHoverStopped), then
-	# focus held inside it is released (the focused widget gets OnBlur).
-	# Both run even if a listener dies; the first error is rethrown.
-	method _subtree_detached ($top) {
-		my $error;
-		{
-			local $@;
-			eval { $interaction->_subtree_detached($top); 1 }
-				or $error = $@ || 'unknown listener error';
-			eval { $self->_release_focus_within($top); 1 }
-				or $error //= $@ || 'unknown listener error';
-		}
-		die $error if defined $error;
-		return;
-	}
-
-	method _release_focus_within ($top) {
-		return unless defined $_focused;
-		for (my $node = $_focused; defined $node; $node = $node->parent) {
-			next unless refaddr($node) == refaddr($top);
-			$self->set_focused_widget(undef);
-			return;
-		}
-		return;
-	}
-
-	method set_focused_widget ($widget) {
-		# Pass undef to blur. Setting to the currently focused widget is
-		# a no-op (no events refire).
-		if (defined $_focused && defined $widget && refaddr($_focused) == refaddr($widget)) {
-			return;
-		}
-		if (!defined $_focused && !defined $widget) {
-			return;
-		}
-
-		if (defined $widget) {
-			die "Clay::UI: set_focused_widget target must be a blessed widget"
-				unless blessed $widget;
-			die "Clay::UI: set_focused_widget target must consume Clay::UI::Role::Interaction::Focusable"
-				unless $widget->DOES('Clay::UI::Role::Interaction::Focusable');
-			die "Clay::UI: set_focused_widget target does not belong to this Clay::UI"
-				unless $self->_belongs_here($widget);
-			die "Clay::UI: set_focused_widget target is not currently focusable (can_focus returned false)"
-				unless $widget->can_focus;
-		}
-
-		# The focused widget changes before any listener runs; a dying
-		# OnBlur listener still lets OnFocus fire.
-		my $previous = $_focused;
-		$_focused = $widget;
-		weaken $_focused if defined $_focused;
-
-		Clay::UI::Interaction::_fire_all(
-			(defined $previous ? [ $previous, Clay::UI::Events::OnBlur->new ]  : ()),
-			(defined $widget   ? [ $widget,   Clay::UI::Events::OnFocus->new ] : ()),
-		);
-		return;
-	}
-
-	method focus_next () {
-		my $next = $self->_compute_next_focus($_focused);
-		return unless defined $next;
-		$self->set_focused_widget($next);
-		return;
-	}
-
-	method focus_previous () {
-		my $prev = $self->_compute_previous_focus($_focused);
-		return unless defined $prev;
-		$self->set_focused_widget($prev);
-		return;
-	}
-
-	method _compute_next_focus ($from) {
-		return $self->_delegate_or_default($from, 'get_next_focus', '_compute_default_next_focus');
-	}
-
-	method _compute_previous_focus ($from) {
-		return $self->_delegate_or_default($from, 'get_previous_focus', '_compute_default_previous_focus');
-	}
-
-	# The nearest HasFocusOrder ancestor of the focused widget (including
-	# itself) takes over; with nothing focused, the root does if it
-	# composes HasFocusOrder.
-	method _delegate_or_default ($from, $custom_method, $default_method) {
-		my $node = $from // $root;
-		while (defined $node) {
-			if ($node->DOES('Clay::UI::Role::Interaction::HasFocusOrder')) {
-				return $self->_validate_focus_target($node, $node->$custom_method);
-			}
-			last unless defined $from;
-			$node = $node->parent;
-		}
-		return $self->$default_method($from);
-	}
-
-	# undef means "no change", as does a focusable widget of this UI that
-	# is disabled right now; anything else a HasFocusOrder returns is a bug
-	# in that class.
-	method _validate_focus_target ($order, $widget) {
-		return undef unless defined $widget;
-		my $class = ref $order;
-		die "Clay::UI: $class returned a non-widget from its focus order"
-			unless blessed $widget;
-		die "Clay::UI: $class returned " . ref($widget) . ", which is not Clay::UI::Role::Interaction::Focusable"
-			unless $widget->DOES('Clay::UI::Role::Interaction::Focusable');
-		die "Clay::UI: $class returned " . ref($widget) . ", which is not part of this Clay::UI"
-			unless $self->_belongs_here($widget);
-		return $widget->can_focus ? $widget : undef;
-	}
-
-	# Every Focusable in depth-first pre-order, focusable right now or not.
-	method _focusables_in_order () {
-		my @focusables;
-		my @stack = ($root);
-		while (@stack) {
-			my $node = shift @stack;
-			push @focusables, $node if $node->DOES('Clay::UI::Role::Interaction::Focusable');
-			unshift @stack, @{ $node->children } if $node->DOES('Clay::UI::Role::Core::Element');
-		}
-		return @focusables;
-	}
-
-	# The next focusable widget after $from in pre-order ($step 1) or
-	# before it ($step -1), wrapping around. $from itself does not have to
-	# be focusable (it may have been disabled while focused).
-	method _step_focus ($from, $step) {
-		my @all = $self->_focusables_in_order;
-		return undef unless @all;
-		my $start;
-		if (defined $from) {
-			($start) = grep { refaddr($all[$_]) == refaddr($from) } 0 .. $#all;
-		}
-		$start //= $step > 0 ? -1 : scalar @all;
-		for my $offset (1 .. scalar @all) {
-			my $candidate = $all[ ($start + $step * $offset) % @all ];
-			return $candidate if $candidate->can_focus;
-		}
-		return undef;
-	}
-
-	method _compute_default_next_focus ($from) {
-		return $self->_step_focus($from, 1);
-	}
-
-	method _compute_default_previous_focus ($from) {
-		return $self->_step_focus($from, -1);
-	}
-
 	# Injects the back-reference into a config hash the walker owns (a
 	# copy of what the widget returned) and records it in $frame.
 	sub _attach_back_reference ($frame, $config, $node) {
@@ -774,87 +611,15 @@ falsy or unknown).
 
 =head2 interaction
 
-Returns this UI's L<Clay::UI::Interaction>, which owns hover, armed and
-pressed state. C<< $ui->interaction->under_pointer >> lists the widgets
+Returns this UI's L<Clay::UI::Interaction>, which owns hover, armed,
+pressed and focus state. C<< $ui->interaction->under_pointer >> lists the widgets
 that were under the pointer at the last C<render>, in Clay's
 pointer-over order (see L</POINTER EVENTS>), Hoverable or not; widgets
 that have been garbage-collected or removed from the tree since are
 skipped. C<< $ui->interaction->update(...) >> takes synthetic pointer
-input between renders.
-
-=head2 get_focused_widget
-
-Returns the widget currently holding focus, or C<undef> if no widget
-is focused (or the previously focused widget has been
-garbage-collected). The reference is held weakly.
-
-=head2 set_focused_widget
-
-	$ui->set_focused_widget($widget);
-
-Sets focus to C<$widget>. Pass C<undef> to clear focus (blur).
-
-Validates loudly, before anything changes:
-
-=over 4
-
-=item *
-
-Dies if C<$widget> is not blessed.
-
-=item *
-
-Dies if C<$widget> does not consume
-L<Clay::UI::Role::Interaction::Focusable>.
-
-=item *
-
-Dies if C<< $widget->can_focus >> returns false.
-
-=item *
-
-Dies if C<$widget> belongs to a different Clay::UI tree.
-
-=back
-
-Then switches focus - the C<focused> state moves from the previous
-widget to the new one - and fires L<Clay::UI::Events::OnBlur> on the
-previously focused widget (if any) and L<Clay::UI::Events::OnFocus> on
-the new one (if any). Both events fire even if the first listener dies;
-the first error is rethrown afterwards, with focus already changed.
-Setting focus to the already-focused widget is a no-op (no events
-fire).
-
-Focus changes only through this method, L</focus_next>,
-L</focus_previous>, and the removal of a subtree holding the focused
-widget (which blurs it). C<render> never changes focus.
-
-=head2 focus_next
-
-Moves focus to the next focusable widget.
-
-=head2 focus_previous
-
-Moves focus to the previous focusable widget.
-
-Both follow the same rules.
-
-The default order is the depth-first pre-order of the tree, skipping
-widgets whose C<can_focus> is false, wrapping from end to beginning
-(and vice versa). With no focused widget, C<focus_next> focuses the
-first widget of the chain and C<focus_previous> the last. The focused
-widget itself does not have to be focusable any more: after
-C<< $focused->can_focus(0) >>, C<focus_next> moves on from its
-position.
-
-If the focused widget or one of its ancestors composes
-L<Clay::UI::Role::Interaction::HasFocusOrder>, the nearest such widget
-decides instead: its C<get_next_focus> / C<get_previous_focus> is
-called. With no focused widget, the root decides if it composes
-HasFocusOrder. The result must be C<undef> (focus does not change), a
-Focusable widget of this UI (focused, or no change if its C<can_focus>
-is false right now), or else the call dies naming the HasFocusOrder
-class and what was wrong with the result.
+input between renders, and C<< $ui->interaction->set_focused_widget >>,
+C<focus_next> and C<focus_previous> move focus (see
+L<Clay::UI::Interaction/FOCUS>).
 
 =head1 POINTER EVENTS
 
@@ -947,7 +712,7 @@ first error and the frame's render commands are discarded; the widget
 states are already up to date and the next C<render> works normally.
 
 Focus events (L<Clay::UI::Events::OnFocus>, L<Clay::UI::Events::OnBlur>)
-do not come from C<render>; see L</set_focused_widget>.
+do not come from C<render>; see L<Clay::UI::Interaction/FOCUS>.
 
 =head1 NOTES
 

@@ -31,8 +31,8 @@ Clay::UI::Events::OnFocus - edge-triggered focus-gained event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI> on the widget that just became the focused
-element, immediately after C<< $ui->set_focused_widget >> (directly or
+Fired by L<Clay::UI::Interaction> on the widget that just became the
+focused element, immediately after C<set_focused_widget> (directly or
 via C<focus_next> / C<focus_previous>) installs it. Pairs with
 L<Clay::UI::Events::OnBlur>. Carries no payload beyond the inherited
 C<target> / C<current_target>.

@@ -100,7 +100,7 @@ currently doing?".
 C<hovered>, C<pressed> and C<focused> are derived states: they are
 never stored, but answered live by the widget's C<is_hovered>,
 C<is_pressed> and C<is_focused> readers, which ask the UI's interaction
-tracker (L<Clay::UI::Interaction>) and focus. A widget without the
+tracker (L<Clay::UI::Interaction>). A widget without the
 matching interaction role never has the state. Derived states appear
 in C<has_state> and C<states>, but cannot be written: C<add_state>,
 C<remove_state> and C<toggle_state> die for them, and C<clear_states>

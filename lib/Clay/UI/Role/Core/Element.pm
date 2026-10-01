@@ -132,9 +132,10 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return;
 	}
 
-	# Runs after the child list has changed: tells the controller (focus
-	# inside a leaving subtree is released, with OnBlur bubbling through the
-	# still-intact parent slots), then clears each child's parent slot. The
+	# Runs after the child list has changed: tells the interaction tracker
+	# (hover and focus inside a leaving subtree are released, with
+	# OnHoverStopped / OnBlur bubbling through the still-intact parent
+	# slots), then clears each child's parent slot. The
 	# children are detached even if an OnBlur listener dies; its error is
 	# rethrown once they are.
 	method _release_children (@kids) {
@@ -144,7 +145,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		if (defined $ui) {
 			for my $kid (@kids) {
 				local $@;
-				eval { $ui->_subtree_detached($kid); 1 }
+				eval { $ui->interaction->_subtree_detached($kid); 1 }
 					or $listener_error //= $@ || 'unknown listener error';
 			}
 		}

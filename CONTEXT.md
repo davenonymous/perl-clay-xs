@@ -47,9 +47,10 @@ _Avoid_: REQUIRE_CONTEXT, guard flags
 ### Interaction
 
 **Interaction tracker**:
-The per-UI object (`$ui->interaction`) that owns hover, armed and pressed
-state. It turns the widgets under the pointer, the pointer's down flag and
-scroll changes into state changes and fires the matching events. `render`
+The per-UI object (`$ui->interaction`) that owns hover, armed, pressed and
+focus state. It turns the widgets under the pointer, the pointer's down flag
+and scroll changes into state changes, moves focus on request (walking the
+live tree, not the frame registry) and fires the matching events. `render`
 feeds it real pointer input; callers may feed it synthetic input.
 _Avoid_: pointer state machine, %_tracked
 
@@ -60,7 +61,7 @@ _Avoid_: pending press
 
 **Derived state**:
 The state names `hovered`, `pressed` and `focused`. HasStates answers them
-live from the interaction tracker and the UI's focus, and they are read-only.
+live from the interaction tracker, and they are read-only.
 All other state names are user states.
 _Avoid_: auto-synced state, mirrored state
 

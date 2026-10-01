@@ -232,8 +232,9 @@ The events:
   the press did not start on, fires nothing.
 - `OnScroll` - a HasScroll widget's scroll position changed; carries
   `delta_x` / `delta_y`.
-- `OnFocus` / `OnBlur` - focus moved, through `set_focused_widget`,
-  `focus_next` / `focus_previous`, or the removal of the focused widget.
+- `OnFocus` / `OnBlur` - focus moved, through the tracker's
+  `set_focused_widget`, `focus_next` / `focus_previous`, or the removal
+  of the focused widget.
   `render` never changes focus.
 
 `OnPress` and `OnRelease` bubble to the ancestors while listeners return
@@ -241,12 +242,12 @@ The events:
 (`Clay::UI::Enum::Bubble`: `ALWAYS`, `IF_CONTINUE`, `NEVER`). If a
 listener dies, the frame's remaining events still fire, the layout pass
 still runs, and then `render` dies with the first error (the frame's
-render commands are discarded). Hover and press state lives in the UI's
-interaction tracker (`$ui->interaction`, `Clay::UI::Interaction`), which
-`render` feeds every frame and which also takes synthetic input. The
-`is_hovered` / `is_pressed` / `is_focused` readers and the derived,
+render commands are discarded). Hover, press and focus state lives in
+the UI's interaction tracker (`$ui->interaction`, `Clay::UI::Interaction`),
+which `render` feeds every frame and which also takes synthetic input.
+The `is_hovered` / `is_pressed` / `is_focused` readers and the derived,
 read-only `hovered`, `pressed` and `focused` states
-(`Clay::UI::Role::Style::HasStates`) ask it and the UI's focus. A hovered
+(`Clay::UI::Role::Style::HasStates`) ask it. A hovered
 widget removed from the tree gets `OnHoverStopped` at once. `Clay::UI`'s
 POD (section POINTER EVENTS) has the details.
 
@@ -337,8 +338,9 @@ the Grid widget. See `examples/05-ui-grid.pl` for an SVG demo and
 
 ### Focus
 
-`$ui->set_focused_widget($widget)`, `$ui->focus_next` and
-`$ui->focus_previous` move focus between `Focusable` widgets in
+`$ui->interaction->set_focused_widget($widget)`,
+`$ui->interaction->focus_next` and `$ui->interaction->focus_previous`
+move focus between `Focusable` widgets in
 depth-first order; a container composing `HasFocusOrder` can take over
 the order for its subtree (the root also decides the first focus).
 Widgets whose `can_focus` is false are skipped.

@@ -236,27 +236,27 @@ subtest 'a dying OnBlur listener does not stop the detachment' => sub {
 	$panel->add_child($input);
 	$root->add_child($panel);
 	my $ui = Clay::UI->new(root => $root, width => 100, height => 100);
-	$ui->set_focused_widget($input);
+	$ui->interaction->set_focused_widget($input);
 	$input->on('OnBlur', sub ($e) { die "blur listener bug\n" });
 
 	like( dies { $root->remove_child('panel') }, qr/^blur listener bug$/, 'remove_child dies with the listener error' );
 	is( scalar @{ $root->children }, 0, 'the panel was removed' );
 	is( $panel->parent, undef, 'and detached' );
 	is( $input->ui, undef, 'its subtree has no controller' );
-	is( $ui->get_focused_widget, undef, 'focus was released' );
-	like( dies { $ui->set_focused_widget($input) }, qr/does not belong to this Clay::UI/,
+	is( $ui->interaction->get_focused_widget, undef, 'focus was released' );
+	like( dies { $ui->interaction->set_focused_widget($input) }, qr/does not belong to this Clay::UI/,
 		'the removed widget cannot be focused again' );
 
 	my $grid = Clay::UI::Test::Grid->new(id => 'grid');
 	my $cell = FocusBox->new(id => 'cell');
 	$grid->append_row([ $cell ]);
 	my $grid_ui = Clay::UI->new(root => $grid, width => 100, height => 100);
-	$grid_ui->set_focused_widget($cell);
+	$grid_ui->interaction->set_focused_widget($cell);
 	$cell->on('OnBlur', sub ($e) { die "blur listener bug\n" });
 	like( dies { $grid->remove_row(0) }, qr/^blur listener bug$/, 'remove_row dies with the listener error' );
 	is( $grid->row_count, 0, 'the row was removed' );
 	is( $cell->ui, undef, 'the cell is detached' );
-	is( $grid_ui->get_focused_widget, undef, 'focus was released' );
+	is( $grid_ui->interaction->get_focused_widget, undef, 'focus was released' );
 };
 
 subtest 'Clay::UI stamps itself on the root; descendants reach it via ui()' => sub {

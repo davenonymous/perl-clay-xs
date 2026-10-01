@@ -31,8 +31,10 @@ Clay::UI::Events::OnBlur - edge-triggered focus-lost event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI> on the widget that just lost focus, immediately
-before the new focus target gets its L<Clay::UI::Events::OnFocus>.
+Fired by L<Clay::UI::Interaction> on the widget that just lost focus,
+immediately before the new focus target gets its
+L<Clay::UI::Events::OnFocus>, or when a removed subtree took the focused
+widget with it.
 Pairs with L<Clay::UI::Events::OnFocus>. Carries no payload beyond the
 inherited C<target> / C<current_target>.
 

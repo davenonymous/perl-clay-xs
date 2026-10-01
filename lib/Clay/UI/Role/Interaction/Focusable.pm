@@ -6,7 +6,6 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
-use Scalar::Util qw(blessed refaddr);
 
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Emitter;
@@ -21,10 +20,7 @@ role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasPar
 
 	method is_focused () {
 		my $ui = $self->ui;
-		return 0 unless defined $ui;
-		my $focused = $ui->get_focused_widget;
-		return 0 unless defined $focused;
-		return refaddr($focused) == refaddr($self) ? 1 : 0;
+		return defined $ui ? $ui->interaction->is_focused($self) : 0;
 	}
 }
 
@@ -55,14 +51,14 @@ Clay::UI::Role::Interaction::Focusable - role marking a widget as focusable
 	$input->on('OnBlur',  sub ($e) { warn "lost focus" });
 
 	# ... after attaching to a Clay::UI ...
-	$ui->set_focused_widget($input);
+	$ui->interaction->set_focused_widget($input);
 	$input->is_focused;   # 1
 
 =head1 DESCRIPTION
 
-Composed by widgets that participate in the focus system. The
-companion controller (L<Clay::UI>) tracks which Focusable is the
-currently focused widget; Focusable's job is to advertise eligibility
+Composed by widgets that participate in the focus system. The UI's
+interaction tracker (L<Clay::UI::Interaction>) tracks which Focusable
+is the currently focused widget; Focusable's job is to advertise eligibility
 and let the widget query its own focus state.
 
 Composes L<Clay::UI::Role::Layout::HasParent> (for the C<parent> chain
@@ -86,8 +82,8 @@ accessor from an C<ADJUST> block or any state-mutating method:
 	field $disabled :param :reader = 0;
 	ADJUST { $self->can_focus(0) if $disabled }
 
-C<< $ui->set_focused_widget >>, C<focus_next>, and C<focus_previous>
-all consult C<can_focus>; a widget that returns false is skipped by
+C<< $ui->interaction->set_focused_widget >>, C<focus_next>, and
+C<focus_previous> all consult C<can_focus>; a widget that returns false is skipped by
 the default focus chain, rejected (loud die) by direct
 C<set_focused_widget> calls, and means "no change" when a
 L<Clay::UI::Role::Interaction::HasFocusOrder> returns it. Turning
@@ -97,7 +93,7 @@ C<focus_next> and C<focus_previous> move on from its position.
 =head2 is_focused
 
 Returns C<1> when this widget is the one currently held in
-C<< $self->ui->get_focused_widget >>, C<0> otherwise. Returns C<0>
+C<< $self->ui->interaction->get_focused_widget >>, C<0> otherwise. Returns C<0>
 when the widget has not yet been attached to a Clay::UI.
 
 =cut

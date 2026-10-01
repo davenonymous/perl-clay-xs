@@ -103,14 +103,16 @@ through Clay::UI and replaces `userData` with widget class and id.
   order, `widget_for` back-references and scroll containers with their
   element ids) and hands the widgets, the down
   flag and scroll changes to `Clay::UI::Interaction` (`$ui->interaction`),
-  which owns hover / armed / pressed state and fires the events. Widgets
-  hold no interaction state; `is_hovered`, `is_pressed` and the derived
-  `hovered` / `pressed` / `focused` states ask the tracker and the UI.
+  which owns hover / armed / pressed / focus state and fires the events.
+  Widgets hold no interaction state; `is_hovered`, `is_pressed`,
+  `is_focused` and the derived `hovered` / `pressed` / `focused` states
+  ask the tracker.
   Clay::UI registers no `Clay_OnHover` callbacks. Every queued event
   fires, the layout pass always runs, then the first listener error is
-  rethrown. Focus events fire only from `set_focused_widget`; detaching a
-  subtree drops its interaction state (`OnHoverStopped`) and focus
-  (`OnBlur`) at once.
+  rethrown. Focus moves only through the tracker's `set_focused_widget` /
+  `focus_next` / `focus_previous` (live tree order, not frame order);
+  detaching a subtree drops its interaction state (`OnHoverStopped`) and
+  focus (`OnBlur`) at once.
 - The walker injects `user_data => refaddr($widget)` so
   `$ui->widget_for($cmd->{userData})` works; a widget setting `user_data`
   itself is an error.

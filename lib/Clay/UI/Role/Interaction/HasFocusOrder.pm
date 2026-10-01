@@ -17,14 +17,12 @@ role Clay::UI::Role::Interaction::HasFocusOrder :does(Clay::UI::Role::Layout::Ha
 
 	method default_next_focus () {
 		my $ui = $self->ui;
-		return undef unless defined $ui;
-		return $ui->_compute_default_next_focus($ui->get_focused_widget);
+		return defined $ui ? $ui->interaction->default_next_focus : undef;
 	}
 
 	method default_previous_focus () {
 		my $ui = $self->ui;
-		return undef unless defined $ui;
-		return $ui->_compute_default_previous_focus($ui->get_focused_widget);
+		return defined $ui ? $ui->interaction->default_previous_focus : undef;
 	}
 }
 
@@ -58,7 +56,7 @@ Clay::UI::Role::Interaction::HasFocusOrder - container-level override of focus t
 		method get_next_focus {
 			# The first focus_next (nothing focused yet; this widget is the
 			# root of the Clay::UI) goes to the toolbar ...
-			return $toolbar unless defined $self->ui->get_focused_widget;
+			return $toolbar unless defined $self->ui->interaction->get_focused_widget;
 			# ... after that the default order applies.
 			return $self->default_next_focus;
 		}
@@ -70,15 +68,15 @@ Clay::UI::Role::Interaction::HasFocusOrder - container-level override of focus t
 	my $root    = My::ToolbarFirst->new(id => 'root', toolbar => $toolbar);
 	$root->add_child(My::Input->new(id => 'name'), My::Input->new(id => 'email'), $toolbar);
 	my $ui = Clay::UI->new(root => $root, width => 400, height => 300);
-	$ui->focus_next;    # toolbar
-	$ui->focus_next;    # name, then email, toolbar, name, ...
+	$ui->interaction->focus_next;    # toolbar
+	$ui->interaction->focus_next;    # name, then email, toolbar, name, ...
 
 =head1 DESCRIPTION
 
 Composed by container widgets that want to override the default
 depth-first focus traversal for a subtree. When
-L<Clay::UI/focus_next> or L<Clay::UI/focus_previous> is called, the
-controller walks up from the currently focused widget; the B<nearest>
+C<focus_next> or C<focus_previous> of L<Clay::UI::Interaction> is
+called, the tracker walks up from the currently focused widget; the B<nearest>
 ancestor (including the focused widget itself) that composes
 HasFocusOrder takes over. With nothing focused, the root of the
 L<Clay::UI> takes over if it composes HasFocusOrder.
@@ -113,7 +111,7 @@ a container that orchestrates focus need not itself be a focus target.
 =head2 get_next_focus
 
 Returns the widget to focus next, or C<undef>. Use
-C<< $self->ui->get_focused_widget >> to know where focus currently is
+C<< $self->ui->interaction->get_focused_widget >> to know where focus currently is
 (C<undef> when nothing is focused).
 
 =head2 get_previous_focus
@@ -124,8 +122,9 @@ Mirror of C<get_next_focus> for reverse traversal.
 
 =head2 default_next_focus
 
-Returns what the default Clay::UI focus order would pick as the next
-widget, given the currently focused widget, without consulting any
+Returns what the default focus order would pick as the next widget,
+given the currently focused widget (see
+L<Clay::UI::Interaction/default_next_focus, default_previous_focus>), without consulting any
 HasFocusOrder. Useful for partial overrides: handle the special case
 yourself, then C<< return $self->default_next_focus >> for everything
 else. Returns C<undef> while the widget is not part of a Clay::UI.

@@ -131,11 +131,11 @@ subtest 'focus transitions sync into states() atomically with OnFocus/OnBlur' =>
 	$w->on('OnFocus', sub ($) { $focused_at_event = $w->has_state('focused') });
 	$w->on('OnBlur',  sub ($) { $blurred_at_event = $w->has_state('focused') });
 
-	$ui->set_focused_widget($w);
+	$ui->interaction->set_focused_widget($w);
 	ok($w->has_state('focused'), 'focused added by set_focused_widget');
 	ok($focused_at_event,        'has_state(focused) is true inside OnFocus handler');
 
-	$ui->set_focused_widget(undef);
+	$ui->interaction->set_focused_widget(undef);
 	ok(!$w->has_state('focused'),  'focused removed by blur');
 	ok(defined $blurred_at_event,  'OnBlur handler ran');
 	ok(!$blurred_at_event,         'has_state(focused) is false inside OnBlur handler');
@@ -168,7 +168,7 @@ subtest 'all three states coexist on a fully interactive widget' => sub {
 	$ui->render;
 	$ui->render(pointer_state => { x => -100, y => -100, down => 0 });
 
-	$ui->set_focused_widget($w);
+	$ui->interaction->set_focused_widget($w);
 	$ui->render(pointer_state => { x => 50, y => 20, down => 1 });
 	$ui->render(pointer_state => { x => 50, y => 20, down => 1 });
 
@@ -183,12 +183,12 @@ subtest 'derived states sit beside user states and cannot be written' => sub {
 	my $w = TestStateWidget->new(id => 'mixed');
 	my $ui = make_ui($w);
 	$w->add_state('selected');
-	$ui->set_focused_widget($w);
+	$ui->interaction->set_focused_widget($w);
 	is( [ sort $w->states ], [qw(focused selected)], 'states() lists user and derived states' );
 	$w->clear_states;
 	is( [ $w->states ], ['focused'], 'clear_states clears only user states' );
 	like( dies { $w->remove_state('focused') }, qr/state 'focused' is derived/, 'derived states are read-only' );
-	$ui->set_focused_widget(undef);
+	$ui->interaction->set_focused_widget(undef);
 	ok( !$w->has_state('focused'), 'and follow the UI' );
 };
 
