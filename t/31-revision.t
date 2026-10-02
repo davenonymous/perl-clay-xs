@@ -9,6 +9,8 @@ use lib 't/lib';
 
 use Object::Pad 0.800;
 use Clay::UI;
+use Clay::UI::Box;
+use Clay::XS qw(Clay_GetElementId set_scroll_position sizing_fixed);
 use Clay::UI::Revision qw(bump_revision current_revision);
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
@@ -25,6 +27,8 @@ use Clay::UI::Role::Interaction::Focusable;
 # -----------------------------------------------------------------------------
 
 class ScrollPanel :strict(params) :does(Clay::UI::Role::Layout::HasScroll) {}
+
+class ScrollBox :strict(params) :does(Clay::UI::Box) :does(Clay::UI::Role::Layout::HasScroll) {}
 
 class HoverBox :strict(params)
 	:does(Clay::UI::Role::Core::Container)
@@ -117,6 +121,16 @@ subtest 'focus changes bump the revision' => sub {
 	ok( bumps(sub { $ui->interaction->set_focused_widget($input) }), 'focusing' );
 	ok( !bumps(sub { $ui->interaction->set_focused_widget($input) }), 'focusing the focused widget again does not' );
 	ok( bumps(sub { $ui->interaction->set_focused_widget(undef) }), 'blurring' );
+};
+
+subtest 'setting a scroll position bumps the revision' => sub {
+	my $root = ScrollBox->new(id => 'log', layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(2) } });
+	$root->add_child(Clay::UI::Test::Box->new(layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(9) } }));
+	my $ui = Clay::UI->new(width => 20, height => 20, root => $root);
+	$ui->render;
+
+	ok( bumps(sub { set_scroll_position(Clay_GetElementId('log'), { x => 0, y => -3 }) }), 'set_scroll_position' );
+	is( bump_revision(), current_revision(), 'bump_revision still returns the current value' );
 };
 
 done_testing;

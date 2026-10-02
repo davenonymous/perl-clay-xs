@@ -7,19 +7,23 @@ no warnings 'experimental::signatures';
 
 use Exporter 'import';
 
+use Clay::XS ();
+
 our $VERSION   = '0.01';
 our @EXPORT_OK = qw(bump_revision current_revision);
 
 # One counter for the whole process: a renderer only needs to know whether
-# anything changed, not what or in which Clay::UI.
+# anything changed, not what or in which Clay::UI. Scroll positions are
+# written in Clay::XS, which counts them itself.
 my $revision = 0;
 
 sub bump_revision () {
-	return ++$revision;
+	$revision++;
+	return current_revision();
 }
 
 sub current_revision () {
-	return $revision;
+	return $revision + Clay::XS::_scroll_position_writes();
 }
 
 1;
@@ -54,7 +58,9 @@ Every Clay::UI setter that changes a frame bumps it: widget attributes
 widget, user states (C<add_state> and friends), the viewport size and
 measure-text callback of a L<Clay::UI>, and the hovered, armed, pressed
 and focused widgets of its L<Clay::UI::Interaction>, which drive the
-derived C<hovered> / C<pressed> / C<focused> states. Reading an
+derived C<hovered> / C<pressed> / C<focused> states. So does
+L<Clay::XS/set_scroll_position>, whose new position shows only in the
+next frame. Reading an
 attribute never bumps it. Widget classes that keep state of their own
 call C<< $widget->mark_changed >> (see
 L<Clay::UI::Role::Core::Element/mark_changed>) from their setters.

@@ -327,6 +327,17 @@ static void croak_unbalanced(pTHX_ clay_perl_context *ctx, int32_t still_open)
     croak_sv(message);
 }
 
+/* ===========================================================================
+ * Scroll position writes.
+ *
+ * A position written by set_scroll_position shows only in the next frame,
+ * so Clay::UI::Revision adds this count to its revision: a renderer that
+ * skips unchanged frames still draws it. Process-wide, like Clay's current
+ * context.
+ * ======================================================================== */
+
+static UV scroll_position_writes = 0;
+
 MODULE = Clay::XS    PACKAGE = Clay::XS    PREFIX = xs_
 
 PROTOTYPES: DISABLE
@@ -994,6 +1005,7 @@ xs_set_scroll_position(id_sv, position_sv)
                   "(declare it with clip enabled and complete a frame first)", (unsigned) id.id);
         }
         *data.scrollPosition = position;
+        scroll_position_writes++;
         wrapper_leave(aTHX_ &GUARD_set_scroll_position, ctx);
 
 # Check mode: needs no context and never calls into Clay.
@@ -1365,6 +1377,18 @@ xs__wrapper_guards()
             (void) hv_store(table, w->name, (I32) strlen(w->name), newRV_noinc((SV *) guard), 0);
         }
         RETVAL = newRV_noinc((SV *) table);
+    OUTPUT:
+        RETVAL
+
+# =============================================================================
+# Internal: how often set_scroll_position wrote a position, for
+# Clay::UI::Revision.
+# =============================================================================
+
+UV
+xs__scroll_position_writes()
+    CODE:
+        RETVAL = scroll_position_writes;
     OUTPUT:
         RETVAL
 

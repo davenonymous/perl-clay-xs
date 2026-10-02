@@ -273,7 +273,9 @@ how to spell each one in Perl:
 In C, programmatic scrolling writes through the C<scrollPosition> pointer
 returned by C<Clay_GetScrollContainerData>. C<set_scroll_position> does
 that write; it croaks unless the id names a scroll container Clay knows
-(one declared with C<clip> enabled in a completed frame).
+(one declared with C<clip> enabled in a completed frame). Every write
+counts as a change for L<Clay::UI::Revision>, so a renderer that skips
+unchanged frames still draws the next one.
 
 The C<sizing_*> helpers accept C<max =E<gt> 0> (Clay's "no maximum") and
 C<+Inf> as an unbounded maximum.
