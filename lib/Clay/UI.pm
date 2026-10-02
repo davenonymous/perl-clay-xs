@@ -40,7 +40,7 @@ use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
 use Clay::UI::Revision qw(bump_revision);
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 my %RENDER_ARGS  = map { $_ => 1 } qw(pointer_state delta_time scroll_delta enable_drag_scrolling);
 my %POINTER_KEYS = map { $_ => 1 } qw(x y down);
