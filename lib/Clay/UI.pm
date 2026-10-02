@@ -12,7 +12,10 @@ use Scalar::Util qw(blessed refaddr looks_like_number);
 use Clay::XS qw(
 	Clay_Initialize
 	Clay_MinMemorySize
+	Clay_GetCurrentContext
 	Clay_SetCurrentContext
+	Clay_SetMaxElementCount
+	Clay_SetMaxMeasureTextCacheWordCount
 	Clay_SetLayoutDimensions
 	Clay_SetMeasureTextFunction
 	Clay_ResetMeasureTextCache
@@ -34,6 +37,7 @@ use Clay::XS qw(
 use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.02';
 
@@ -41,16 +45,23 @@ my %RENDER_ARGS  = map { $_ => 1 } qw(pointer_state delta_time scroll_delta enab
 my %POINTER_KEYS = map { $_ => 1 } qw(x y down);
 my %VECTOR_KEYS  = map { $_ => 1 } qw(x y);
 
+# Clay's default element count, and the fewest measure-cache words Clay::XS
+# accepts.
+my $DEFAULT_MAX_ELEMENT_COUNT = 8192;
+my $MIN_MEASURE_CACHE_WORDS   = 32;
+
 class Clay::UI :strict(params) {
 	field $root   :param :reader;
 	field $width  :param;
 	field $height :param;
 
-	field $memory_size    :param = undef;
-	field $error_handler  :param = undef;
-	field $measure_text   :param = undef;
+	field $memory_size       :param = undef;
+	field $max_element_count :param :reader = $DEFAULT_MAX_ELEMENT_COUNT;
+	field $error_handler     :param = undef;
+	field $measure_text      :param = undef;
 
 	field $_ctx;
+	field $_uses_default_error_handler;
 	field $_rendering = 0;
 
 	# What the last completed frame laid out (see Clay::UI::_FrameRegistry).
@@ -68,18 +79,17 @@ class Clay::UI :strict(params) {
 			die "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode";
 		}
 		die "Clay::UI: 'root' must not have a parent; the root is the top of its widget tree"
-			if $root->_was_parented;
+			if defined $root->parent;
 		unless (looks_like_number($width) && $width > 0
 			&& looks_like_number($height) && $height > 0) {
 			die "Clay::UI: 'width' and 'height' must be positive numbers";
 		}
-
-		my $min_memory = Clay_MinMemorySize();
-		$memory_size //= $min_memory;
-		unless (looks_like_number($memory_size) && $memory_size == int($memory_size)
-			&& $memory_size >= $min_memory) {
-			die "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)";
+		unless (looks_like_number($max_element_count) && $max_element_count == int($max_element_count)
+			&& $max_element_count >= 1) {
+			die "Clay::UI: 'max_element_count' must be a positive integer";
 		}
+
+		$_uses_default_error_handler = !defined $error_handler;
 		$error_handler //= sub ($err, $userdata) {
 			die "Clay error: $err->{errorText}\n";
 		};
@@ -95,12 +105,13 @@ class Clay::UI :strict(params) {
 			die "Clay::UI: 'measure_text' must be a coderef";
 		}
 
-		$_ctx = Clay_Initialize(
-			$memory_size,
-			{ width => $width, height => $height },
-			$error_handler,
-		);
-		Clay_SetCurrentContext($_ctx);
+		my $previous = Clay_GetCurrentContext();
+		my $ok = eval { $_ctx = $self->_initialize_context; 1 };
+		unless ($ok) {
+			my $error = $@;
+			Clay_SetCurrentContext($previous) if defined $previous;
+			die $error;
+		}
 		Clay_SetMeasureTextFunction($measure_text);
 		# Clay's pointer state starts zeroed, which reads as "pressed this
 		# frame"; settle it so the first real pointer frame is no click.
@@ -114,6 +125,36 @@ class Clay::UI :strict(params) {
 		$root->_set_ui_controller($self);
 	}
 
+	# Creates this UI's context, sized for max_element_count, and leaves it
+	# current. Clay_MinMemorySize and Clay_Initialize use the counts of the
+	# current context, so a throwaway seed context carries this UI's counts
+	# to them: setting the counts on another UI's context would disable it
+	# until it is initialised again, and setting them with no current
+	# context would change Clay's process-wide defaults. The measure cache
+	# gets twice as many words as elements, as Clay's defaults do.
+	method _initialize_context () {
+		my $seed = Clay_Initialize(Clay_MinMemorySize(), { width => $width, height => $height });
+		Clay_SetMaxElementCount($max_element_count);
+		my $word_count = 2 * $max_element_count;
+		Clay_SetMaxMeasureTextCacheWordCount($word_count > $MIN_MEASURE_CACHE_WORDS ? $word_count : $MIN_MEASURE_CACHE_WORDS);
+
+		my $min_memory = Clay_MinMemorySize();
+		$memory_size //= $min_memory;
+		unless (looks_like_number($memory_size) && $memory_size == int($memory_size)
+			&& $memory_size >= $min_memory) {
+			die "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)"
+				. " for max_element_count $max_element_count";
+		}
+		# The new context copies the seed's counts and becomes current.
+		return Clay_Initialize($memory_size, { width => $width, height => $height }, $error_handler);
+	}
+
+	# Clay keeps one element for its own root and never fills its last
+	# slot, so this many widgets fit into one frame.
+	method _widget_capacity () {
+		return $max_element_count > 2 ? $max_element_count - 2 : 0;
+	}
+
 	# Read with no args; write with one arg, propagating to Clay.
 	method width (@v) {
 		if (@v) {
@@ -123,6 +164,7 @@ class Clay::UI :strict(params) {
 			$width = $new;
 			Clay_SetCurrentContext($_ctx);
 			Clay_SetLayoutDimensions({ width => $width, height => $height });
+			bump_revision();
 		}
 		return $width;
 	}
@@ -135,6 +177,7 @@ class Clay::UI :strict(params) {
 			$height = $new;
 			Clay_SetCurrentContext($_ctx);
 			Clay_SetLayoutDimensions({ width => $width, height => $height });
+			bump_revision();
 		}
 		return $height;
 	}
@@ -148,6 +191,7 @@ class Clay::UI :strict(params) {
 			Clay_SetCurrentContext($_ctx);
 			Clay_SetMeasureTextFunction($measure_text);
 			Clay_ResetMeasureTextCache();
+			bump_revision();
 		}
 		return $measure_text;
 	}
@@ -283,6 +327,8 @@ class Clay::UI :strict(params) {
 			eval { $commands = Clay_EndLayout($delta_time); 1 }
 				or $end_error = $@ || 'unknown Clay_EndLayout error';
 		}
+		$end_error = $self->_capacity_error($next_frame->element_count)
+			if defined $end_error && $_uses_default_error_handler && $next_frame->element_count > $self->_widget_capacity;
 
 		if (defined $walk_error) {
 			$walk_error .= "(Clay_EndLayout also failed: $end_error)"
@@ -293,6 +339,15 @@ class Clay::UI :strict(params) {
 
 		$_frame = $next_frame;
 		return $commands;
+	}
+
+	# Clay drops every element past its capacity without a word and then
+	# reports the open elements it could not close; this says what
+	# happened instead.
+	method _capacity_error ($widget_count) {
+		return "Clay::UI: the widget tree has more elements than max_element_count ($max_element_count) allows:"
+			. " $widget_count widgets, at most " . $self->_widget_capacity . " fit;"
+			. " pass a larger max_element_count to Clay::UI->new\n";
 	}
 
 	# ---------------------------------------------------------------------
@@ -439,6 +494,15 @@ have to invoke C<Clay_*> functions directly. Each L</render> turns the
 pointer and scroll input into widget events (see L</POINTER EVENTS>)
 and then lays out the widget tree.
 
+Every setter that changes what a frame lays out or draws - widget
+attributes, children, user states, this object's C<width>, C<height> and
+C<measure_text>, and the hovered, armed, pressed and focused widgets of
+its L</interaction> - bumps a process-wide revision counter
+(L<Clay::UI::Revision>); reading never does. A renderer compares the
+counter with the value it saw at its last frame and skips the frame
+while the two are equal. Widgets that keep state of their own call
+C<mark_changed> (see L<Clay::UI::Role::Core::Element/mark_changed>).
+
 The low-level API is untouched and remains independently usable.
 
 =head1 CONSTRUCTOR
@@ -455,7 +519,8 @@ Required:
 
 The root widget. Must be a blessed object consuming
 L<Clay::UI::Role::Core::Element> or L<Clay::UI::Role::Core::TextNode>,
-and must not have a parent (it is the top of its tree). Immutable after
+and must not currently have a parent (it is the top of its tree); a
+widget that was removed from its parent may become a root. Immutable after
 construction (the I<tree> below the root is still mutable through the
 widgets' own child-mutation methods).
 
@@ -474,7 +539,24 @@ Optional:
 =item C<memory_size>
 
 Bytes of arena memory to allocate: an integer of at least
-C<Clay_MinMemorySize()>, which is also the default.
+C<Clay_MinMemorySize()> for this UI's C<max_element_count>, which is
+also the default.
+
+=item C<max_element_count>
+
+How many Clay layout elements this UI's context holds: a positive
+integer, default 8192 (Clay's default). Every element widget and every
+text widget of the tree is one element; Clay keeps two of the slots
+for itself, so a frame fits C<max_element_count - 2> widgets (none
+for a count below 3). Clay's
+measure-text word cache is sized to twice this count (at least 32), as
+Clay's defaults are. Each Clay::UI has its own count, whatever context
+is current when it is constructed. A larger count needs more memory
+(see C<memory_size>).
+
+A tree with more widgets than fit makes C<render> die with
+C<Clay::UI: the widget tree has more elements than max_element_count
+(8192) allows: ...> when the default C<error_handler> is in use.
 
 =item C<error_handler>
 
@@ -486,7 +568,12 @@ L<Clay::XS/What a callback may do>). An exception
 thrown by the handler makes C<render> die with it (see
 L<Clay::XS/ERRORS FROM CALLBACKS>), so with the default handler any Clay
 error - for example two widgets with the same C<id> - makes C<render>
-die with C<Clay error: ...>.
+die with C<Clay error: ...>. The one exception is a tree with more
+widgets than C<max_element_count> allows: Clay drops the excess
+elements silently and then reports open elements it could not close,
+so the default handler's error is replaced by one that names
+C<max_element_count>. A handler of your own receives Clay's error data
+unchanged.
 
 =item C<measure_text>
 
@@ -504,6 +591,11 @@ outer C<render> die.
 =head2 root
 
 Read-only accessor for the root widget passed at construction.
+
+=head2 max_element_count
+
+Read-only accessor for the C<max_element_count> passed at construction
+(8192 by default).
 
 =head2 width, width($new)
 
@@ -560,8 +652,10 @@ Lets pressing and dragging scroll a container, as on touch screens.
 Unknown arguments die. C<render> dies if an event listener dies (after
 all of the frame's events have fired and the layout pass has run, see
 L</POINTER EVENTS>), if any widget
-produces a config Clay::XS rejects, if Clay reports an error through the
-error handler, or if a callback dies; the frame is discarded and Clay
+produces a config Clay::XS rejects, if the tree has more widgets than
+C<max_element_count> allows (with the default error handler), if Clay
+reports an error through the error handler, or if a callback dies; the
+frame is discarded and Clay
 stays usable, so the next C<render> works once the cause is fixed.
 C<render> cannot be called again while it is running (for example from
 an event listener).

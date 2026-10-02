@@ -68,50 +68,61 @@ subtest 'root walks a multi-level chain' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# No reparenting: a widget can be attached exactly once, ever.
+# Attaching: a widget can be attached whenever it has no parent.
 # -----------------------------------------------------------------------------
 
-subtest 'adding an already-parented widget to a second parent dies' => sub {
+subtest 'adding a widget that has a parent to a second parent dies' => sub {
 	my $kid = Clay::UI::Test::Box->new(id => 'k');
 	my $p1  = Clay::UI::Test::Box->new;
 	$p1->add_child($kid);
 	my $p2  = Clay::UI::Test::Box->new;
 	like(
 		dies { $p2->add_child($kid) },
-		qr/no reparenting/,
+		qr/widget Clay::UI::Test::Box is still attached to a parent; remove it first/,
 		'second-parent attempt dies with descriptive message',
 	);
+	same($kid->parent, $p1, 'the widget keeps its parent');
+	is(scalar @{ $p2->children }, 0, 'the second parent has no children');
 };
 
-subtest 'adding the same widget twice to the same parent also dies' => sub {
-	# Re-add is treated identically to a conflict: the parent slot is
-	# write-once, no exceptions. Idempotent-builder patterns must build
-	# fresh widgets per call rather than re-attaching cached ones.
+subtest 'adding a widget again to its own parent also dies' => sub {
 	my $kid = Clay::UI::Test::Box->new(id => 'k');
 	my $p   = Clay::UI::Test::Box->new;
 	$p->add_child($kid);
 	like(
 		dies { $p->add_child($kid) },
-		qr/no reparenting/,
+		qr/still attached to a parent/,
 		'second add under same parent dies',
 	);
+	is(scalar @{ $p->children }, 1, 'the widget is a child once');
 };
 
-subtest 'remove_child detaches the widget for good' => sub {
-	# Removal detaches: the parent slot is cleared and the widget becomes
-	# the root of its own subtree, but it can never be attached again.
+subtest 'a removed widget can be added back to the same parent' => sub {
 	my $kid = Clay::UI::Test::Box->new(id => 'k');
-	my $p1  = Clay::UI::Test::Box->new;
-	$p1->add_child($kid);
-	$p1->remove_child('k');
+	my $p   = Clay::UI::Test::Box->new;
+	$p->add_child($kid, Clay::UI::Test::Box->new(id => 'other'));
+	$p->remove_child('k');
 	is($kid->parent, undef, 'parent slot cleared by remove_child');
 	same($kid->root, $kid, 'the removed widget is the root of its subtree');
+	ok(lives { $p->add_child($kid) }, 're-adding lives');
+	same($kid->parent, $p, 'the parent is stamped again');
+	is([ map { $_->id } @{ $p->children } ], [ 'other', 'k' ], 'the widget is appended');
+};
+
+subtest 'a removed widget can move to another parent' => sub {
+	my $kid  = Clay::UI::Test::Box->new(id => 'k');
+	my $leaf = Clay::UI::Test::Box->new(id => 'leaf');
+	$kid->add_child($leaf);
+	my $p1 = Clay::UI::Test::Box->new;
 	my $p2 = Clay::UI::Test::Box->new;
-	like(
-		dies { $p2->add_child($kid) },
-		qr/no reparenting/,
-		'detached widget still cannot be reattached',
-	);
+	$p1->add_child($kid);
+	$p1->clear_children;
+	ok(lives { $p2->add_child($kid) }, 'adding to another parent lives');
+	same($kid->parent, $p2, 'the new parent is stamped');
+	same($leaf->root, $p2, 'its subtree moved along');
+	$p2->remove_children_with(sub { $_->id eq 'k' });
+	ok(lives { $p1->add_child($kid) }, 'and it can move back after remove_children_with');
+	same($kid->parent, $p1, 'back at the first parent');
 };
 
 # -----------------------------------------------------------------------------
@@ -156,8 +167,8 @@ subtest 'a failed add_child changes nothing' => sub {
 	my $old   = Clay::UI::Test::Box->new(id => 'old');
 	$other->add_child($old);
 
-	like( dies { $p->add_child($new, $old) }, qr/has been attached before; no reparenting/,
-		'an already-parented kid fails the call' );
+	like( dies { $p->add_child($new, $old) }, qr/still attached to a parent; remove it first/,
+		'a kid that has a parent fails the call' );
 	is( $new->parent, undef, 'the valid kid was not parented' );
 	is( scalar @{ $p->children }, 0, 'the parent has no new children' );
 	ok( lives { $p->add_child($new) }, 'the valid kid can still be attached' );
@@ -194,16 +205,27 @@ subtest 'children returns a copy' => sub {
 	is( scalar @{ $p->children }, 1, 'changing the returned array does not change the widget' );
 };
 
-subtest 'a removed widget whose old parent is gone still cannot be reattached' => sub {
+subtest 'a widget whose old parent is gone can be attached again' => sub {
 	my $kid = Clay::UI::Test::Box->new(id => 'k');
 	{
 		my $parent = Clay::UI::Test::Box->new;
 		$parent->add_child($kid);
 	}
 	is( $kid->parent, undef, 'the old parent is gone' );
-	like( dies { Clay::UI::Test::Box->new->add_child($kid) }, qr/no reparenting/, 'reattaching dies' );
-	like( dies { Clay::UI->new(root => $kid, width => 10, height => 10) }, qr/'root' must not have a parent/,
-		'and it cannot become a Clay::UI root either' );
+	my $new = Clay::UI::Test::Box->new;
+	ok( lives { $new->add_child($kid) }, 'attaching it lives' );
+	same( $kid->parent, $new, 'the new parent is stamped' );
+};
+
+subtest 'a removed widget can become a Clay::UI root' => sub {
+	my $app   = Clay::UI::Test::Box->new(id => 'app');
+	my $panel = Clay::UI::Test::Box->new(id => 'panel');
+	$app->add_child($panel);
+	$app->remove_child('panel');
+	my $ui;
+	ok( lives { $ui = Clay::UI->new(root => $panel, width => 10, height => 10) }, 'Clay::UI->new lives' );
+	same( $panel->ui, $ui, 'the controller is stamped on it' );
+	like( dies { $app->add_child($panel) }, qr/is the root of a Clay::UI/, 'and as a root it cannot become a child' );
 };
 
 # -----------------------------------------------------------------------------

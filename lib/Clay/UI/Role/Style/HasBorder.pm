@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional validate_border_width clay_struct);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -22,12 +23,16 @@ role Clay::UI::Role::Style::HasBorder {
 
 	method border_color (@new) {
 		return $border_color unless @new;
-		return $border_color = optional(clay_struct('Clay_Color'), border_color => @new);
+		$border_color = optional(clay_struct('Clay_Color'), border_color => @new);
+		bump_revision();
+		return $border_color;
 	}
 
 	method border_width (@new) {
 		return $border_width unless @new;
-		return $border_width = optional(\&validate_border_width, border_width => @new);
+		$border_width = optional(\&validate_border_width, border_width => @new);
+		bump_revision();
+		return $border_width;
 	}
 
 	method contribute_border ($config) {

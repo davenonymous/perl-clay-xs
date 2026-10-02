@@ -7,6 +7,8 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::Revision qw(bump_revision);
+
 our $VERSION = '0.01';
 
 # Derived states and the reader each one is answered by. A widget
@@ -24,12 +26,14 @@ role Clay::UI::Role::Style::HasStates {
 	method add_state ($name) {
 		_require_user_state($name);
 		$_states{$name} = 1;
+		bump_revision();
 		return $self;
 	}
 
 	method remove_state ($name) {
 		_require_user_state($name);
 		delete $_states{$name};
+		bump_revision();
 		return $self;
 	}
 
@@ -46,12 +50,14 @@ role Clay::UI::Role::Style::HasStates {
 		} else {
 			$_states{$name} = 1;
 		}
+		bump_revision();
 		return $self;
 	}
 
 	# Clears the user states; derived states follow interaction.
 	method clear_states {
 		%_states = ();
+		bump_revision();
 		return $self;
 	}
 

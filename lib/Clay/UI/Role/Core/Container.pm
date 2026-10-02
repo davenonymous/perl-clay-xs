@@ -65,8 +65,8 @@ managed through C<append_row> and friends.
 All mutators follow the rules in
 L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>: new children are
 validated as a whole before anything changes, and removed children are
-detached for good (see
-L<Clay::UI::Role::Layout::HasParent/NO REPARENTING>).
+detached; they can be attached again (see
+L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>).
 
 =head1 METHODS
 
@@ -76,7 +76,7 @@ L<Clay::UI::Role::Layout::HasParent/NO REPARENTING>).
 
 Appends one or more widgets. Each must be a blessed instance consuming
 C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>
-that was never attached before; see
+that has no parent (never attached, or removed since); see
 L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN> for everything that
 dies. Returns C<$self> so calls chain:
 

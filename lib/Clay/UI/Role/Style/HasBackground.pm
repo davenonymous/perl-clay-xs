@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional clay_struct);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -20,7 +21,9 @@ role Clay::UI::Role::Style::HasBackground {
 
 	method background_color (@new) {
 		return $background_color unless @new;
-		return $background_color = optional(clay_struct('Clay_Color'), background_color => @new);
+		$background_color = optional(clay_struct('Clay_Color'), background_color => @new);
+		bump_revision();
+		return $background_color;
 	}
 
 	method contribute_background ($config) {

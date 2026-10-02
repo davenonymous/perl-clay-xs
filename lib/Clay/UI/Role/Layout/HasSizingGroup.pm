@@ -9,6 +9,7 @@ use Object::Pad 0.800;
 use Scalar::Util qw(looks_like_number);
 
 use Clay::UI::_validate qw(required validate_group_id);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -23,12 +24,16 @@ role Clay::UI::Role::Layout::HasSizingGroup {
 
 	method width_group (@new) {
 		return $width_group unless @new;
-		return $width_group = _write_group(width_group => $width_group, @new);
+		$width_group = _write_group(width_group => $width_group, @new);
+		bump_revision();
+		return $width_group;
 	}
 
 	method height_group (@new) {
 		return $height_group unless @new;
-		return $height_group = _write_group(height_group => $height_group, @new);
+		$height_group = _write_group(height_group => $height_group, @new);
+		bump_revision();
+		return $height_group;
 	}
 
 	# Writing back the current id is a no-op, even for an id Grid owns.

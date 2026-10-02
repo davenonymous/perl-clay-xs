@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional required validate_text clay_struct clay_field);
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Core::TextNode;
 
 our $VERSION = '0.01';
@@ -36,42 +37,58 @@ role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 
 	method text (@new) {
 		return $text unless @new;
-		return $text = required(\&validate_text, text => @new);
+		$text = required(\&validate_text, text => @new);
+		bump_revision();
+		return $text;
 	}
 
 	method font_id (@new) {
 		return $font_id unless @new;
-		return $font_id = required(clay_field('Clay_TextElementConfig', 'fontId'), font_id => @new);
+		$font_id = required(clay_field('Clay_TextElementConfig', 'fontId'), font_id => @new);
+		bump_revision();
+		return $font_id;
 	}
 
 	method font_size (@new) {
 		return $font_size unless @new;
-		return $font_size = required(clay_field('Clay_TextElementConfig', 'fontSize'), font_size => @new);
+		$font_size = required(clay_field('Clay_TextElementConfig', 'fontSize'), font_size => @new);
+		bump_revision();
+		return $font_size;
 	}
 
 	method text_color (@new) {
 		return $text_color unless @new;
-		return $text_color = required(clay_struct('Clay_Color'), text_color => @new);
+		$text_color = required(clay_struct('Clay_Color'), text_color => @new);
+		bump_revision();
+		return $text_color;
 	}
 
 	method letter_spacing (@new) {
 		return $letter_spacing unless @new;
-		return $letter_spacing = required(clay_field('Clay_TextElementConfig', 'letterSpacing'), letter_spacing => @new);
+		$letter_spacing = required(clay_field('Clay_TextElementConfig', 'letterSpacing'), letter_spacing => @new);
+		bump_revision();
+		return $letter_spacing;
 	}
 
 	method line_height (@new) {
 		return $line_height unless @new;
-		return $line_height = required(clay_field('Clay_TextElementConfig', 'lineHeight'), line_height => @new);
+		$line_height = required(clay_field('Clay_TextElementConfig', 'lineHeight'), line_height => @new);
+		bump_revision();
+		return $line_height;
 	}
 
 	method wrap_mode (@new) {
 		return $wrap_mode unless @new;
-		return $wrap_mode = optional(clay_field('Clay_TextElementConfig', 'wrapMode'), wrap_mode => @new);
+		$wrap_mode = optional(clay_field('Clay_TextElementConfig', 'wrapMode'), wrap_mode => @new);
+		bump_revision();
+		return $wrap_mode;
 	}
 
 	method text_alignment (@new) {
 		return $text_alignment unless @new;
-		return $text_alignment = optional(clay_field('Clay_TextElementConfig', 'textAlignment'), text_alignment => @new);
+		$text_alignment = optional(clay_field('Clay_TextElementConfig', 'textAlignment'), text_alignment => @new);
+		bump_revision();
+		return $text_alignment;
 	}
 
 	method text_config {

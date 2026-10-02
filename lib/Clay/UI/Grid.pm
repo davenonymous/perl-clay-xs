@@ -9,6 +9,7 @@ use Object::Pad 0.800;
 
 use Clay::XS qw(sizing_fit CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
 use Clay::UI::_validate qw(required clay_field);
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Grid::Row;
 use Clay::UI::Grid::Cell;
 use Clay::UI::Role::Core::Element;
@@ -59,6 +60,19 @@ sub _pack_group_id ($grid_id, $local) {
 
 sub _is_grid_owned_group ($group_id) {
 	return $group_id > _LOCAL_MAX;
+}
+
+# Cells leaving a grid drop the group ids it stamped, so a cell attached
+# elsewhere afterwards is no longer sized with this grid's columns and rows.
+sub _drop_grid_groups (@wrappers) {
+	for my $wrapper (@wrappers) {
+		my ($width, $height) = ($wrapper->width_group, $wrapper->height_group);
+		$wrapper->_set_grid_groups(
+			_is_grid_owned_group($width)  ? 0 : $width,
+			_is_grid_owned_group($height) ? 0 : $height,
+		);
+	}
+	return;
 }
 
 # Holds one grid id for the lifetime of a Grid and returns it to the pool
@@ -118,7 +132,9 @@ role Clay::UI::Grid
 
 	method row_gap (@new) {
 		return $row_gap unless @new;
-		return $row_gap = required(clay_field('Clay_LayoutConfig', 'childGap'), row_gap => @new);
+		$row_gap = required(clay_field('Clay_LayoutConfig', 'childGap'), row_gap => @new);
+		bump_revision();
+		return $row_gap;
 	}
 
 	# The inter-cell gap is baked into each row's layout when the row is
@@ -127,6 +143,7 @@ role Clay::UI::Grid
 		return $cell_gap unless @new;
 		$cell_gap = required(clay_field('Clay_LayoutConfig', 'childGap'), cell_gap => @new);
 		$_->layout({ %{ $_->layout }, child_gap => $cell_gap }) for @{ $self->children };
+		bump_revision();
 		return $cell_gap;
 	}
 
@@ -241,8 +258,9 @@ role Clay::UI::Grid
 	method remove_row ($index) {
 		$self->_check_row_index($index);
 		my ($height_id) = splice @_row_height_ids, $index, 1;
-		splice @_cell_wrappers, $index, 1;
+		my ($wrappers)  = splice @_cell_wrappers, $index, 1;
 		$self->_release_row_height_id($height_id);
+		_drop_grid_groups(@$wrappers);
 		$self->_splice_children($index, 1);
 		return $self;
 	}
@@ -254,6 +272,7 @@ role Clay::UI::Grid
 
 		$self->_commit_col_ids($col_ids, $next_width_local);
 		my @wrappers = $self->_wrap_row($row_cells, $col_ids, $_row_height_ids[$index]);
+		_drop_grid_groups(@{ $_cell_wrappers[$index] });
 		$_cell_wrappers[$index] = [ @wrappers ];
 		my $row = $self->children->[$index];
 		$row->_splice_children(0, scalar @{ $row->children }, @wrappers);
@@ -270,8 +289,9 @@ role Clay::UI::Grid
 
 		$self->_commit_col_ids($col_ids, $next_width_local);
 		my ($wrapper) = $self->_wrap_row([ $widget ], [ $col_ids->[$c] ], $_row_height_ids[$r]);
-		$_cell_wrappers[$r][$c] = $wrapper;
 		my $replaced = $c < $current_row_len ? 1 : 0;
+		_drop_grid_groups($_cell_wrappers[$r][$c]) if $replaced;
+		$_cell_wrappers[$r][$c] = $wrapper;
 		$self->children->[$r]->_splice_children($c, $replaced, $wrapper);
 		return $self;
 	}
@@ -438,14 +458,19 @@ Replace the cells of the row at C<$index>, keeping the row's
 C<height_group> id. Widens the column-id cache if the new row is longer.
 The replaced cells are detached.
 
-=head2 No widget reuse
+=head2 Reusing widgets
 
-Per L<Clay::UI::Role::Layout::HasParent/NO REPARENTING>, a widget is
-attached at most once. All mutators above expect freshly built widgets;
-passing a widget that has already been attached anywhere (including to
-this same grid, or to a grid that has since been freed) dies. Widgets
-removed via C<remove_row>, C<replace_row> or C<set_cell> cannot be
-reattached.
+Per L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>, a
+widget can be attached whenever it has no parent. All mutators above die
+for a widget that is still attached somewhere, including in this same
+grid. Widgets removed via C<remove_row>, C<replace_row> or C<set_cell>
+can be attached again, to this grid or anywhere else; a
+L<Clay::UI::Grid::Cell> leaving the grid also drops the column and row
+group ids the grid gave it. A Cell of a removed row, and a widget the
+grid wrapped in a Cell of its own, stay children of that row or wrapper
+until it is freed, which happens as soon as the grid lets go of it
+unless you keep a reference to it (from C<children> or
+C<cell_wrappers>).
 
 =head1 ID NAMESPACING
 

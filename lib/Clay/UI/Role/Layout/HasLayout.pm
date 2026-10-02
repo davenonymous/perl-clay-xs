@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(required clay_struct);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -20,7 +21,9 @@ role Clay::UI::Role::Layout::HasLayout {
 
 	method layout (@new) {
 		return $layout unless @new;
-		return $layout = required(clay_struct('Clay_LayoutConfig'), layout => @new);
+		$layout = required(clay_struct('Clay_LayoutConfig'), layout => @new);
+		bump_revision();
+		return $layout;
 	}
 
 	# Merges the user's layout over any slice another contributor wrote

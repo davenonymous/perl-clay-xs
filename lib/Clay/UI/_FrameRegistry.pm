@@ -48,6 +48,12 @@ class Clay::UI::_FrameRegistry :strict(params) {
 		return $widget->DOES('Clay::UI::Role::Layout::HasScroll') ? 1 : 0;
 	}
 
+	# Every widget the walk declared, element or text: each is one Clay
+	# layout element.
+	method element_count () {
+		return scalar keys %_by_user_data;
+	}
+
 	method widget_for ($user_data) {
 		return $_by_user_data{$user_data};
 	}
@@ -144,6 +150,11 @@ commands.
 Records an element widget in walk order under the element id hash from
 C<Clay_GetElementId>; a scroll container is also listed by
 C<scroll_containers>.
+
+=item C<element_count>
+
+How many widgets C<add_back_reference> recorded: the Clay layout
+elements the walk declared, element and text widgets alike.
 
 =item C<widget_for($user_data)>, C<widget_for_element($id)>
 

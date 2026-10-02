@@ -122,13 +122,23 @@ through Clay::UI and replaces `userData` with widget class and id.
   itself is an error.
 - Children are changed only through `Element`'s validating primitives;
   the public mutators live in the `Container` role. A widget can be
-  attached once, ever. `$widget->ui` walks to the root, which a Clay::UI
+  attached whenever it has no parent (removed ones can come back). `$widget->ui` walks to the root, which a Clay::UI
   stamps at construction (write-once).
 - Attributes are validated where set (accessors and `ADJUST` via
   `Clay::UI::_validate`). Clay values go through `check_struct`, the
   strict check mode of the struct schemas in `src/marshal.c`, so there is
   no Perl copy of Clay's keys or ranges. Classes are `:strict(params)`. User ids must not start with `anon:`; user
   sizing-group ids are `0 .. 2**20 - 1` (higher ones belong to `Grid`).
+- Every setter that changes what a frame lays out or draws calls
+  `bump_revision()` (`Clay::UI::Revision`) after its value is accepted,
+  never on a read; child changes bump in `Element`'s primitives, the
+  tracker when its hovered / armed / pressed / focused sets change. A new
+  setter must bump too.
+- `max_element_count` reaches Clay through a throwaway seed context
+  (`Clay::UI::_initialize_context`): `Clay_MinMemorySize` and
+  `Clay_Initialize` read the current context's counts, and setting them
+  on another UI's context or with none current would disable that context
+  or change Clay's process-wide defaults.
 
 ## Conventions
 

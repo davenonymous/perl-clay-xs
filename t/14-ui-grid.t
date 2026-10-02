@@ -389,13 +389,13 @@ subtest 'set_cell with a cell that is already in the grid changes nothing' => su
 	my $first = Clay::UI::Grid::Cell->new;
 	$first->add_child(text_cell('a'));
 	$grid->append_row([ $first, text_cell('b') ]);
-	like( dies { $grid->set_cell(0, 1, $first) }, qr/no reparenting/, 'set_cell dies' );
+	like( dies { $grid->set_cell(0, 1, $first) }, qr/still attached to a parent/, 'set_cell dies' );
 	my $row = $grid->children->[0]->children;
 	is( scalar @$row, 2, 'row still has two cells' );
 	isnt( refaddr($row->[1]), refaddr($first), 'the second cell was not replaced' );
 };
 
-subtest 'a cell cannot move to a new grid after its grid is freed' => sub {
+subtest 'a cell can move to a new grid after its grid is freed' => sub {
 	my $cell = Clay::UI::Grid::Cell->new;
 	$cell->add_child(text_cell('reused'));
 	{
@@ -403,7 +403,26 @@ subtest 'a cell cannot move to a new grid after its grid is freed' => sub {
 		$old->append_row([ $cell ]);
 	}
 	my $new = Clay::UI::Test::Grid->new(id => 'new');
-	like( dies { $new->append_row([ $cell ]) }, qr/no reparenting/, 'reusing the cell dies' );
+	ok( lives { $new->append_row([ $cell ]) }, 'reusing the cell lives' );
+	is( refaddr($new->cell_wrappers->[0][0]), refaddr($cell), 'the cell is in the new grid' );
+};
+
+subtest 'cells removed from a grid can be attached again' => sub {
+	my $grid  = Clay::UI::Test::Grid->new(id => 'reuse');
+	my $cell  = Clay::UI::Grid::Cell->new;
+	my $label = text_cell('wrapped');
+	$grid->append_row([ $cell, $label ]);
+	$grid->remove_row(0);
+	is( $cell->parent,  undef, 'the Cell of the removed row is detached' );
+	is( $label->parent, undef, 'and so is the widget the grid wrapped' );
+	is( [ $cell->width_group, $cell->height_group ], [ 0, 0 ], 'the Cell dropped the grid\'s group ids' );
+
+	ok( lives { $grid->append_row([ $cell, $label ]) }, 'both go back into the grid' );
+	$grid->set_cell(0, 0, Clay::UI::Grid::Cell->new);
+	is( $cell->parent, undef, 'set_cell detaches the replaced Cell' );
+	my $box = Clay::UI::Test::Box->new(id => 'box');
+	ok( lives { $box->add_child($cell) }, 'which can join another parent' );
+	is( [ $cell->width_group, $cell->height_group ], [ 0, 0 ], 'without the grid\'s group ids' );
 };
 
 # -----------------------------------------------------------------------------

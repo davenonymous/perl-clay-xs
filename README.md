@@ -154,7 +154,8 @@ on your classes makes misspelled constructor parameters die too.
   with `anon:`, the prefix of the derived ids).
 - `Clay::UI::Role::Core::Container` - an Element with `add_child`,
   `remove_child`, `remove_children_with` and `clear_children`. A widget
-  is attached at most once: removed widgets are detached for good.
+  can be attached whenever it has no parent: removed widgets can be
+  added again, attaching one that still has a parent dies.
 - `Clay::UI::Role::Core::TextNode` - the base of text leaves.
 - `Clay::UI::Role::Core::Stateful` - an Element that requires an `id`.
 - Style and layout mixins: `HasLayout`, `HasBackground`, `HasBorder`,
@@ -344,6 +345,23 @@ move focus between `Focusable` widgets in
 depth-first order; a container composing `HasFocusOrder` can take over
 the order for its subtree (the root also decides the first focus).
 Widgets whose `can_focus` is false are skipped.
+
+### Skipping unchanged frames
+
+Every setter that changes what a frame lays out or draws (widget
+attributes, children, user states, the viewport size, and hover, press
+and focus changes) bumps one process-wide counter,
+`Clay::UI::Revision::current_revision()`. A renderer remembers the value
+it drew and skips frames while it has not changed. Widget classes with
+state of their own call `$widget->mark_changed` from their setters.
+
+### Tree size
+
+Each `Clay::UI` holds up to `max_element_count` Clay elements (default
+8192, Clay's default; every widget is one, and Clay keeps two for
+itself). Pass a larger `max_element_count` to `Clay::UI->new` for a
+bigger tree; with the default error handler, a tree that does not fit
+makes `render` die with a message naming the parameter.
 
 ## Known limitations
 

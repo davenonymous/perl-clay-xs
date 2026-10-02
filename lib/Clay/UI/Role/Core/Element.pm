@@ -12,6 +12,7 @@ use Scalar::Util qw(blessed refaddr);
 no warnings 'experimental';
 
 use Clay::UI::_validate qw(validate_id);
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasSizingGroup;
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
@@ -54,8 +55,8 @@ sub _validate_attachment ($anchor, @kids) {
 			if $ancestor{$addr};
 		die "Clay::UI: widget " . ref($kid) . " is the root of a Clay::UI and cannot become a child"
 			if defined $kid->_local_ui_controller;
-		die "Clay::UI: widget " . ref($kid) . " has been attached before; no reparenting allowed"
-			if $kid->_was_parented;
+		die "Clay::UI: widget " . ref($kid) . " is still attached to a parent; remove it first"
+			if defined $kid->parent;
 	}
 	return;
 }
@@ -97,10 +98,18 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return \%config;
 	}
 
+	# For widget classes that keep state of their own: call from their
+	# setters so renderers see the change (see Clay::UI::Revision).
+	method mark_changed () {
+		bump_revision();
+		return $self;
+	}
+
 	# ---------------------------------------------------------------------
 	# Child-list primitives. Every change to the children goes through
 	# _splice_children or _detach_children: new children are validated as a
-	# whole before anything is written, removed children are detached.
+	# whole before anything is written, removed children are detached, and
+	# the revision (Clay::UI::Revision) is bumped.
 	# Clay::UI::Role::Core::Container and Clay::UI::Grid build their public
 	# mutators on these.
 	# ---------------------------------------------------------------------
@@ -119,6 +128,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 
 		my @removed = splice @_children, $offset, $length, @kids;
 		$_->_set_parent($self) for @kids;
+		bump_revision();
 		$self->_release_children(@removed);
 		return @removed;
 	}
@@ -128,6 +138,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		my @removed = grep { $leaving{ refaddr($_) } } @_children;
 		return unless @removed;
 		@_children = grep { !$leaving{ refaddr($_) } } @_children;
+		bump_revision();
 		$self->_release_children(@removed);
 		return;
 	}
@@ -249,6 +260,19 @@ each other, and the reserved C<anon:> prefix keeps them distinct from
 user ids. The walker passes the arguments and
 hashes the result with C<Clay_GetElementId>.
 
+=head2 mark_changed
+
+	$widget->mark_changed;
+
+Bumps the process-wide revision (L<Clay::UI::Revision>) and returns
+C<$self>. The setters of Clay::UI's roles bump it themselves; a widget
+class that keeps state of its own, which its C<contribute_*> methods
+turn into the config, calls C<mark_changed> from its setters so that
+renderers skipping unchanged frames see the change.
+
+Adding or removing children (L<Clay::UI::Role::Core::Container>,
+L<Clay::UI::Grid>) bumps the revision as well.
+
 =head2 get_children_with
 
 	my @foos = $root->get_children_with(sub { $_->id =~ /^foo_/ });
@@ -266,11 +290,11 @@ new children before anything is changed, so a failed call leaves the
 widget as it was. It dies if a child is not a widget
 (C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>),
 appears twice in the call, is the widget itself or one of its ancestors
-(a cycle), is the root of a L<Clay::UI>, or has been attached before
-(see L<Clay::UI::Role::Layout::HasParent/NO REPARENTING>).
+(a cycle), is the root of a L<Clay::UI>, or is still attached to a
+parent (see L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>).
 
 Removed children are detached: their C<parent> becomes undef and they
-are no longer part of the Clay::UI. If the focused widget is inside a
+are no longer part of the Clay::UI, until they are attached again. If the focused widget is inside a
 removed subtree, focus is cleared first (the widget gets its
 C<OnBlur>). An C<OnBlur> listener that dies does not stop the removal:
 the call completes and then dies with the listener's error.

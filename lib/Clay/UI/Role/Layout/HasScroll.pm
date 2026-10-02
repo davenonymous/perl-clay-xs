@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional required clay_struct clay_field);
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Events::Emitter;
@@ -31,17 +32,23 @@ role Clay::UI::Role::Layout::HasScroll
 
 	method horizontal (@new) {
 		return $horizontal unless @new;
-		return $horizontal = required(clay_field('Clay_ClipElementConfig', 'horizontal'), horizontal => @new);
+		$horizontal = required(clay_field('Clay_ClipElementConfig', 'horizontal'), horizontal => @new);
+		bump_revision();
+		return $horizontal;
 	}
 
 	method vertical (@new) {
 		return $vertical unless @new;
-		return $vertical = required(clay_field('Clay_ClipElementConfig', 'vertical'), vertical => @new);
+		$vertical = required(clay_field('Clay_ClipElementConfig', 'vertical'), vertical => @new);
+		bump_revision();
+		return $vertical;
 	}
 
 	method child_offset (@new) {
 		return $child_offset unless @new;
-		return $child_offset = optional(clay_struct('Clay_Vector2'), child_offset => @new);
+		$child_offset = optional(clay_struct('Clay_Vector2'), child_offset => @new);
+		bump_revision();
+		return $child_offset;
 	}
 
 	method contribute_clip ($config) {

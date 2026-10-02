@@ -7,6 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
 
@@ -16,6 +17,11 @@ role Clay::UI::Role::Core::TextNode :does(Clay::UI::Role::Layout::HasParent)
                               :does(Clay::UI::Role::Events::Listener) {
 	method text;
 	method text_config;
+
+	method mark_changed () {
+		bump_revision();
+		return $self;
+	}
 }
 
 1;
@@ -44,5 +50,16 @@ Returns the string to render.
 
 Returns the text-element config hashref (snake_case keys allowed;
 the walker camelizes).
+
+=head1 METHODS
+
+=head2 mark_changed
+
+	$widget->mark_changed;
+
+Bumps the process-wide revision (L<Clay::UI::Revision>) and returns
+C<$self>. L<Clay::UI::Text>'s accessors bump it themselves; a text
+widget class that keeps state of its own calls C<mark_changed> from its
+setters so that renderers skipping unchanged frames see the change.
 
 =cut

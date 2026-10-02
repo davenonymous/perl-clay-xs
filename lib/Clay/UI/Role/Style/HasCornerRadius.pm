@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional clay_struct);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -20,7 +21,9 @@ role Clay::UI::Role::Style::HasCornerRadius {
 
 	method corner_radius (@new) {
 		return $corner_radius unless @new;
-		return $corner_radius = optional(clay_struct('Clay_CornerRadius'), corner_radius => @new);
+		$corner_radius = optional(clay_struct('Clay_CornerRadius'), corner_radius => @new);
+		bump_revision();
+		return $corner_radius;
 	}
 
 	method contribute_corner_radius ($config) {

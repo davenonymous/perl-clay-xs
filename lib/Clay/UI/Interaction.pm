@@ -15,6 +15,7 @@ use Clay::UI::Events::OnRelease;
 use Clay::UI::Events::OnScroll;
 use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -111,6 +112,7 @@ class Clay::UI::Interaction :strict(params) {
 
 	# State changes for one frame; returns the events in firing order.
 	method _apply ($input) {
+		my $states_before = $self->_state_signature;
 		my $press_edge   = $input->{down} && !$_down;
 		my $release_edge = !$input->{down} && $_down;
 		$_down = $input->{down};
@@ -156,6 +158,7 @@ class Clay::UI::Interaction :strict(params) {
 
 		@_under_pointer = @{ $input->{over} };
 		weaken $_ for @_under_pointer;
+		bump_revision() if $self->_state_signature ne $states_before;
 
 		my ($x, $y) = @$input{qw(x y)};
 		my %scroll_of = map { refaddr($_->[0]) => $_ } @{ $input->{scrolled} };
@@ -193,6 +196,12 @@ class Clay::UI::Interaction :strict(params) {
 		return;
 	}
 
+	# Who is hovered, armed and pressed, as a string that changes exactly
+	# when one of those sets does.
+	method _state_signature () {
+		return join ';', map { join ',', sort { $a <=> $b } map { refaddr $_ } _live($_) } \%_hovered, \%_armed, \%_pressed;
+	}
+
 	# -----------------------------------------------------------------
 	# Focus. Moves only on request, walking the live tree: it must work
 	# before the first render and right after the tree changed, while
@@ -220,6 +229,7 @@ class Clay::UI::Interaction :strict(params) {
 		my $previous = $_focused;
 		$_focused = $widget;
 		weaken $_focused if defined $_focused;
+		bump_revision();
 
 		_fire_all(
 			(defined $previous ? [ $previous, Clay::UI::Events::OnBlur->new ]  : ()),
@@ -437,6 +447,10 @@ C<is_pressed> (L<Clay::UI::Role::Interaction::Pressable>) and
 C<is_focused> (L<Clay::UI::Role::Interaction::Focusable>) and the
 derived C<hovered> / C<pressed> / C<focused> states of
 L<Clay::UI::Role::Style::HasStates> ask this object.
+
+Whenever the hovered, armed, pressed or focused widgets change, the
+tracker bumps the process-wide revision (L<Clay::UI::Revision>), since
+widgets may style themselves by those states.
 
 =head1 METHODS
 

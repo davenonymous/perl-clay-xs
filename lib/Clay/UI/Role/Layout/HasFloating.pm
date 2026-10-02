@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::_validate qw(optional clay_struct);
+use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
 
@@ -20,7 +21,9 @@ role Clay::UI::Role::Layout::HasFloating {
 
 	method floating (@new) {
 		return $floating unless @new;
-		return $floating = optional(clay_struct('Clay_FloatingElementConfig'), floating => @new);
+		$floating = optional(clay_struct('Clay_FloatingElementConfig'), floating => @new);
+		bump_revision();
+		return $floating;
 	}
 
 	method contribute_floating ($config) {

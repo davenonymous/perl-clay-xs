@@ -13,6 +13,7 @@ use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Enum::Result;
 use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Interaction::Hoverable;
@@ -179,6 +180,30 @@ subtest 'a removed hovered widget gets OnHoverStopped at once' => sub {
 	is( $box->is_hovered, 0, 'and is_hovered cleared' );
 	$ui->render;
 	is( \@log, ['hb:OnHoverStopped'], 'the next render fires nothing more' );
+};
+
+subtest 'a removed widget added to another parent renders and is hovered again' => sub {
+	my $box    = HoverBox->new(id => 'hb', layout => fixed(50, 50));
+	my $spacer = Clay::UI::Test::Box->new(id => 'spacer', layout => fixed(60, 50));
+	my $panel  = Clay::UI::Test::Box->new(id => 'panel', layout => fixed(100, 50));
+	$box->add_child(Clay::UI::Test::Text->new(text => 'label'));
+	my @log;
+	log_events(\@log, $box, qw(OnHoverStart OnHoverStopped));
+	my $root = page($box, $spacer, $panel);
+	my $ui = make_ui($root);
+	$ui->render;
+	pointer($ui, 10, 10);
+	$root->remove_child('hb');
+	pointer($ui, 250, 10);
+	is( \@log, [ 'hb:OnHoverStart', 'hb:OnHoverStopped' ], 'hovered, then released by the removal' );
+
+	$panel->add_child($box);
+	my ($label) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ $ui->render };
+	is( $label->{boundingBox}{x}, 60, 'its subtree renders inside the new parent' );
+	is( refaddr($ui->widget_for($label->{userData})->parent), refaddr($box), 'and maps back to it' );
+	pointer($ui, 80, 10);
+	is( \@log, [ 'hb:OnHoverStart', 'hb:OnHoverStopped', 'hb:OnHoverStart' ], 'it is hovered at its new place' );
+	is( $box->is_hovered, 1, 'is_hovered agrees' );
 };
 
 subtest 'hover events do not bubble' => sub {
