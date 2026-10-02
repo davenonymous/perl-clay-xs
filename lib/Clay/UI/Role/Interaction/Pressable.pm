@@ -72,14 +72,14 @@ rules):
 
 =item L<Clay::UI::Events::OnPress>
 
-When the pointer goes down, on exactly one widget: the innermost
-Pressable under the pointer (a button inside a pressable card gets the
-press, not the card). Every Pressable under the pointer becomes
+When the pointer goes down, on exactly one widget: the Pressable under
+the pointer that is drawn on top (a button inside a pressable card gets
+the press, not the card; of two overlapping siblings, the later one). Every Pressable under the pointer becomes
 I<armed>.
 
 =item L<Clay::UI::Events::OnRelease>
 
-When the pointer goes up, on the innermost I<armed> Pressable still
+When the pointer goes up, on the topmost I<armed> Pressable still
 under the pointer - that is a completed click. A press arms every
 Pressable under the pointer, so a press on a button inside a pressable
 card that is dragged off the button onto the card and released there

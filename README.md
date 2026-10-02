@@ -41,8 +41,8 @@ Requirements:
 Clay's header is vendored as `src/clay/clay.h.orig`; there are no
 external runtime dependencies. At build time `make` applies the patches
 under `patches/` in order - cross-tree sizing groups (used by
-`Clay::UI::Grid`) and flow layout (`CLAY_LEFT_TO_RIGHT_WRAP`) - and
-writes the result to `src/clay/clay.h` (generated, gitignored).
+`Clay::UI::Grid`), flow layout (`CLAY_LEFT_TO_RIGHT_WRAP`) and stack
+layout (`CLAY_BACK_TO_FRONT`) - and writes the result to `src/clay/clay.h` (generated, gitignored).
 
 ## Clay::XS
 
@@ -228,8 +228,9 @@ The events:
   pointer or leaves it (or is removed while hovered). They do not
   bubble: every hovered widget gets its own.
 - `OnPress` - when the pointer goes down, on exactly one widget: the
-  innermost Pressable of the topmost stack under the pointer.
-- `OnRelease` - when the pointer goes up, on the innermost Pressable
+  Pressable under the pointer that is drawn on top (the innermost of
+  nested ones, the later of overlapping siblings).
+- `OnRelease` - when the pointer goes up, on the topmost Pressable
   still under the pointer that the press started over (a press arms
   every Pressable under the pointer, so dragging from a button onto the
   pressable card around it and releasing there gives the card its
@@ -365,6 +366,33 @@ $tags->add_child(My::Text->new(text => $_)) for qw(perl layout clay flow);
 ```
 
 See `examples/07-ui-flow.pl` for an SVG demo.
+
+### Stack layout
+
+`layout_direction => CLAY_BACK_TO_FRONT` puts a widget's children on top
+of each other, each placed by `child_alignment` on both axes; later
+children are drawn over earlier ones and get the press where they
+overlap (every child under the pointer is still hovered). The container
+fits its largest child on each axis, and `GROW` children fill it, so a
+background, content and a corner badge stack like this:
+
+```perl
+my $card = My::Box->new(layout => {
+    layout_direction => CLAY_BACK_TO_FRONT,
+    child_alignment  => { x => CLAY_ALIGN_X_RIGHT, y => CLAY_ALIGN_Y_TOP },
+});
+$card->add_child(
+    My::Box->new(background_color => [30, 30, 30, 255],
+        layout => { sizing => { width => sizing_grow(), height => sizing_grow() } }),
+    My::Text->new(text => 'content'),
+    My::Box->new(background_color => [220, 60, 60, 255],
+        layout => { sizing => { width => sizing_fixed(8), height => sizing_fixed(8) } }),
+);
+```
+
+A stack has one `child_alignment`; to put children in different corners,
+wrap each in a `GROW` stack with its own. See `examples/08-ui-stack.pl`
+for an SVG demo.
 
 ### Focus
 

@@ -45,6 +45,12 @@ the container's leftover height (`GROW`) or keep their tallest child's
 height (`FIT`).
 _Avoid_: row (reserved for Clay::UI::Grid rows)
 
+**Stack container**:
+An element with `layoutDirection` `CLAY_BACK_TO_FRONT`. It places all its
+children on top of each other, each aligned on its own by
+`childAlignment`, and draws later children over earlier ones.
+_Avoid_: z-stack, overlay (reserved for `overlayColor`)
+
 ### Binding
 
 **Held error**:

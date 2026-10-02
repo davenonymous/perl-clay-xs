@@ -805,7 +805,7 @@ static const schema_field layout_config_fields[] = {
     F_STRUCT(Clay_LayoutConfig, padding,        padding_schema),
     F_U16   (Clay_LayoutConfig, childGap),
     F_STRUCT(Clay_LayoutConfig, childAlignment, child_alignment_schema),
-    F_ENUM  (Clay_LayoutConfig, layoutDirection, CLAY_LEFT_TO_RIGHT_WRAP),
+    F_ENUM  (Clay_LayoutConfig, layoutDirection, CLAY_BACK_TO_FRONT),
     F_U16   (Clay_LayoutConfig, lineGap),
     F_ENUM  (Clay_LayoutConfig, lineSizing, CLAY_LINE_SIZING_FIT),
 };

@@ -47,7 +47,7 @@ subtest 'range and type errors name the field' => sub {
 	my @cases = (
 		[ Clay_Padding => { left => -5 }, qr/^Clay_Padding\.left: expected an integer in 0\.\.65535, got '-5'/ ],
 		[ Clay_LayoutConfig => { childGap => 70000 }, qr/^Clay_LayoutConfig\.childGap: expected an integer in 0\.\.65535/ ],
-		[ Clay_LayoutConfig => { layoutDirection => 3 }, qr/layoutDirection: expected an integer in 0\.\.2/ ],
+		[ Clay_LayoutConfig => { layoutDirection => 4 }, qr/layoutDirection: expected an integer in 0\.\.3/ ],
 		[ Clay_FloatingElementConfig => { zIndex => 40000 }, qr/zIndex: expected an integer in -32768\.\.32767/ ],
 		[ Clay_Color => { r => 'red' }, qr/^Clay_Color\.r: expected a finite number, got 'red'/ ],
 		[ Clay_SizingAxis => { min => 0, max => -9**9**9 }, qr/max: expected a finite number or \+Inf/ ],

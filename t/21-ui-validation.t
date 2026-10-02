@@ -115,7 +115,7 @@ my @invalid = (
 	[ 'Clay::UI::Test::Box',  layout           => { child_gap => 70000 },      qr/'layout\.child_gap' expected an integer in 0\.\.65535, got '70000'/ ],
 	[ 'Clay::UI::Test::Box',  layout           => { child_gapp => 50 },        qr/'layout' has unknown key 'child_gapp' \(known keys: sizing, padding, child_gap, child_alignment, layout_direction, line_gap, line_sizing\)/ ],
 	[ 'Clay::UI::Test::Box',  layout           => { sizing => { width => 5 } }, qr/'layout\.sizing\.width' expected a hash reference, got '5' \(sizing_fit, sizing_grow, sizing_fixed or sizing_percent build one\)/ ],
-	[ 'Clay::UI::Test::Box',  layout           => { layout_direction => 7 },   qr/'layout\.layout_direction' expected an integer in 0\.\.2, got '7'/ ],
+	[ 'Clay::UI::Test::Box',  layout           => { layout_direction => 7 },   qr/'layout\.layout_direction' expected an integer in 0\.\.3, got '7'/ ],
 	[ 'Clay::UI::Test::Box',  floating         => { attach_too => 1 },         qr/'floating' has unknown key 'attach_too'/ ],
 	[ 'Clay::UI::Test::Box',  floating         => { offset => 'up' },          qr/'floating\.offset' expected a hash or array reference, got 'up'/ ],
 	[ 'Clay::UI::Test::Box',  width_group      => -1,                          qr/'width_group' must be an integer in 0\.\.1048575/ ],

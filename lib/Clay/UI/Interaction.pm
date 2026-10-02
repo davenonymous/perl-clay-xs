@@ -15,7 +15,9 @@ use Clay::UI::Events::OnRelease;
 use Clay::UI::Events::OnScroll;
 use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
+use Clay::XS qw(CLAY_ATTACH_TO_NONE);
 use Clay::UI::Revision qw(bump_revision);
+use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::_validate qw(is_finite_number);
 
 our $VERSION = '0.01';
@@ -27,6 +29,7 @@ my $PRESSABLE   = 'Clay::UI::Role::Interaction::Pressable';
 my $FOCUSABLE   = 'Clay::UI::Role::Interaction::Focusable';
 my $FOCUS_ORDER = 'Clay::UI::Role::Interaction::HasFocusOrder';
 my $SCROLLABLE  = 'Clay::UI::Role::Layout::HasScroll';
+my $FLOATING    = 'Clay::UI::Role::Layout::HasFloating';
 
 class Clay::UI::Interaction :strict(params) {
 	field $ui :param :weak;
@@ -468,16 +471,36 @@ class Clay::UI::Interaction :strict(params) {
 		return 0;
 	}
 
-	# The widget a press or release belongs to: the first Pressable in
-	# pointer-over order, replaced by each following Pressable that is its
-	# descendant. The innermost widget of the topmost stack wins.
+	# The widget a press or release belongs to. Pointer-over order lists
+	# the topmost Clay root first and each root in pre-order, so a later
+	# Pressable in the first one's root is its descendant or drawn over
+	# it: the last one wins. Ancestors are skipped, as synthetic input may
+	# list them after their descendants.
 	sub _event_origin (@pressables) {
 		my $origin = shift @pressables;
+		return undef unless defined $origin;
+		my $root_addr = refaddr(_floating_root($origin)) // 0;
 		for my $next (@pressables) {
-			last unless _is_within($next->parent, $origin);
+			next if _is_within($origin, $next);
+			next unless (refaddr(_floating_root($next)) // 0) == $root_addr;
 			$origin = $next;
 		}
 		return $origin;
+	}
+
+	# The widget whose Clay root $widget is laid out in: its nearest
+	# floating ancestor (itself included), or undef for the main root.
+	sub _floating_root ($widget) {
+		for (my $node = $widget; defined $node; $node = $node->parent) {
+			return $node if _is_floating($node);
+		}
+		return undef;
+	}
+
+	sub _is_floating ($widget) {
+		return 0 unless $widget->DOES($FLOATING);
+		my $floating = $widget->floating;
+		return defined $floating && (camelize_keys($floating)->{attachTo} // CLAY_ATTACH_TO_NONE) != CLAY_ATTACH_TO_NONE;
 	}
 }
 
@@ -537,9 +560,10 @@ One pointer frame:
 
 =item C<over> (required)
 
-Arrayref of the widgets under the pointer, topmost first (Clay's
-pointer-over order: the topmost floating root first, pre-order within
-each root). Widgets must belong to this Clay::UI. Only Hoverables
+Arrayref of the widgets under the pointer in Clay's pointer-over order:
+the topmost floating root first, pre-order within each root, so within a
+root a later widget is a descendant of an earlier one or drawn over it.
+Widgets must belong to this Clay::UI. Only Hoverables
 become hovered and only Pressables can be pressed; the rest are
 reported by C<under_pointer>.
 
@@ -574,7 +598,12 @@ hovered. A widget gets C<OnHoverStopped> only after its
 C<OnHoverStart>, and C<OnBlur> only after its C<OnFocus>.
 
 A press arms every Pressable under the pointer and fires C<OnPress> at
-the innermost Pressable of the topmost stack. A Pressable is pressed
+the one drawn on top: the last Pressable of C<over> that lies in the
+same root as the first one, skipping that one's ancestors. Nested
+Pressables give the innermost one; overlapping siblings, such as the
+children of a C<CLAY_BACK_TO_FRONT> container, give the later one; a
+Pressable in a floating root beats everything below that root. A
+Pressable is pressed
 while it is armed, under the pointer and the button is down. A release
 fires C<OnRelease> at the armed Pressable under the pointer chosen the
 same way, then disarms everything.

@@ -15,7 +15,9 @@ use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Role::Interaction::Pressable;
+use Clay::UI::Role::Layout::HasFloating;
 use Clay::UI::Role::Layout::HasScroll;
+use Clay::XS qw(CLAY_ATTACH_TO_PARENT);
 
 # -----------------------------------------------------------------------------
 # The interaction tracker turns pointer input into hover / armed / pressed
@@ -33,6 +35,8 @@ class Button :strict(params)
 	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Interaction::Pressable)
 {}
+
+class FloatingButton :strict(params) :isa(Button) :does(Clay::UI::Role::Layout::HasFloating) {}
 
 class ScrollPanel :strict(params) :does(Clay::UI::Role::Layout::HasScroll) {}
 
@@ -81,6 +85,23 @@ subtest 'a nested press has one origin and bubbles to the ancestor' => sub {
 	$ui->interaction->update(over => [ $card, $inner ], down => 0);
 	$ui->interaction->update(over => [ $card, $inner ], down => 1);
 	is( \@log, ['inner'], 'HANDLED stops the event at the button' );
+};
+
+subtest 'a Pressable in a floating root beats later ones below it' => sub {
+	my $back    = Button->new(id => 'back');
+	my $front   = Button->new(id => 'front');
+	my $tooltip = FloatingButton->new(id => 'tip', floating => { attach_to => CLAY_ATTACH_TO_PARENT });
+	$front->add_child($tooltip);
+	my $ui = make_ui($back, $front);
+	my @log;
+	log_events(\@log, $_, 'OnPress') for $back, $front, $tooltip;
+	$ui->interaction->update(over => [ $tooltip, $back, $front ], down => 1);
+	is( $log[0], 'tip:OnPress', 'the floating root comes first and wins over the main root' );
+
+	@log = ();
+	$ui->interaction->update(over => [ $back, $front ], down => 0);
+	$ui->interaction->update(over => [ $back, $front ], down => 1);
+	is( \@log, ['front:OnPress'], 'of two overlapping siblings, the later one wins' );
 };
 
 subtest 'press, drag out, drag back in, release' => sub {

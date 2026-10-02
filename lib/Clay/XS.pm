@@ -76,7 +76,7 @@ our @EXPORT_OK = qw(
     set_scroll_position
     check_struct
 
-    CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM CLAY_LEFT_TO_RIGHT_WRAP
+    CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM CLAY_LEFT_TO_RIGHT_WRAP CLAY_BACK_TO_FRONT
     CLAY_LINE_SIZING_GROW CLAY_LINE_SIZING_FIT
     CLAY_ALIGN_X_LEFT CLAY_ALIGN_X_RIGHT CLAY_ALIGN_X_CENTER
     CLAY_ALIGN_Y_TOP CLAY_ALIGN_Y_BOTTOM CLAY_ALIGN_Y_CENTER
@@ -701,6 +701,22 @@ container in every C<lineGap>; a vertical bar reaches halfway into the
 C<lineGap>s around its line, or to the container's edge above the first
 line and below the last one. Wrapping is horizontal only: Clay sizes
 widths before heights, so wrapping into columns cannot be expressed.
+
+=head1 STACK LAYOUT
+
+A third patch adds the layout direction C<CLAY_BACK_TO_FRONT>. A stack
+container places all its children on top of each other inside its
+padding; later children are drawn over earlier ones, and C<childGap> is
+unused. Both axes are sized the way the other directions size their off
+axis: a C<FIT> stack is as wide as its widest child and as tall as its
+tallest one (plus padding), C<GROW> children fill its inner size, and
+children larger than a non-clipping stack are compressed to it.
+C<childAlignment> places every child on its own, on both axes.
+C<betweenChildren> borders draw nothing.
+
+The order also decides hit testing: Clay reports every element under the
+pointer, and L<Clay::UI> sends a press to the child drawn on top (see
+L<Clay::UI::Interaction>).
 
 =head1 LIMITATIONS
 

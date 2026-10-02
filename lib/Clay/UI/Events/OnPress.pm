@@ -35,7 +35,7 @@ Clay::UI::Events::OnPress - pointer-pressed event
 
 =head1 DESCRIPTION
 
-Fired by L<Clay::UI/render> on the innermost
+Fired by L<Clay::UI/render> on the topmost
 L<Clay::UI::Role::Interaction::Pressable> widget under the pointer in the
 frame the pointer goes down (Clay's C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>).
 Pairs with L<Clay::UI::Events::OnRelease>.

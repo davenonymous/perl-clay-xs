@@ -41,6 +41,7 @@ my $ccflags = join(' ', @ccflags);
 my @clay_patches = qw(
     patches/0001-clay-sizing-groups.patch
     patches/0002-clay-flow-layout.patch
+    patches/0003-clay-back-to-front.patch
 );
 
 WriteMakefile(

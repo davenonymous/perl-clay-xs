@@ -762,15 +762,16 @@ ones included, gets its own event.
 =item L<Clay::UI::Events::OnPress>
 
 When the pointer goes down, exactly one
-L<Clay::UI::Role::Interaction::Pressable> gets OnPress: the innermost
-Pressable of the topmost stack under the pointer (a button inside a
-pressable card, not the card; the upper of two overlapping, unrelated
-Pressables). Every Pressable under the pointer becomes I<armed>.
+L<Clay::UI::Role::Interaction::Pressable> gets OnPress: the Pressable
+under the pointer that is drawn on top (a button inside a pressable
+card, not the card; the later of two overlapping siblings, such as the
+children of a C<CLAY_BACK_TO_FRONT> container; a Pressable in a floating
+element, not one below it). Every Pressable under the pointer becomes I<armed>.
 
 =item L<Clay::UI::Events::OnRelease>
 
-When the pointer goes up, the innermost I<armed> Pressable still under
-the pointer gets OnRelease - a completed click. Every release disarms
+When the pointer goes up, the topmost I<armed> Pressable still under
+the pointer (chosen the same way) gets OnRelease - a completed click. Every release disarms
 all Pressables, so a press that started elsewhere and a press that was
 dragged off the widget end without OnRelease.
 

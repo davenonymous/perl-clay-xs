@@ -46,7 +46,10 @@ through Clay::UI and replaces `userData` with widget class and id.
   `patches/0002-clay-flow-layout.patch` adds `CLAY_LEFT_TO_RIGHT_WRAP`,
   `lineGap` and `lineSizing` (per element in `flowLines`: the X sizing
   pass records where lines start, the Y sizing pass how tall they are;
-  later passes read both instead of recomputing). The
+  later passes read both instead of recomputing);
+  `patches/0003-clay-back-to-front.patch` adds `CLAY_BACK_TO_FRONT`
+  (stack layout: both axes sized like the off axis, every child placed
+  by `childAlignment`, no `betweenChildren` bars). The
   `postamble` in `Makefile.PL` holds that rule and a `src/%.o : src/%.c`
   rule; EUMM's default rule drops subdirectory objects in the CWD, so
   removing it breaks the build.

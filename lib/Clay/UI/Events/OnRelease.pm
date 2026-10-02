@@ -38,7 +38,7 @@ Clay::UI::Events::OnRelease - pointer-released-over-widget event
 =head1 DESCRIPTION
 
 Fired by L<Clay::UI/render> in the frame the pointer is released
-(Clay's C<CLAY_POINTER_DATA_RELEASED_THIS_FRAME>), on the innermost
+(Clay's C<CLAY_POINTER_DATA_RELEASED_THIS_FRAME>), on the topmost
 L<Clay::UI::Role::Interaction::Pressable> widget that is still under the
 pointer B<and> on which the press started - a completed click. Pairs
 with L<Clay::UI::Events::OnPress>.
