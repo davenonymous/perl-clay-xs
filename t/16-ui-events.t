@@ -156,6 +156,40 @@ subtest 'IF_CONTINUE: undef return halts as HANDLED' => sub {
 };
 
 # -----------------------------------------------------------------------------
+# fire_event reports the outcome, and the event records who handled it.
+# -----------------------------------------------------------------------------
+
+subtest 'fire_event returns the outcome' => sub {
+	my $leaf = Clay::UI::Test::Box->new( id => 'leaf' );
+	my $mid  = Clay::UI::Test::Box->new( id => 'mid' );
+	my $root = Clay::UI::Test::Box->new( id => 'root' );
+	$root->add_child($mid);
+	$mid->add_child($leaf);
+
+	my $unhandled = Clay::UI::Events::Event->new(name => 'Ping');
+	ok( $leaf->fire_event($unhandled) == $CONTINUE, 'CONTINUE without any handler' );
+	is( $unhandled->handled_by, undef,              'nothing handled it' );
+	ok( $unhandled->result == $CONTINUE,            'the event reports CONTINUE too' );
+
+	$leaf->on('Ping', sub ($e) { return $CONTINUE });
+	$mid->on('Ping',  sub ($e) { return $HANDLED });
+	$root->on('Ping', sub ($e) { return $HANDLED });
+
+	my $handled = Clay::UI::Events::Event->new(name => 'Ping');
+	ok( $leaf->fire_event($handled) == $HANDLED, 'HANDLED once a node stops the walk' );
+	is( $handled->handled_by->id, 'mid',          'handled_by is the node that stopped it' );
+	ok( $handled->result == $HANDLED,             'the event reports HANDLED too' );
+
+	my $always = Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $ALWAYS);
+	ok( $leaf->fire_event($always) == $HANDLED, 'HANDLED under ALWAYS as well' );
+	is( $always->handled_by->id, 'mid',          'handled_by is the first handling node' );
+
+	my $never = Clay::UI::Events::Event->new(name => 'Ping', bubble_mode => $NEVER);
+	ok( $leaf->fire_event($never) == $CONTINUE, 'CONTINUE when the only node continues' );
+	is( $never->handled_by, undef,              'nothing handled it' );
+};
+
+# -----------------------------------------------------------------------------
 # Bubble: NEVER never reaches ancestors.
 # -----------------------------------------------------------------------------
 

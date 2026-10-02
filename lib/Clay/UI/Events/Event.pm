@@ -9,6 +9,7 @@ use Object::Pad 0.800;
 use Scalar::Util qw(blessed weaken);
 
 use Clay::UI::Enum::Bubble;
+use Clay::UI::Enum::Result;
 
 our $VERSION = '0.01';
 
@@ -18,6 +19,7 @@ class Clay::UI::Events::Event :strict(params) {
 
 	field $target         :reader = undef;
 	field $current_target :reader = undef;
+	field $handled_by     :reader = undef;
 	field $_dispatched           = 0;
 
 	# Subclasses override these to declare their default event name and
@@ -52,6 +54,20 @@ class Clay::UI::Events::Event :strict(params) {
 		weaken $current_target;
 		return;
 	}
+
+	# Set by the emitter once, at the first node whose handlers stopped
+	# the walk (or would have, under ALWAYS).
+	method _set_handled_by ($widget) {
+		return if defined $handled_by;
+		$handled_by = $widget;
+		weaken $handled_by;
+		return;
+	}
+
+	# The outcome of the dispatch so far, as fire_event returns it.
+	method result () {
+		return defined $handled_by ? Clay::UI::Enum::Result->HANDLED : Clay::UI::Enum::Result->CONTINUE;
+	}
 }
 
 1;
@@ -74,8 +90,8 @@ Clay::UI::Events::Event - base class for Clay::UI events
 
 =head1 DESCRIPTION
 
-Base class every concrete event derives from. Provides the four fields
-the dispatcher cares about:
+Base class every concrete event derives from. Provides the fields the
+dispatcher cares about:
 
 =over 4
 
@@ -106,7 +122,24 @@ The widget currently dispatching handlers. Equal to C<target> on the
 first hop; equals the bubble cursor on subsequent hops. Both are weak
 references so a fired event never holds the tree alive.
 
+=item C<handled_by> (set by the emitter)
+
+The first widget at which a handler returned anything but
+C<< Clay::UI::Enum::Result->CONTINUE >>, or C<undef> when no handler
+did (or the event has not been fired yet). Under C<IF_CONTINUE> this is
+the node the bubble walk stopped at. A weak reference, like C<target>.
+
 =back
+
+=head1 METHODS
+
+=head2 result
+
+	my $result = $event->result;
+
+The outcome of the dispatch, as a L<Clay::UI::Enum::Result> singleton:
+C<HANDLED> when C<handled_by> is set, C<CONTINUE> otherwise. This is
+what L<Clay::UI::Role::Events::Emitter/fire_event> returns.
 
 Sub-classes typically just declare extra payload fields (pointer
 position, scroll delta, key modifiers, ...) and override

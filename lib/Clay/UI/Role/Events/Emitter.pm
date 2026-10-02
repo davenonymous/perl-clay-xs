@@ -23,10 +23,11 @@ role Clay::UI::Role::Events::Emitter :does(Clay::UI::Role::Layout::HasParent)
 
 		$event->_set_target($self);  # dies on re-fire
 
-		my $mode = $event->bubble_mode;
-		my $always = Clay::UI::Enum::Bubble->ALWAYS;
-		my $never  = Clay::UI::Enum::Bubble->NEVER;
-		my $cont   = Clay::UI::Enum::Result->CONTINUE;
+		my $mode    = $event->bubble_mode;
+		my $always  = Clay::UI::Enum::Bubble->ALWAYS;
+		my $never   = Clay::UI::Enum::Bubble->NEVER;
+		my $cont    = Clay::UI::Enum::Result->CONTINUE;
+		my $handled = Clay::UI::Enum::Result->HANDLED;
 
 		my $node = $self;
 		while (defined $node) {
@@ -39,12 +40,15 @@ role Clay::UI::Role::Events::Emitter :does(Clay::UI::Role::Layout::HasParent)
 				$any_stop = 1 unless defined($result) && blessed($result) && $result == $cont;
 			}
 
-			return if $mode == $never;
-			return if $mode != $always && $any_stop;
+			if ($any_stop) {
+				$event->_set_handled_by($node);
+				return $handled if $mode != $always;
+			}
+			return $event->result if $mode == $never;
 
 			$node = $node->parent;
 		}
-		return;
+		return $event->result;
 	}
 }
 
@@ -93,6 +97,20 @@ Dispatches a L<Clay::UI::Events::Event> instance. Stamps
 C<< $event->target >> with C<$self> (raises if the event was already
 dispatched), then walks handlers at the originating widget and,
 according to C<< $event->bubble_mode >>, up the C<parent> chain.
+
+Returns the outcome as a L<Clay::UI::Enum::Result> singleton:
+C<< Clay::UI::Enum::Result->HANDLED >> when a handler at some node
+returned anything but C<CONTINUE> (that node is then
+C<< $event->handled_by >>), and C<< Clay::UI::Enum::Result->CONTINUE >>
+when every handler that ran returned C<CONTINUE>. Under C<ALWAYS> the
+walk continues past a handling node, and C<handled_by> names the first
+one.
+
+	my $result = $box->fire_event($event);
+	if ($result == Clay::UI::Enum::Result->HANDLED) {
+		my $widget = $event->handled_by;
+		...
+	}
 
 =head1 BUBBLE MODES
 
