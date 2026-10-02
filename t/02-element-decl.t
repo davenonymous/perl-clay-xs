@@ -129,7 +129,7 @@ subtest 'out-of-range values croak with struct and field' => sub {
     like( configure_error({ layout => { childGap => 70000 } }),
         qr/layout\.childGap: expected an integer in 0\.\.65535/, 'childGap above 65535' );
     like( configure_error({ layout => { layoutDirection => 257 } }),
-        qr/layout\.layoutDirection: expected an integer in 0\.\.1/, 'enum out of range' );
+        qr/layout\.layoutDirection: expected an integer in 0\.\.2/, 'enum out of range' );
     like( configure_error({ floating => { zIndex => 40000 } }),
         qr/floating\.zIndex: expected an integer in -32768\.\.32767/, 'zIndex beyond int16' );
     like( configure_error({ sizingGroup => { width => -1 } }),

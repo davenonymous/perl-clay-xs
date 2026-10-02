@@ -75,7 +75,8 @@ a fresh copy: changing the passed or returned structure afterwards does
 not change the widget (write it back to do that). A write takes effect on
 the next C<render>. The value is validated when set: it must be a
 hashref using only the keys Clay reads (C<sizing>, C<padding>,
-C<child_gap>, C<child_alignment>, C<layout_direction>, in snake_case or
+C<child_gap>, C<child_alignment>, C<layout_direction>, C<line_gap>,
+C<line_sizing>, in snake_case or
 camelCase) with values of the right shape - for example C<padding> is a
 hashref (C<padding_all(N)> builds one); anything else dies, naming the
 key.

@@ -39,9 +39,14 @@ through Clay::UI and replaces `userData` with widget class and id.
   mode (lenient, per frame) and check mode (`check_struct`, strict), and
   both croak `Clay::XS::StructError`. Add a field by extending its table.
 - `src/clay/clay.h.orig` is the pristine upstream header (committed).
-  `make` generates the gitignored `src/clay/clay.h` from it plus
-  `patches/0001-clay-sizing-groups.patch`, which adds sizing groups
-  (`sizingGroup`, `Clay__ApplySizingGroups`, a cycle error type). The
+  `make` generates the gitignored `src/clay/clay.h` from it plus the
+  patches in `@clay_patches` (`Makefile.PL`), applied in order:
+  `patches/0001-clay-sizing-groups.patch` adds sizing groups
+  (`sizingGroup`, `Clay__ApplySizingGroups`, a cycle error type);
+  `patches/0002-clay-flow-layout.patch` adds `CLAY_LEFT_TO_RIGHT_WRAP`,
+  `lineGap` and `lineSizing` (per element in `flowLines`: the X sizing
+  pass records where lines start, the Y sizing pass how tall they are;
+  later passes read both instead of recomputing). The
   `postamble` in `Makefile.PL` holds that rule and a `src/%.o : src/%.c`
   rule; EUMM's default rule drops subdirectory objects in the CWD, so
   removing it breaks the build.
@@ -167,11 +172,13 @@ through Clay::UI and replaces `userData` with widget class and id.
 ## Bumping Clay
 
 1. Update `references/clay`, copy its `clay.h` to `src/clay/clay.h.orig`.
-2. `rm -f src/clay/clay.h && make`. On rejects, fix `src/clay/clay.h.tmp`,
-   move it to `src/clay/clay.h`, and regenerate the patch with
-   `diff -u --label a/src/clay/clay.h --label b/src/clay/clay.h
-   src/clay/clay.h.orig src/clay/clay.h > patches/0001-clay-sizing-groups.patch`.
+2. `rm -f src/clay/clay.h && make`. On rejects, fix `src/clay/clay.h.tmp`
+   and regenerate the failing patch as a diff from the header with only the
+   earlier patches applied to the fixed one, e.g. `diff -u --label
+   a/src/clay/clay.h --label b/src/clay/clay.h <before> <after> >
+   patches/0002-clay-flow-layout.patch`. Each patch applies on top of the
+   previous ones.
 3. Re-check the helpers in `src/clay_impl.c` against Clay's internals and
    extend its warning pragmas if the build warns.
 4. Regenerate golden fixtures; drift unrelated to upstream changes means
-   the sizing-groups patch interacts badly with the new code.
+   one of the patches interacts badly with the new code.

@@ -390,6 +390,11 @@ BOOT:
     /* Layout direction. */
     install_iv_const(aTHX_ "CLAY_LEFT_TO_RIGHT", CLAY_LEFT_TO_RIGHT);
     install_iv_const(aTHX_ "CLAY_TOP_TO_BOTTOM", CLAY_TOP_TO_BOTTOM);
+    install_iv_const(aTHX_ "CLAY_LEFT_TO_RIGHT_WRAP", CLAY_LEFT_TO_RIGHT_WRAP);
+
+    /* Line sizing of wrap containers. */
+    install_iv_const(aTHX_ "CLAY_LINE_SIZING_GROW", CLAY_LINE_SIZING_GROW);
+    install_iv_const(aTHX_ "CLAY_LINE_SIZING_FIT",  CLAY_LINE_SIZING_FIT);
 
     /* Alignment. */
     install_iv_const(aTHX_ "CLAY_ALIGN_X_LEFT",   CLAY_ALIGN_X_LEFT);

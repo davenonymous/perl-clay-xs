@@ -30,6 +30,21 @@ mode croak. It carries the field path, the expected value, the value received
 and an optional hint, and it stringifies to the C-style message.
 _Avoid_: marshal error, validation error
 
+### Layout
+
+**Wrap container**:
+An element with `layoutDirection` `CLAY_LEFT_TO_RIGHT_WRAP`. It places its
+children left to right and starts a new line whenever the next child does
+not fit the remaining inner width.
+_Avoid_: flow box, flex-wrap container
+
+**Line**:
+A run of a wrap container's children placed side by side. The X sizing
+pass decides where lines start; `lineSizing` decides whether lines share
+the container's leftover height (`GROW`) or keep their tallest child's
+height (`FIT`).
+_Avoid_: row (reserved for Clay::UI::Grid rows)
+
 ### Binding
 
 **Held error**:

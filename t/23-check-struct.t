@@ -47,7 +47,7 @@ subtest 'range and type errors name the field' => sub {
 	my @cases = (
 		[ Clay_Padding => { left => -5 }, qr/^Clay_Padding\.left: expected an integer in 0\.\.65535, got '-5'/ ],
 		[ Clay_LayoutConfig => { childGap => 70000 }, qr/^Clay_LayoutConfig\.childGap: expected an integer in 0\.\.65535/ ],
-		[ Clay_LayoutConfig => { layoutDirection => 2 }, qr/layoutDirection: expected an integer in 0\.\.1/ ],
+		[ Clay_LayoutConfig => { layoutDirection => 3 }, qr/layoutDirection: expected an integer in 0\.\.2/ ],
 		[ Clay_FloatingElementConfig => { zIndex => 40000 }, qr/zIndex: expected an integer in -32768\.\.32767/ ],
 		[ Clay_Color => { r => 'red' }, qr/^Clay_Color\.r: expected a finite number, got 'red'/ ],
 		[ Clay_SizingAxis => { min => 0, max => -9**9**9 }, qr/max: expected a finite number or \+Inf/ ],
@@ -75,10 +75,10 @@ subtest 'shape errors carry the schema hint' => sub {
 
 subtest 'unknown keys are rejected at every level' => sub {
 	my $error = check_error('Clay_LayoutConfig', { childGapp => 1, zz => 2 });
-	like( "$error", qr/^Clay_LayoutConfig: expected only the keys sizing, padding, childGap, childAlignment, layoutDirection, got the unknown keys 'childGapp', 'zz'/,
+	like( "$error", qr/^Clay_LayoutConfig: expected only the keys sizing, padding, childGap, childAlignment, layoutDirection, lineGap, lineSizing, got the unknown keys 'childGapp', 'zz'/,
 		'unknown keys listed, sorted' );
 	is( $error->unknown_keys, [ 'childGapp', 'zz' ], 'unknown_keys reader' );
-	is( $error->known_keys, [qw(sizing padding childGap childAlignment layoutDirection)], 'known_keys reader' );
+	is( $error->known_keys, [qw(sizing padding childGap childAlignment layoutDirection lineGap lineSizing)], 'known_keys reader' );
 
 	like( check_error('Clay_ElementDeclaration', { border => { width => { lft => 1 } } }),
 		qr/^Clay_ElementDeclaration\.border\.width: expected only the keys left, right, top, bottom, betweenChildren, got the unknown key 'lft'/,

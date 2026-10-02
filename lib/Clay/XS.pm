@@ -76,7 +76,8 @@ our @EXPORT_OK = qw(
     set_scroll_position
     check_struct
 
-    CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM
+    CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM CLAY_LEFT_TO_RIGHT_WRAP
+    CLAY_LINE_SIZING_GROW CLAY_LINE_SIZING_FIT
     CLAY_ALIGN_X_LEFT CLAY_ALIGN_X_RIGHT CLAY_ALIGN_X_CENTER
     CLAY_ALIGN_Y_TOP CLAY_ALIGN_Y_BOTTOM CLAY_ALIGN_Y_CENTER
     CLAY__SIZING_TYPE_FIT CLAY__SIZING_TYPE_GROW
@@ -671,6 +672,35 @@ equalization repeats until the sizes settle, widening containers
 (a member of group 1 contains a member of group 2 whose other member
 contains a member of group 1) cannot settle; Clay then reports
 C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE> through the error handler.
+
+=head1 FLOW LAYOUT
+
+A second patch adds the layout direction C<CLAY_LEFT_TO_RIGHT_WRAP> and
+the layout fields C<lineGap> and C<lineSizing>. A wrap container lays its
+children out left to right and starts a new line below whenever the next
+child would not fit into the remaining inner width; lines are C<lineGap>
+pixels apart, children within a line C<childGap>. Line breaks use the
+children's preferred widths; a child wider than the container is
+compressed like any overflowing child (unless the container clips
+horizontally) and gets a line of its own. Within a line, C<GROW> children
+share the line's free width and stretch to the line's height.
+
+A C<FIT> wrap container prefers a single line and can be compressed down
+to its widest child; give it a C<GROW> or C<FIXED> width to make it wrap
+inside its parent. A C<FIT> height is the height of its lines. When the
+container is taller than its lines, C<lineSizing> decides what happens to
+the leftover height: C<CLAY_LINE_SIZING_GROW> (the default) adds an equal
+share of it to every line, C<CLAY_LINE_SIZING_FIT> keeps every line as
+tall as its tallest child. C<childAlignment.x> aligns every line on its
+own; C<childAlignment.y> aligns each child within its line and, with
+C<CLAY_LINE_SIZING_FIT>, the block of lines within the container.
+
+Borders between children (C<betweenChildren>) draw a vertical bar in the
+C<childGap> between neighbours on a line and a horizontal bar across the
+container in every C<lineGap>; a vertical bar reaches halfway into the
+C<lineGap>s around its line, or to the container's edge above the first
+line and below the last one. Wrapping is horizontal only: Clay sizes
+widths before heights, so wrapping into columns cannot be expressed.
 
 =head1 LIMITATIONS
 

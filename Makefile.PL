@@ -26,6 +26,23 @@ if ($ENV{PERL_CLAY_DISABLE_SIMD}) {
 
 my $ccflags = join(' ', @ccflags);
 
+# -----------------------------------------------------------------------------
+# Clay patches.
+#
+# The pristine upstream Clay header lives in src/clay/clay.h.orig (tracked in
+# git). The build copy at src/clay/clay.h is regenerated each time the pristine
+# header or a patch changes; the patches apply in this order, each on top of
+# the previous ones. The patched header is written to a temporary file and
+# moved into place only when every patch succeeds, so a failed patch never
+# leaves an up-to-date-looking, unpatched src/clay/clay.h behind.
+# src/clay/clay.h is gitignored so the working tree stays clean after a build.
+# -----------------------------------------------------------------------------
+
+my @clay_patches = qw(
+    patches/0001-clay-sizing-groups.patch
+    patches/0002-clay-flow-layout.patch
+);
+
 WriteMakefile(
     NAME           => 'Clay::UI',
     VERSION_FROM   => 'lib/Clay/UI.pm',
@@ -95,19 +112,15 @@ WriteMakefile(
 # so when a source file lives in a subdirectory the compiler still emits
 # the .o into CWD instead of the matching subdirectory. Override the rule
 # for our src/ tree so the object files land where O_FILES expects them.
+# The rule for src/clay/clay.h is built from @clay_patches (see above).
 sub MY::postamble {
-    return <<'POSTAMBLE';
-
-# The pristine upstream Clay header lives in src/clay/clay.h.orig (tracked in
-# git). The build copy at src/clay/clay.h is regenerated each time the pristine
-# header or the patch changes. The patched header is written to a temporary
-# file and moved into place only when patch succeeds, so a failed patch never
-# leaves an up-to-date-looking, unpatched src/clay/clay.h behind.
-# src/clay/clay.h is gitignored so the working tree stays clean after a build.
-src/clay/clay.h : src/clay/clay.h.orig patches/0001-clay-sizing-groups.patch
-	$(RM_F) src/clay/clay.h.tmp
-	patch -o src/clay/clay.h.tmp src/clay/clay.h.orig < patches/0001-clay-sizing-groups.patch
-	$(MV) src/clay/clay.h.tmp src/clay/clay.h
+    my $apply_patches = join '', map { "\tpatch src/clay/clay.h.tmp < $_\n" } @clay_patches;
+    return "\nsrc/clay/clay.h : src/clay/clay.h.orig @clay_patches\n"
+        . "\t\$(RM_F) src/clay/clay.h.tmp\n"
+        . "\t\$(CP) src/clay/clay.h.orig src/clay/clay.h.tmp\n"
+        . $apply_patches
+        . "\t\$(MV) src/clay/clay.h.tmp src/clay/clay.h\n"
+        . <<'POSTAMBLE';
 
 src/clay_impl$(OBJ_EXT) : src/clay/clay.h
 src/marshal$(OBJ_EXT) : src/clay/clay.h

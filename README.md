@@ -39,10 +39,10 @@ Requirements:
 - Test2::V0 and JSON::PP (tests only)
 
 Clay's header is vendored as `src/clay/clay.h.orig`; there are no
-external runtime dependencies. At build time `make` applies the patch
-under `patches/`, which adds cross-tree sizing groups (used by
-`Clay::UI::Grid`), and writes the result to `src/clay/clay.h`
-(generated, gitignored).
+external runtime dependencies. At build time `make` applies the patches
+under `patches/` in order - cross-tree sizing groups (used by
+`Clay::UI::Grid`) and flow layout (`CLAY_LEFT_TO_RIGHT_WRAP`) - and
+writes the result to `src/clay/clay.h` (generated, gitignored).
 
 ## Clay::XS
 
@@ -339,6 +339,32 @@ own sizing `max`. Groups may nest (a grid in a grid cell). Use them for
 form-label alignment, equal-height buttons and the like, independent of
 the Grid widget. See `examples/05-ui-grid.pl` for an SVG demo and
 `examples/04-ui-sidebar.pl` for the sidebar demo rebuilt on Clay::UI.
+
+### Flow layout
+
+Any widget with a `layout` slice wraps its children onto new lines when
+it sets `layout_direction => CLAY_LEFT_TO_RIGHT_WRAP`: children go left
+to right, and a child that does not fit the remaining width starts a new
+line below. `child_gap` separates neighbours, `line_gap` separates lines.
+When the container is taller than its lines, `line_sizing` decides what
+happens to the leftover height: `CLAY_LINE_SIZING_GROW` (the default)
+shares it equally between the lines, `CLAY_LINE_SIZING_FIT` keeps lines
+tight and lets `child_alignment.y` place them. `GROW` children fill the
+rest of their own line, and `border_width => { between_children => N }`
+draws separators between neighbours and between lines:
+
+```perl
+my $tags = My::Box->new(layout => {
+    sizing           => { width => sizing_grow() },
+    child_gap        => 8,
+    line_gap         => 8,
+    layout_direction => CLAY_LEFT_TO_RIGHT_WRAP,
+    line_sizing      => CLAY_LINE_SIZING_FIT,
+});
+$tags->add_child(My::Text->new(text => $_)) for qw(perl layout clay flow);
+```
+
+See `examples/07-ui-flow.pl` for an SVG demo.
 
 ### Focus
 
