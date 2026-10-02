@@ -17,7 +17,7 @@ class Clay::UI::_FrameRegistry :strict(params) {
 	# like one the frame never saw.
 	field %_by_user_data;   # render-command userData (refaddr) -> widget
 	field %_by_element;     # Clay element id -> widget
-	field %_rank;           # refaddr -> position in the walk (pre-order)
+	field %_rank;           # refaddr -> [ position in the walk (pre-order), widget ]
 	field @_scroll;         # [ widget, element id hash ] per scroll container
 
 	# Records a widget that emits render commands; returns the userData
@@ -34,7 +34,8 @@ class Clay::UI::_FrameRegistry :strict(params) {
 	method add_element ($widget, $element_id) {
 		$_by_element{ $element_id->{id} } = $widget;
 		weaken $_by_element{ $element_id->{id} };
-		$_rank{ refaddr $widget } = scalar keys %_rank;
+		$_rank{ refaddr $widget } = [ scalar keys %_rank, $widget ];
+		weaken $_rank{ refaddr $widget }[1];
 		if ($self->is_scroll_container($widget)) {
 			push @_scroll, [ $widget, $element_id ];
 			weaken $_scroll[-1][0];
@@ -62,11 +63,47 @@ class Clay::UI::_FrameRegistry :strict(params) {
 		return $_by_element{$id};
 	}
 
-	# Widgets sorted by their position in the walk; widgets the walk did
-	# not reach (removed ones) keep their relative order last.
+	# Widgets sorted by their position in the walk. Widgets the walk did not
+	# reach (added since) follow, in the pre-order of the tree they are in
+	# now; ties keep their input order.
 	method in_tree_order (@widgets) {
-		my $rank = sub ($widget) { $_rank{ refaddr $widget } // 9**9**9 };
-		return map { $_->[1] } sort { $a->[0] <=> $b->[0] } map { [ $rank->($_), $_ ] } @widgets;
+		my $walked  = scalar keys %_rank;
+		my %unknown = map { refaddr($_) => $_ } grep { !defined $self->_walk_rank($_) } @widgets;
+		my %live_rank;
+		for my $root (_distinct_roots(values %unknown)) {
+			my $position = 0;
+			$live_rank{ refaddr $_ } //= $position++ for _pre_order($root);
+		}
+		my $rank = sub ($widget) {
+			return $self->_walk_rank($widget) // $walked + ($live_rank{ refaddr $widget } // 9**9**9);
+		};
+		my @keyed = map { [ $rank->($widgets[$_]), $_, $widgets[$_] ] } 0 .. $#widgets;
+		return map { $_->[2] } sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @keyed;
+	}
+
+	# The widget's position in the walk, or undef if the walk did not reach
+	# it (a freed widget's address may have been reused).
+	method _walk_rank ($widget) {
+		my $entry = $_rank{ refaddr $widget };
+		return undef unless defined $entry && defined $entry->[1] && refaddr($entry->[1]) == refaddr($widget);
+		return $entry->[0];
+	}
+
+	sub _distinct_roots (@widgets) {
+		my %roots = map { my $root = $_->root; refaddr($root) => $root } @widgets;
+		return values %roots;
+	}
+
+	# Every widget of the tree below $root, depth-first pre-order.
+	sub _pre_order ($root) {
+		my @order;
+		my @stack = ($root);
+		while (@stack) {
+			my $node = shift @stack;
+			push @order, $node;
+			unshift @stack, @{ $node->children } if $node->DOES('Clay::UI::Role::Core::Element');
+		}
+		return @order;
 	}
 
 	# [ widget, element id hash ] for every scroll container that still
@@ -162,8 +199,9 @@ The widget, or undef.
 
 =item C<in_tree_order(@widgets)>
 
-C<@widgets> sorted by walk position; unknown ones last, in their
-original order.
+C<@widgets> sorted by walk position. Widgets the walk did not reach
+come last, in the depth-first pre-order of the tree they are in now;
+ties keep their original order.
 
 =item C<scroll_containers>
 

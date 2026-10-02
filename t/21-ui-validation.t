@@ -45,6 +45,39 @@ subtest 'misspelled constructor parameters die' => sub {
 		'a consumer class declared :strict(params)' );
 };
 
+subtest 'accessor values are copies' => sub {
+	my $color = [ 10, 20, 30, 255 ];
+	my $box = Clay::UI::Test::Box->new(background_color => $color, layout => { child_gap => 4 });
+	push @$color, 99;
+	is( $box->background_color, [ 10, 20, 30, 255 ], 'changing the passed array does not change the widget' );
+	$box->layout->{child_gap} = -5;
+	is( $box->layout, { child_gap => 4 }, 'changing the returned hash does not either' );
+	my $blessed = bless { r => 1, g => 2, b => 3, a => 255 }, 'Some::Colour';
+	$box->background_color($blessed);
+	$blessed->{r} = 999;
+	is( $box->background_color, { r => 1, g => 2, b => 3, a => 255 }, 'a blessed hash is copied as plain data' );
+};
+
+subtest 'viewport sizes must be positive finite numbers' => sub {
+	my $ui = make_ui(Clay::UI::Test::Box->new(id => 'root'));
+	like( dies { $ui->width('inf') }, qr/width must be a positive finite number/, 'an infinite width dies' );
+	like( dies { $ui->height('nan') }, qr/height must be a positive finite number/, 'a NaN height dies' );
+	like( dies { $ui->width(10, 20) }, qr/width takes one value/, 'one value at a time' );
+	is( [ $ui->width, $ui->height ], [ 100, 100 ], 'the size is unchanged' );
+	ok( lives { $ui->height(50) }, 'a valid size still works' );
+	like( dies { Clay::UI->new(width => 'inf', height => 1, root => Clay::UI::Test::Box->new) },
+		qr/'width' and 'height' must be positive finite numbers/, 'also at construction' );
+};
+
+subtest 'a non-finite pointer dies in Clay::UI and is not remembered' => sub {
+	my $ui = make_ui(Clay::UI::Test::Box->new(id => 'root'));
+	$ui->render(pointer_state => { x => 1, y => 1 });
+	like( dies { $ui->render(pointer_state => { x => 'nan', y => 2 }) }, qr/pointer_state 'x' must be a finite number/,
+		'a NaN position dies' );
+	like( dies { $ui->render(scroll_delta => [ 'inf', 0 ]) }, qr/'scroll_delta' must be/, 'so does an infinite delta' );
+	ok( lives { $ui->render }, 'the next render reuses the last good pointer' );
+};
+
 subtest 'render arguments are validated' => sub {
 	my $ui = make_ui(Clay::UI::Test::Box->new(id => 'root'));
 	like( dies { $ui->render(pointer => {}) }, qr/unknown argument\(s\): pointer/, 'unknown argument' );
@@ -52,7 +85,7 @@ subtest 'render arguments are validated' => sub {
 	like( dies { $ui->render(pointer_state => { x => 1, y => 2, pressed => 1 }) },
 		qr/unknown pointer_state key\(s\): pressed/, 'unknown pointer_state key' );
 	like( dies { $ui->render(pointer_state => { x => 'left', y => 2 }) },
-		qr/pointer_state 'x' must be a number/, 'non-numeric pointer position' );
+		qr/pointer_state 'x' must be a finite number/, 'non-numeric pointer position' );
 	like( dies { $ui->render(delta_time => -1) }, qr/'delta_time' must be a finite number >= 0/, 'negative delta_time' );
 	like( dies { $ui->render(scroll_delta => 5) }, qr/'scroll_delta' must be/, 'scalar scroll_delta' );
 	like( dies { $ui->render(scroll_delta => { x => 0, yy => -1 }) }, qr/unknown scroll_delta key\(s\): yy/,

@@ -35,9 +35,9 @@
  *
  *   - Fail Fast: every present value is parsed at this boundary. A wrong
  *     reference type (at any nesting level), a non-numeric value, a
- *     non-finite float, a fractional integer or an integer outside the C
- *     field's range croaks with a Clay::XS::StructError naming the struct
- *     and field. Values are fetched once (one get-magic call) and read
+ *     float that is not finite as a C float (beyond +-FLT_MAX), a
+ *     fractional integer or an integer outside the C field's range croaks
+ *     with a Clay::XS::StructError naming the struct and field. Values are fetched once (one get-magic call) and read
  *     with the _nomg accessors.
  *
  *   - Strings are characters: text comes back from Clay as UTF-8 flagged
@@ -46,6 +46,7 @@
 
 #include "clay_perl.h"
 
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -159,23 +160,25 @@ static bool is_number_nomg(pTHX_ SV *sv)
     return SvROK(sv) ? cBOOL(SvAMAGIC(sv)) : cBOOL(looks_like_number(sv));
 }
 
+/* A number that stays finite as a C float: anything beyond +-FLT_MAX
+ * would turn into an infinity when narrowed. */
 static bool read_finite(pTHX_ SV *sv, float *out)
 {
     if (!is_number_nomg(aTHX_ sv)) return false;
     NV nv = SvNV_nomg(sv);
-    if (Perl_isnan(nv) || Perl_isinf(nv)) return false;
+    if (Perl_isnan(nv) || nv > FLT_MAX || nv < -FLT_MAX) return false;
     *out = (float) nv;
     return true;
 }
 
 /* A size maximum: finite, or +Inf for "unbounded" (Clay also treats 0 as
- * "no max"). */
+ * "no max"); a value beyond FLT_MAX is unbounded too. */
 static bool read_maximum(pTHX_ SV *sv, float *out)
 {
     if (!is_number_nomg(aTHX_ sv)) return false;
     NV nv = SvNV_nomg(sv);
-    if (Perl_isnan(nv) || (Perl_isinf(nv) && nv < 0)) return false;
-    *out = (float) nv;
+    if (Perl_isnan(nv) || nv < -FLT_MAX) return false;
+    *out = nv > FLT_MAX ? (float) INFINITY : (float) nv;
     return true;
 }
 
@@ -190,13 +193,33 @@ static bool read_integer(pTHX_ SV *sv, NV min, NV max, NV *out)
     return true;
 }
 
-/* Opaque pointer-sized integers (userData, imageData, customData). */
+/* Opaque pointer-sized integers (userData, imageData, customData): an
+ * unsigned integer that fits a pointer, read exactly. Integers above 2**53
+ * are exact only as Perl integers or decimal strings, not as floats. */
 static bool read_pointer(pTHX_ SV *sv, void **out)
 {
-    bool integral = !SvROK(sv) && looks_like_number(sv)
-                 && (SvIOK(sv) || SvNV_nomg(sv) == Perl_floor(SvNV_nomg(sv)));
-    if (!integral) return false;
-    *out = (SvIOK(sv) && SvIsUV(sv)) ? INT2PTR(void *, SvUV_nomg(sv)) : INT2PTR(void *, SvIV_nomg(sv));
+    if (SvROK(sv) || !looks_like_number(sv)) return false;
+    UV value;
+    int flags = 0;
+    if (SvPOK(sv) && !SvIOK(sv) && !SvNOK(sv)) {
+        STRLEN length;
+        const char *pv = SvPV_nomg(sv, length);
+        flags = grok_number(pv, length, &value);
+    }
+    if ((flags & (IS_NUMBER_IN_UV | IS_NUMBER_GREATER_THAN_UV_MAX | IS_NUMBER_NOT_INT | IS_NUMBER_NEG
+                  | IS_NUMBER_INFINITY | IS_NUMBER_NAN)) == IS_NUMBER_IN_UV) {
+        /* value holds the decimal string's integer */
+    } else if (SvIOK(sv)) {
+        if (!SvIsUV(sv) && SvIVX(sv) < 0) return false;
+        value = SvIsUV(sv) ? SvUVX(sv) : (UV) SvIVX(sv);
+    } else {
+        NV nv = SvNV_nomg(sv);
+        /* UV_MAX + 1 is a power of two, exact as an NV. */
+        if (Perl_isnan(nv) || nv != Perl_floor(nv) || nv < 0 || nv >= (NV) UV_MAX + 1.0) return false;
+        value = (UV) nv;
+    }
+    if (sizeof(void *) < sizeof(UV) && value > (UV) UINTPTR_MAX) return false;
+    *out = INT2PTR(void *, value);
     return true;
 }
 
@@ -221,6 +244,34 @@ UV clay_perl_parse_uint(pTHX_ SV *sv, const char *what, UV max)
     return (UV) clay_perl_parse_integer(aTHX_ sv, what, 0, (NV) max);
 }
 
+double clay_perl_parse_float_or(pTHX_ SV *sv, const char *what, double fallback)
+{
+    SvGETMAGIC(sv);
+    if (!SvOK(sv)) return fallback;
+    float value;
+    if (!read_finite(aTHX_ sv, &value)) croak_bad_argument(aTHX_ what, "a finite number", sv);
+    return value;
+}
+
+double clay_perl_parse_max_float_or(pTHX_ SV *sv, const char *what, double fallback)
+{
+    SvGETMAGIC(sv);
+    if (!SvOK(sv)) return fallback;
+    float value;
+    if (!read_maximum(aTHX_ sv, &value)) croak_bad_argument(aTHX_ what, "a finite number or +Inf", sv);
+    return value;
+}
+
+UV clay_perl_parse_uint_or(pTHX_ SV *sv, const char *what, UV max, UV fallback)
+{
+    SvGETMAGIC(sv);
+    if (!SvOK(sv)) return fallback;
+    NV value;
+    if (read_integer(aTHX_ sv, 0, (NV) max, &value)) return (UV) value;
+    SV *expected = sv_2mortal(newSVpvf("an integer in 0..%.0f", (double) max));
+    croak_bad_argument(aTHX_ what, SvPV_nolen(expected), sv);
+}
+
 NV clay_perl_parse_integer(pTHX_ SV *sv, const char *what, NV min, NV max)
 {
     SvGETMAGIC(sv);
@@ -240,7 +291,10 @@ SV *clay_perl_require_code(pTHX_ SV *sv, const char *what, bool allow_undef)
     if (!SvROK(sv) || SvTYPE(SvRV(sv)) != SVt_PVCV) {
         croak_bad_argument(aTHX_ what, allow_undef ? "a CODE reference or undef" : "a CODE reference", sv);
     }
-    return sv;
+    /* A plain copy, so callers do not run get-magic again. */
+    SV *code = sv_newmortal();
+    sv_setsv_nomg(code, sv);
+    return code;
 }
 
 /* ===========================================================================
@@ -271,7 +325,10 @@ static NV field_integer(pTHX_ SV *sv, const marshal_label *what, const char *fie
 static void *field_pointer(pTHX_ SV *sv, const marshal_label *what, const char *field)
 {
     void *value;
-    if (!read_pointer(aTHX_ sv, &value)) croak_bad_value(aTHX_ what, field, "an integer", sv);
+    if (!read_pointer(aTHX_ sv, &value)) {
+        SV *expected = newSVpvf("an integer in 0..%" UVuf, (UV) (sizeof(void *) < sizeof(UV) ? (UV) UINTPTR_MAX : UV_MAX));
+        croak_struct_error(aTHX_ what, field, expected, describe_value(aTHX_ sv), NULL);
+    }
     return value;
 }
 
@@ -1111,7 +1168,7 @@ SV *clay_text_element_config_to_sv(pTHX_ Clay_TextElementConfig value)
     hv_store_uv(aTHX_ hv, "lineHeight",    value.lineHeight);
     hv_store_iv(aTHX_ hv, "wrapMode",      (IV) value.wrapMode);
     hv_store_iv(aTHX_ hv, "textAlignment", (IV) value.textAlignment);
-    hv_store_iv(aTHX_ hv, "userData",      PTR2IV(value.userData));
+    hv_store_uv(aTHX_ hv, "userData",      PTR2UV(value.userData));
     return newRV_noinc((SV *) hv);
 }
 
@@ -1192,7 +1249,7 @@ SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data)
  *   zIndex      : int16_t
  *   commandType : Clay_RenderCommandType enum value
  *   boundingBox : { x, y, width, height }
- *   userData    : the integer passed as userData (0 when none)
+ *   userData    : the unsigned integer passed as userData (0 when none)
  *   renderData  : type-specific hashref (see below)
  *
  * The renderData shape depends on commandType. The shape mirrors the C
@@ -1228,7 +1285,7 @@ static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
                     clay_color_to_sv(aTHX_ cmd->renderData.image.backgroundColor));
         hv_store_sv(aTHX_ hv, "cornerRadius",
                     clay_corner_radius_to_sv(aTHX_ cmd->renderData.image.cornerRadius));
-        hv_store_iv(aTHX_ hv, "imageData", PTR2IV(cmd->renderData.image.imageData));
+        hv_store_uv(aTHX_ hv, "imageData", PTR2UV(cmd->renderData.image.imageData));
         break;
 
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
@@ -1236,7 +1293,7 @@ static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
                     clay_color_to_sv(aTHX_ cmd->renderData.custom.backgroundColor));
         hv_store_sv(aTHX_ hv, "cornerRadius",
                     clay_corner_radius_to_sv(aTHX_ cmd->renderData.custom.cornerRadius));
-        hv_store_iv(aTHX_ hv, "customData", PTR2IV(cmd->renderData.custom.customData));
+        hv_store_uv(aTHX_ hv, "customData", PTR2UV(cmd->renderData.custom.customData));
         break;
 
     case CLAY_RENDER_COMMAND_TYPE_BORDER:
@@ -1272,7 +1329,7 @@ static SV *clay_render_command_to_sv(pTHX_ const Clay_RenderCommand *cmd)
     HV *hv = newHV();
     hv_store_sv(aTHX_ hv, "boundingBox", clay_bounding_box_to_sv(aTHX_ cmd->boundingBox));
     hv_store_sv(aTHX_ hv, "renderData",  clay_render_data_to_sv(aTHX_ cmd));
-    hv_store_iv(aTHX_ hv, "userData",    PTR2IV(cmd->userData));
+    hv_store_uv(aTHX_ hv, "userData",    PTR2UV(cmd->userData));
     hv_store_uv(aTHX_ hv, "id",          cmd->id);
     hv_store_iv(aTHX_ hv, "zIndex",      (IV) cmd->zIndex);
     hv_store_iv(aTHX_ hv, "commandType", (IV) cmd->commandType);

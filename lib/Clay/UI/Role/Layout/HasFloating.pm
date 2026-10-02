@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional clay_struct);
+use Clay::UI::_validate qw(optional clay_struct copy_value);
 use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
@@ -20,10 +20,10 @@ role Clay::UI::Role::Layout::HasFloating {
 	}
 
 	method floating (@new) {
-		return $floating unless @new;
+		return copy_value($floating) unless @new;
 		$floating = optional(clay_struct('Clay_FloatingElementConfig'), floating => @new);
 		bump_revision();
-		return $floating;
+		return copy_value($floating);
 	}
 
 	method contribute_floating ($config) {
@@ -66,7 +66,9 @@ declaration. Pass any of Clay's floating-element fields; snake_case keys
 are camelized by the walker.
 
 C<floating> is a read/write accessor: call with no argument to read, with
-one argument to write. A write takes effect on the next C<render>. The
+one argument to write. A write takes effect on the next C<render>. The widget keeps its own copy of what was written and every read returns
+a fresh copy: changing the passed or returned structure afterwards does
+not change the widget (write it back to do that). The
 value must be a hashref using the keys Clay reads (C<offset>, C<expand>,
 C<parent_id>, C<z_index>, C<attach_points>, C<pointer_capture_mode>,
 C<attach_to>, C<clip_to>) with values of the right shape; C<parent_id> is

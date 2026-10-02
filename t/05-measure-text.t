@@ -107,4 +107,23 @@ Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
 is( text_frame("unchanged words here", { fontSize => 10 })->{renderData}{stringContents},
     "unchanged words here", 'text survives id lookups from inside the measurer' );
 
+Clay_SetMeasureTextFunction(sub { return });
+like( dies { text_frame("forgotten", { fontSize => 10 }) },
+    qr/measure_text callback result: expected a hash or array reference, got undef/,
+    'a measurer that returns nothing croaks instead of measuring 0x0' );
+
+# In a fresh process, before any context installed a measurer, text is
+# reported all the same (Clay's measure function pointer is process-wide).
+my $code = <<'PERL';
+use Clay::XS qw(:all);
+my $ctx = Clay_Initialize(Clay_MinMemorySize(), [10, 10]);
+Clay_BeginLayout(); Clay__OpenTextElement('x', {});
+print eval { Clay_EndLayout(); 1 } ? "no error\n" : $@;
+PERL
+open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+my $fresh = do { local $/; <$child> };
+close $child;
+like( $fresh, qr/text measured but no measure_text function is installed for this context/,
+    'a fresh process without a measurer croaks' );
+
 done_testing;

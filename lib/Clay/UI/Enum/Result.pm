@@ -42,7 +42,9 @@ Two singleton values handlers may return:
 
 Equivalent to returning C<undef> from a handler. In
 C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> mode this stops further
-propagation. In C<ALWAYS> or C<NEVER> mode the return value is ignored.
+propagation. In C<ALWAYS> or C<NEVER> mode it does not change how far
+the event travels, but it still marks the widget as the event's
+C<handled_by> and makes C<fire_event> return C<HANDLED>.
 
 =item C<< Clay::UI::Enum::Result->CONTINUE >>
 

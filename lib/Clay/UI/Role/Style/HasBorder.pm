@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional validate_border_width clay_struct);
+use Clay::UI::_validate qw(optional validate_border_width clay_struct copy_value);
 use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
@@ -22,17 +22,17 @@ role Clay::UI::Role::Style::HasBorder {
 	}
 
 	method border_color (@new) {
-		return $border_color unless @new;
+		return copy_value($border_color) unless @new;
 		$border_color = optional(clay_struct('Clay_Color'), border_color => @new);
 		bump_revision();
-		return $border_color;
+		return copy_value($border_color);
 	}
 
 	method border_width (@new) {
-		return $border_width unless @new;
+		return copy_value($border_width) unless @new;
 		$border_width = optional(\&validate_border_width, border_width => @new);
 		bump_revision();
-		return $border_width;
+		return copy_value($border_width);
 	}
 
 	method contribute_border ($config) {
@@ -87,6 +87,8 @@ C<border_color> and C<border_width> are read/write accessors: call with no
 argument to read, with one argument to write. A write takes effect on the
 next C<render>. Values are validated when set: C<border_color> is a
 colour (C<[r, g, b, a]> or C<{ r, g, b, a }>), C<border_width> a number or
-a hashref with the keys above; anything else dies.
+a hashref with the keys above; anything else dies. The widget keeps its own copy of what was written and every read returns
+a fresh copy: changing the passed or returned structure afterwards does
+not change the widget (write it back to do that).
 
 =cut

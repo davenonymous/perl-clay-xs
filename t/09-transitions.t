@@ -160,6 +160,67 @@ subtest 'exiting element keeps its text' => sub {
     Clay_SetTransitionHandlers();
 };
 
+subtest 'an abandoned frame does not free text an exiting element shows' => sub {
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $toast_frame = sub ($with_toast) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("page") );
+        Clay__ConfigureOpenElement({});
+        if ($with_toast) {
+            Clay__OpenElementWithId( Clay_GetElementId("toast") );
+            Clay__ConfigureOpenElement({ transition => { duration => 1, properties => CLAY_TRANSITION_PROPERTY_X,
+                                                          exit => { hasSetFinal => 1 } } });
+            Clay__OpenTextElement("TOAST-MESSAGE-TEXT", {});
+            Clay__CloseElement();
+        }
+        Clay__CloseElement();
+        return [ map { $_->{renderData}{stringContents} }
+                 grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ Clay_EndLayout(0.016) } ];
+    };
+    $toast_frame->(1) for 1 .. 3;
+    Clay_BeginLayout();
+    Clay__OpenTextElement("abandoned " . ("x" x 20_000), {});
+    is( $toast_frame->(0), ["TOAST-MESSAGE-TEXT"], 'the exiting toast still shows its text' );
+    is( $toast_frame->(0), ["TOAST-MESSAGE-TEXT"], 'also in the frame after' );
+    Clay_SetTransitionHandlers();
+};
+
+subtest 'memory stays bounded while exit transitions keep running' => sub {
+    Clay_SetTransitionHandlers(sub ($args, $userdata) { $args->{elapsedTime} >= $args->{duration} }, undef,
+        sub ($initial, $properties, $userdata) { $initial });
+    for my $frame (1 .. 200) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("toast$frame") );
+        Clay__ConfigureOpenElement({ transition => { duration => 0.1, properties => CLAY_TRANSITION_PROPERTY_X,
+                                                     exit => { hasSetFinal => 1 } } });
+        Clay__OpenTextElement("toast $frame " . ("x" x 5000), {});
+        Clay__CloseElement();
+        Clay_EndLayout(0.016);
+    }
+    my $chunks = Clay::XS::_string_arena_chunk_count($ctx);
+    ok( $chunks <= 16, "a new exiting toast every frame keeps $chunks text chunks, not one per frame" );
+    Clay_SetTransitionHandlers();
+};
+
+subtest 'exits survive frames over the element cap' => sub {
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $small = Clay_Initialize(Clay_MinMemorySize(), { width => 100, height => 100 }, sub { });
+    Clay_SetMeasureTextFunction(sub { return { width => 8, height => 10 } });
+    for my $frame (1 .. 3) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId("E") );
+        Clay__ConfigureOpenElement({ transition => { duration => 1, properties => CLAY_TRANSITION_PROPERTY_X,
+                                                     exit => { hasSetFinal => 1 } } });
+        Clay__OpenTextElement("text of E", {});
+        for (1 .. 10_000) { Clay__OpenElement(); Clay__CloseElement() }
+        Clay__CloseElement();
+        Clay_EndLayout(0.016);
+    }
+    pass( 'three frames over the cap with an exiting element' );
+    Clay_SetCurrentContext($ctx);
+    Clay_SetTransitionHandlers();
+};
+
 # -----------------------------------------------------------------------------
 # What the handler writes into current is what gets drawn.
 # -----------------------------------------------------------------------------

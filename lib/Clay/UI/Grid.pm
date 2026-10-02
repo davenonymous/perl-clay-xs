@@ -70,25 +70,39 @@ sub _drop_grid_groups (@wrappers) {
 		$wrapper->_set_grid_groups(
 			_is_grid_owned_group($width)  ? 0 : $width,
 			_is_grid_owned_group($height) ? 0 : $height,
+			undef,
 		);
 	}
 	return;
 }
 
-# Holds one grid id for the lifetime of a Grid and returns it to the pool
-# when the grid is freed. Keeping the id in its own object leaves DESTROY
-# free for classes that consume the Grid role.
+# Holds one grid id and returns it to the pool when the last holder is
+# freed: the Grid, and every cell that still carries ids packed with it (a
+# cell kept after its Grid is gone must not share ids with the next Grid).
+# It also knows whether its Grid still exists: ids packed for a freed Grid
+# size nothing (see Clay::UI::Role::Layout::HasSizingGroup). Keeping the
+# id in its own object leaves DESTROY free for classes that consume the
+# Grid role.
 package Clay::UI::Grid::_IdLease {
-	sub new ($class) {
-		my $id = Clay::UI::Grid::_claim_grid_id();
-		return bless \$id, $class;
+	use Scalar::Util qw(weaken);
+
+	sub new ($class, $grid) {
+		my $self = bless { id => Clay::UI::Grid::_claim_grid_id(), grid => $grid }, $class;
+		weaken $self->{grid};
+		return $self;
 	}
 
-	sub id ($self) { $$self }
+	sub id ($self) { $self->{id} }
+
+	# True while the Grid that claimed the id exists.
+	sub is_live ($self) { defined $self->{grid} }
+
+	# True for a group id packed with this lease's grid id.
+	sub owns_group ($self, $group) { ($group >> Clay::UI::Grid::_LOCAL_BITS) == $self->{id} }
 
 	sub DESTROY ($self) {
 		return if ${^GLOBAL_PHASE} eq 'DESTRUCT';
-		Clay::UI::Grid::_release_grid_id($$self);
+		Clay::UI::Grid::_release_grid_id($self->{id});
 		return;
 	}
 }
@@ -121,7 +135,7 @@ role Clay::UI::Grid
 	ADJUST {
 		$cell_gap    = required(clay_field('Clay_LayoutConfig', 'childGap'), cell_gap => $cell_gap);
 		$row_gap     = required(clay_field('Clay_LayoutConfig', 'childGap'), row_gap  => $row_gap);
-		$_grid_lease = Clay::UI::Grid::_IdLease->new;
+		$_grid_lease = Clay::UI::Grid::_IdLease->new($self);
 	}
 
 	method cell_wrappers () {
@@ -197,9 +211,12 @@ role Clay::UI::Grid
 		}
 		my $width  = $wrapper->width_group;
 		my $height = $wrapper->height_group;
+		my $stamp_width  = $width  == 0 || _is_grid_owned_group($width);
+		my $stamp_height = $height == 0 || _is_grid_owned_group($height);
 		$wrapper->_set_grid_groups(
-			($width  == 0 || _is_grid_owned_group($width))  ? $width_id  : $width,
-			($height == 0 || _is_grid_owned_group($height)) ? $height_id : $height,
+			$stamp_width  ? $width_id  : $width,
+			$stamp_height ? $height_id : $height,
+			($stamp_width || $stamp_height) ? $_grid_lease : undef,
 		);
 		return $wrapper;
 	}
@@ -483,7 +500,13 @@ allocated lazily per axis from a per-Grid counter. This guarantees:
 
 =item *
 
-Different Grid instances never collide, including nested grids.
+Different Grid instances never collide, including nested grids. A
+Cell that still carries a grid's ids (one you kept after the grid was
+freed, for example) holds that grid id until it is freed or put into
+another grid, so no new Grid can share its ids; and once its grid is
+freed, those ids size nothing (its C<width_group> and C<height_group>
+read 0 there), so cells kept from one grid are not equalized with each
+other.
 
 =item *
 
@@ -494,8 +517,8 @@ by C<remove_row>.
 =back
 
 The pool supports up to 4095 concurrent grids. The grid-id is held by a
-small internal object that returns it to the pool when the Grid is
-garbage-collected, so long-running programs that churn grids do not
+small internal object that returns it to the pool when the Grid and
+every Cell still carrying its ids are garbage-collected, so long-running programs that churn grids do not
 exhaust the namespace, and classes consuming the Grid role remain free
 to define their own C<DESTROY>. If the pool is genuinely full when a new
 Grid is constructed, the constructor dies with a clear message.

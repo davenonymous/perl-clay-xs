@@ -308,11 +308,14 @@ subtest 'a widget with a parent cannot be a Clay::UI root' => sub {
 subtest 'second Clay::UI on the same root dies' => sub {
 	my $root = Clay::UI::Test::Box->new;
 	my $ui   = Clay::UI->new(root => $root, width => 100, height => 100);
+	my $current = Clay::XS::Clay_GetCurrentContext();
 	like(
 		dies { Clay::UI->new(root => $root, width => 50, height => 50) },
-		qr/already bound/,
+		qr/'root' is already the root of another Clay::UI/,
 		'cannot re-attach root to a second Clay::UI',
 	);
+	ref_is( Clay::XS::Clay_GetCurrentContext(), $current, 'the current Clay context is unchanged' );
+	ok( lives { $ui->render }, 'the first Clay::UI still renders' );
 };
 
 done_testing;

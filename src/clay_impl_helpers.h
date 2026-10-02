@@ -15,8 +15,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* True while any element of the current context plays its exit transition. */
-bool clay_perl_clay_has_exiting_transitions(void);
+/* Receives one buffer Clay keeps reading (see the visit function below). */
+typedef void (*clay_perl_buffer_visitor)(const char *chars, void *data);
+
+/* Calls visit(chars, data) for the text and the id string of every
+ * element in the subtrees of the current context's exiting elements:
+ * Clay keeps those clones, with the buffers of their last declaration,
+ * until the exit transitions finish. Calls visit(NULL, data) when it
+ * cannot tell (the last frame exceeded the element cap, so Clay made no
+ * clones, or memory ran out): the caller must then keep everything. Only
+ * valid while the context holds a completed layout. */
+void clay_perl_clay_visit_exiting_buffers(clay_perl_buffer_visitor visit, void *data);
 
 /* Clay's default element and measure-cache word counts, used by
  * Clay_Initialize when no context is current. */

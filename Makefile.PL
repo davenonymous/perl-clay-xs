@@ -70,6 +70,7 @@ WriteMakefile(
                     'src/marshal.c',
                     'src/callbacks.c' ],
     H          => [ 'src/clay_perl.h',
+                    'src/clay_impl_helpers.h',
                     'src/clay/clay.h.orig' ],
 
     CCFLAGS    => "$Config{ccflags} $ccflags",

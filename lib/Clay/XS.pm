@@ -298,12 +298,19 @@ frame was abandoned) warns C<Clay::XS: context destroyed with a held
 callback error: ...>.
 
 Clay keeps one process-wide current context, so contexts belong to the
-interpreter that created them: they are not copied into new threads,
-and using an inherited current context from another thread croaks.
+interpreter that created them: they are not copied into new threads.
+While another thread's context is current, every Clay-touching call
+(C<Clay_Initialize> included) croaks C<< <function>: the current
+Clay::XS context belongs to a different interpreter/thread >>; only
+C<Clay_SetCurrentContext> with one of the thread's own contexts works.
 
 C<Clay_SetMaxElementCount> and C<Clay_SetMaxMeasureTextCacheWordCount>
 take effect at the next C<Clay_Initialize>, which sizes the new context
-for them (the word count must be at least 32). Calling a setter on a live
+for them (the word count must be at least 32). Without a current
+context, C<Clay_SetMaxElementCount> also sets the word count to twice
+the element count, as Clay does, so set the word count after the
+element count; C<Clay_Initialize> croaks for fewer than 32 words.
+Calling a setter on a live
 context is allowed, but every Clay-touching call on that context then
 croaks until C<Clay_Initialize> has been called again - Clay's arrays
 keep the sizes they were created with. Counts whose arena would exceed
@@ -329,6 +336,19 @@ croak when no element is open.
 
 =item *
 
+C<Clay__ConfigureOpenElement> configures the element just opened, once,
+before any child is declared (as the C C<CLAY()> macro does); a second
+call or one after a child croaks.
+
+=item *
+
+C<Clay_SetPointerState> and C<Clay_UpdateScrollContainers> work on the
+layout of the last completed frame, so they croak between
+C<Clay_BeginLayout> and C<Clay_EndLayout>, and after a frame that was
+never finished (see below) until the next frame completes.
+
+=item *
+
 C<Clay_EndLayout> croaks without a matching C<Clay_BeginLayout>. If
 elements are still open (for example because an exception interrupted a
 declaration), it closes them, lets Clay finish the frame, and croaks
@@ -337,14 +357,26 @@ Clay__OpenElement/Clay__CloseElement)>, followed by C<; callback error:>
 and the message when a callback error is held as well. A held exception
 object is re-thrown unchanged instead. The next frame works normally.
 
+=item *
+
+A frame that is never ended is abandoned: calling C<Clay_BeginLayout>
+again starts a new one (after re-throwing an error the abandoned frame
+held, see L</ERRORS FROM CALLBACKS>). Text and ids the abandoned frame
+handed to Clay stay alive until a frame completes.
+
 =back
 
 Every struct field is parsed when it crosses into Clay: wrong reference
-types (at any nesting level), non-numeric or non-finite numbers, and
-integers outside the C field's range (for example negative padding or an
-enum value Clay does not define) croak a L</STRUCT ERRORS> object naming
-the struct and field, e.g. C<Clay_ElementDeclaration.layout.padding.left:
-expected an integer in 0..65535, got '-8'>. Unknown keys are ignored, as
+types (at any nesting level), non-numeric numbers, numbers that are not
+finite as a C C<float> (NaN, infinities, and beyond about 3.4e38; a size
+C<max> may be C<+Inf> or larger, meaning unbounded), and integers
+outside the C field's range (for example negative padding or an enum
+value Clay does not define) croak a L</STRUCT ERRORS> object naming the
+struct and field, e.g. C<Clay_ElementDeclaration.layout.padding.left:
+expected an integer in 0..65535, got '-8'>. C<userData>, C<imageData> and
+C<customData> take an unsigned integer that fits a pointer (C<refaddr>
+values do), read exactly: pass integers above 2**53 as Perl integers or
+decimal strings. Unknown keys are ignored, as
 are extra array elements. C<floating =E<gt> { parentId =E<gt> ... }>
 accepts a numeric id or an element-id hash from C<Clay_GetElementId>.
 
@@ -449,13 +481,14 @@ Without a handler, Clay errors are ignored (as in C).
 
 C<%text_config> has the C<Clay_TextElementConfig> fields. Every context
 that lays out text needs its own measure function: measuring text in a
-context without one is reported as an error.
+context without one is reported as an error. A result of undef (a
+forgotten C<return>, say) is an error too.
 
 =item C<Clay_SetQueryScrollOffsetFunction($cb, $userdata)>
 
     $cb->($element_id, $userdata) -> { x => $x, y => $y } or [ $x, $y ]
 
-Clay calls it for every scroll container while
+An undef result is an error. Clay calls it for every scroll container while
 C<Clay_SetExternalScrollHandlingEnabled(1)> is on; the returned offset
 becomes the container's scroll position. Enabling external handling
 without a query function croaks.
@@ -519,7 +552,9 @@ C<Clay_SetMaxElementCount>, C<Clay_SetMaxMeasureTextCacheWordCount>).
 
 So does an explicit C<DESTROY> of the context the callback runs in. This
 applies to every context, not only the running one: Clay has a single
-current context.
+current context. It also applies to code that runs when the callback's
+arguments are freed after it returns (a C<DESTROY> of an object that
+only an argument held, say): Clay has not returned yet.
 
 Read-only queries work: C<Clay_GetCurrentContext>,
 C<Clay_GetLayoutDimensions>, C<Clay_GetElementData>,
@@ -619,8 +654,8 @@ C<backgroundColor>, C<cornerRadius> and C<imageData> / C<customData>;
 C<BORDER> has C<color>, C<cornerRadius>, C<width>; C<SCISSOR_START> /
 C<SCISSOR_END> have C<horizontal>, C<vertical>; C<OVERLAY_COLOR_START> /
 C<OVERLAY_COLOR_END> have C<color>. C<userData>, C<imageData> and
-C<customData> are the integers passed in the declaration (Clay treats
-them as opaque pointers).
+C<customData> are the unsigned integers passed in the declaration (Clay
+treats them as opaque pointers).
 
 =head1 SIZING GROUPS
 
@@ -655,6 +690,20 @@ the callback arguments.
 Contexts are per interpreter (see L</CONTEXTS>). Several contexts can be
 used from one interpreter with C<Clay_SetCurrentContext>; using Clay from
 several threads at once is not supported.
+
+=item *
+
+Clay's layout arithmetic is single-precision and does not guard against
+overflow: sizes near the C<float> limit (text measured at about 1e38,
+say) can sum to infinity inside Clay, and C<Clay_EndLayout> may then not
+return. Keep sizes in a realistic pixel range.
+
+=item *
+
+While the element cap is exceeded, text that exiting elements still show
+is kept until a frame fits again (Clay makes no copies of exiting
+elements in such a frame, so the binding cannot tell which text they
+use).
 
 =back
 

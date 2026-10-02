@@ -6,7 +6,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
-use Scalar::Util qw(blessed refaddr weaken looks_like_number);
+use Scalar::Util qw(blessed refaddr weaken);
 
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
@@ -16,6 +16,7 @@ use Clay::UI::Events::OnScroll;
 use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
 use Clay::UI::Revision qw(bump_revision);
+use Clay::UI::_validate qw(is_finite_number);
 
 our $VERSION = '0.01';
 
@@ -25,6 +26,7 @@ my $HOVERABLE   = 'Clay::UI::Role::Interaction::Hoverable';
 my $PRESSABLE   = 'Clay::UI::Role::Interaction::Pressable';
 my $FOCUSABLE   = 'Clay::UI::Role::Interaction::Focusable';
 my $FOCUS_ORDER = 'Clay::UI::Role::Interaction::HasFocusOrder';
+my $SCROLLABLE  = 'Clay::UI::Role::Layout::HasScroll';
 
 class Clay::UI::Interaction :strict(params) {
 	field $ui :param :weak;
@@ -47,6 +49,17 @@ class Clay::UI::Interaction :strict(params) {
 	field $_firing = 0;
 	field $_focused;
 
+	# The widgets whose OnHoverStart / OnFocus has been delivered and not
+	# yet followed by OnHoverStopped / OnBlur (weak, like the state sets).
+	# A queued event is delivered only while it still matches the state,
+	# so these keep every stop after its start, every blur after its focus.
+	field %_hover_announced;
+	field $_focus_announced;
+
+	# Subtrees release_subtrees is detaching: they no longer belong to the
+	# UI, so no listener can hover, press or focus a widget in them.
+	field @_leaving;
+
 	method is_hovered ($widget) { return _holds(\%_hovered, $widget) }
 	method is_armed   ($widget) { return _holds(\%_armed,   $widget) }
 	method is_pressed ($widget) { return _holds(\%_pressed, $widget) }
@@ -65,7 +78,7 @@ class Clay::UI::Interaction :strict(params) {
 		my @events = $self->_apply($input);
 
 		$_firing = 1;
-		my $ok    = eval { _fire_all(@events); 1 };
+		my $ok    = eval { $self->_fire_due(@events); 1 };
 		my $error = $@;
 		$_firing = 0;
 		die $error unless $ok;
@@ -80,16 +93,20 @@ class Clay::UI::Interaction :strict(params) {
 		_fail("'down' must be a plain boolean value") if ref $args{down};
 		for my $axis ('x', 'y') {
 			next unless defined $args{$axis};
-			_fail("'$axis' must be a finite number") unless _is_finite($args{$axis});
+			_fail("'$axis' must be a finite number") unless is_finite_number($args{$axis});
 		}
 		$self->_require_own($_, 'over') for @{ $args{over} };
 
 		my $scrolled = $args{scrolled} // [];
 		_fail("'scrolled' must be an arrayref of [widget, dx, dy]") unless ref $scrolled eq 'ARRAY';
+		my %scrolled_seen;
 		for my $entry (@$scrolled) {
 			_fail("'scrolled' entries must be [widget, dx, dy]")
-				unless ref $entry eq 'ARRAY' && @$entry == 3 && _is_finite($entry->[1]) && _is_finite($entry->[2]);
+				unless ref $entry eq 'ARRAY' && @$entry == 3 && is_finite_number($entry->[1]) && is_finite_number($entry->[2]);
 			$self->_require_own($entry->[0], 'scrolled');
+			_fail("'scrolled' must hold scroll containers (widgets composing $SCROLLABLE)")
+				unless $entry->[0]->DOES($SCROLLABLE);
+			_fail("'scrolled' lists the same widget twice") if $scrolled_seen{ refaddr $entry->[0] }++;
 		}
 		return {
 			over     => [ @{ $args{over} } ],
@@ -100,9 +117,11 @@ class Clay::UI::Interaction :strict(params) {
 		};
 	}
 
+	# True for a widget of this UI's tree that is not being detached.
 	method _owns ($widget) {
 		my $owner = blessed $widget && $widget->can('ui') ? $widget->ui : undef;
-		return defined $owner && refaddr($owner) == refaddr($ui);
+		return 0 unless defined $owner && refaddr($owner) == refaddr($ui);
+		return !grep { _is_within($widget, $_) } @_leaving;
 	}
 
 	method _require_own ($widget, $arg) {
@@ -163,43 +182,116 @@ class Clay::UI::Interaction :strict(params) {
 		my ($x, $y) = @$input{qw(x y)};
 		my %scroll_of = map { refaddr($_->[0]) => $_ } @{ $input->{scrolled} };
 		return (
-			(map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $tree_order->(@hover_stopped)),
-			(map { [ $_, Clay::UI::Events::OnHoverStart->new ] }   $tree_order->(@hover_started)),
-			(defined $press_origin   ? [ $press_origin,   Clay::UI::Events::OnPress->new(x => $x, y => $y) ]   : ()),
-			(defined $release_origin ? [ $release_origin, Clay::UI::Events::OnRelease->new(x => $x, y => $y) ] : ()),
+			(map { $self->_hover_stopped_event($_) } $tree_order->(@hover_stopped)),
+			(map { $self->_hover_started_event($_) } $tree_order->(@hover_started)),
+			(defined $press_origin   ? $self->_owned_event($press_origin,   Clay::UI::Events::OnPress->new(x => $x, y => $y))   : ()),
+			(defined $release_origin ? $self->_owned_event($release_origin, Clay::UI::Events::OnRelease->new(x => $x, y => $y)) : ()),
 			(map {
 				my (undef, $dx, $dy) = @{ $scroll_of{ refaddr $_ } };
-				[ $_, Clay::UI::Events::OnScroll->new(delta_x => $dx, delta_y => $dy) ];
+				$self->_owned_event($_, Clay::UI::Events::OnScroll->new(delta_x => $dx, delta_y => $dy));
 			} $tree_order->(map { $_->[0] } @{ $input->{scrolled} })),
 		);
 	}
 
-	# Called by an Element while $top (and its subtree) leaves the tree: the
-	# widgets in it stop being hovered, armed and pressed and are no longer
-	# under the pointer, and focus inside it is released. Then the hovered
-	# ones get OnHoverStopped and the focused one OnBlur.
-	method release_subtree ($top) {
-		my @stopped = grep { _is_within($_, $top) } _live(\%_hovered);
-		delete $_hovered{ refaddr $_ } for @stopped;
-		for my $state (\%_armed, \%_pressed) {
-			delete $state->{ refaddr $_ } for grep { _is_within($_, $top) } _live($state);
-		}
-		@_under_pointer = grep { defined && !_is_within($_, $top) } @_under_pointer;
-		weaken $_ for @_under_pointer;
+	# -----------------------------------------------------------------
+	# Queued events. Each is [ $widget, $event, $claim ]: $claim runs right
+	# before delivery and returns false when an earlier listener of the
+	# same dispatch has made the event stale (the widget left the tree, its
+	# hover or focus changed again, a nested call already announced it); it
+	# records what a delivered event announced.
+	# -----------------------------------------------------------------
 
-		my @events = map { [ $_, Clay::UI::Events::OnHoverStopped->new ] } $tree_order->(@stopped);
-		if (defined $_focused && _is_within($_focused, $top)) {
-			push @events, [ $_focused, Clay::UI::Events::OnBlur->new ];
-			undef $_focused;
+	method _hover_started_event ($widget) {
+		return [ $widget, Clay::UI::Events::OnHoverStart->new, sub {
+			return 0 unless $self->is_hovered($widget) && !_holds(\%_hover_announced, $widget);
+			_remember(\%_hover_announced, $widget);
+			return 1;
+		} ];
+	}
+
+	method _hover_stopped_event ($widget) {
+		return [ $widget, Clay::UI::Events::OnHoverStopped->new, sub {
+			return 0 if $self->is_hovered($widget) || !_holds(\%_hover_announced, $widget);
+			delete $_hover_announced{ refaddr $widget };
+			return 1;
+		} ];
+	}
+
+	method _focus_event ($widget) {
+		return [ $widget, Clay::UI::Events::OnFocus->new, sub {
+			return 0 unless $self->is_focused($widget);
+			return 0 if defined $_focus_announced && refaddr($_focus_announced) == refaddr($widget);
+			$_focus_announced = $widget;
+			weaken $_focus_announced;
+			return 1;
+		} ];
+	}
+
+	method _blur_event ($widget) {
+		return [ $widget, Clay::UI::Events::OnBlur->new, sub {
+			return 0 if $self->is_focused($widget);
+			return 0 unless defined $_focus_announced && refaddr($_focus_announced) == refaddr($widget);
+			undef $_focus_announced;
+			return 1;
+		} ];
+	}
+
+	# Press, release and scroll events: due while the widget is in the tree.
+	method _owned_event ($widget, $event) {
+		return [ $widget, $event, sub { $self->_owns($widget) } ];
+	}
+
+	# Delivers every event that is still due, even if a listener dies, then
+	# rethrows the first exception.
+	method _fire_due (@events) {
+		my $first_error;
+		for my $entry (@events) {
+			my ($widget, $event, $claim) = @$entry;
+			my $ok = eval { $widget->fire_event($event) if $claim->(); 1 };
+			$first_error //= ($@ || 'unknown listener error') unless $ok;
 		}
-		_fire_all(@events);
+		_prune(\%_hover_announced);
+		die $first_error if defined $first_error;
 		return;
 	}
 
-	# Who is hovered, armed and pressed, as a string that changes exactly
-	# when one of those sets does.
+	# Called by an Element while the subtrees below @tops leave the tree:
+	# the widgets in them stop being hovered, armed and pressed and are no
+	# longer under the pointer, and focus inside them is released. Then the
+	# hovered ones get OnHoverStopped and the focused one OnBlur. Until this
+	# returns the subtrees count as gone already (see _owns).
+	method release_subtrees (@tops) {
+		my $leaving = sub ($widget) { grep { _is_within($widget, $_) } @tops };
+		my $states_before = $self->_state_signature;
+		my @stopped = grep { $leaving->($_) } _live(\%_hovered);
+		delete $_hovered{ refaddr $_ } for @stopped;
+		for my $state (\%_armed, \%_pressed) {
+			delete $state->{ refaddr $_ } for grep { $leaving->($_) } _live($state);
+		}
+		@_under_pointer = grep { defined && !$leaving->($_) } @_under_pointer;
+		weaken $_ for @_under_pointer;
+
+		my @events = map { $self->_hover_stopped_event($_) } $tree_order->(@stopped);
+		if (defined $_focused && $leaving->($_focused)) {
+			push @events, $self->_blur_event($_focused);
+			undef $_focused;
+		}
+		bump_revision() if $self->_state_signature ne $states_before;
+
+		push @_leaving, @tops;
+		my $ok    = eval { $self->_fire_due(@events); 1 };
+		my $error = $@;
+		splice @_leaving, -@tops if @tops;
+		die $error unless $ok;
+		return;
+	}
+
+	# Who is hovered, armed, pressed and focused, as a string that changes
+	# exactly when one of those does.
 	method _state_signature () {
-		return join ';', map { join ',', sort { $a <=> $b } map { refaddr $_ } _live($_) } \%_hovered, \%_armed, \%_pressed;
+		my $focused = defined $_focused ? refaddr $_focused : '';
+		return join ';', $focused,
+			map { join ',', sort { $a <=> $b } map { refaddr $_ } _live($_) } \%_hovered, \%_armed, \%_pressed;
 	}
 
 	# -----------------------------------------------------------------
@@ -225,15 +317,16 @@ class Clay::UI::Interaction :strict(params) {
 		$self->_check_focus_target($widget) if defined $widget;
 
 		# The focused widget changes before any listener runs; a dying
-		# OnBlur listener still lets OnFocus fire.
+		# OnBlur listener still lets OnFocus fire, and an OnBlur listener
+		# that moves focus again makes this OnFocus stale.
 		my $previous = $_focused;
 		$_focused = $widget;
 		weaken $_focused if defined $_focused;
 		bump_revision();
 
-		_fire_all(
-			(defined $previous ? [ $previous, Clay::UI::Events::OnBlur->new ]  : ()),
-			(defined $widget   ? [ $widget,   Clay::UI::Events::OnFocus->new ] : ()),
+		$self->_fire_due(
+			(defined $previous ? $self->_blur_event($previous) : ()),
+			(defined $widget   ? $self->_focus_event($widget) : ()),
 		);
 		return;
 	}
@@ -346,11 +439,6 @@ class Clay::UI::Interaction :strict(params) {
 		return @focusables;
 	}
 
-	sub _is_finite ($value) {
-		return defined $value && !ref $value && looks_like_number($value)
-			&& $value == $value && $value != 9**9**9 && $value != -9**9**9;
-	}
-
 	sub _holds ($state, $widget) {
 		my $held = $state->{ refaddr $widget };
 		return defined $held && refaddr($held) == refaddr($widget) ? 1 : 0;
@@ -390,19 +478,6 @@ class Clay::UI::Interaction :strict(params) {
 			$origin = $next;
 		}
 		return $origin;
-	}
-
-	# Fires every event even if a listener dies, then rethrows the first
-	# exception.
-	sub _fire_all (@events) {
-		my $first_error;
-		for my $event (@events) {
-			my ($widget, $object) = @$event;
-			my $ok = eval { $widget->fire_event($object); 1 };
-			$first_error //= ($@ || 'unknown listener error') unless $ok;
-		}
-		die $first_error if defined $first_error;
-		return;
 	}
 }
 
@@ -480,15 +555,23 @@ The pointer position carried by C<OnPress> and C<OnRelease>; default 0.
 =item C<scrolled>
 
 Arrayref of C<[ $widget, $delta_x, $delta_y ]> for scroll containers
-that moved; each gets an C<OnScroll>.
+(widgets composing L<Clay::UI::Role::Layout::HasScroll>) that moved,
+each at most once; each gets an C<OnScroll>.
 
 =back
 
 All state changes happen first, then the events fire in this order:
 C<OnHoverStopped>, C<OnHoverStart>, C<OnPress>, C<OnRelease>,
-C<OnScroll>, each group in tree order. Every event fires even if a
-listener dies; C<update> then rethrows the first error. Calling
-C<update> from one of its own listeners dies.
+C<OnScroll>, each group in tree order (widgets the last layout did not
+reach come after the others, in the order of the live tree). Every
+event fires even if a listener dies; C<update> then rethrows the first
+error. Calling C<update> from one of its own listeners dies.
+
+An event that an earlier listener of the same update made stale is
+dropped instead: C<OnPress>, C<OnRelease> and C<OnScroll> for a widget
+that has left the tree, C<OnHoverStart> for a widget that is no longer
+hovered. A widget gets C<OnHoverStopped> only after its
+C<OnHoverStart>, and C<OnBlur> only after its C<OnFocus>.
 
 A press arms every Pressable under the pointer and fires C<OnPress> at
 the innermost Pressable of the topmost stack. A Pressable is pressed
@@ -540,7 +623,9 @@ Then the focus moves - the C<focused> state moves from the previous
 widget to the new one - and L<Clay::UI::Events::OnBlur> fires on the
 previously focused widget (if any) and L<Clay::UI::Events::OnFocus> on
 the new one (if any). Both events fire even if the first listener dies;
-the first error is rethrown afterwards, with focus already changed.
+the first error is rethrown afterwards, with focus already changed. An
+C<OnBlur> listener may move focus again; the C<OnFocus> of this call is
+then dropped, since its widget no longer has focus.
 Focusing the already-focused widget is a no-op (no events fire).
 
 =head2 focus_next, focus_previous
@@ -578,13 +663,20 @@ its armed and pressed widgets are dropped and focus inside it is
 released. Then the hovered ones get C<OnHoverStopped> and the focused
 one gets C<OnBlur>, all at once, during the removal.
 
-=head2 release_subtree($top)
+While these events fire, the leaving subtrees already count as gone:
+a listener cannot hover, press or focus a widget inside them
+(C<set_focused_widget> and C<update> die as for a widget of another
+UI).
 
-Does the above for C<$top> and everything below it. The child-mutation
-methods of L<Clay::UI::Role::Core::Element> call it while C<$top> is
-still attached, so the events bubble through its old ancestors; a widget
-class that detaches children some other way must call it too. Every
-event fires even if a listener dies; the first error is rethrown.
+=head2 release_subtrees(@tops)
+
+Does the above for every widget of C<@tops> and everything below them,
+and bumps the revision if any state changed. The child-mutation methods
+of L<Clay::UI::Role::Core::Element> call it once per change, with all
+removed children, while they are still attached, so the events bubble
+through their old ancestors; a widget class that detaches children some
+other way must call it too. Every event fires even if a listener dies;
+the first error is rethrown.
 
 =head1 CONSTRUCTION
 

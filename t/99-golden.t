@@ -17,7 +17,7 @@ use Clay::XS qw(:all);
 # Each fixture script under t/fixtures/*.pl builds a deterministic
 # layout and is expected to produce the render command array stored in
 # the matching .json file. The two are compared with deep equality
-# after a small normalisation pass (floats truncated to 4 decimal
+# after a small normalisation pass (floats rounded to 4 decimal
 # places to absorb harmless precision wobble between platforms).
 #
 # Set CLAY_UI_UPDATE_FIXTURES=1 to overwrite the .json files with

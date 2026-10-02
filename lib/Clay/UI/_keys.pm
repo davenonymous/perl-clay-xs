@@ -11,7 +11,22 @@ use Exporter 'import';
 our $VERSION   = '0.01';
 our @EXPORT_OK = qw(camelize_keys camelize_string snake_string);
 
+# The walker camelizes every widget's config every frame, and the keys
+# come from a small closed set (Clay's field names), so conversions are
+# cached. The cache stops growing at a fixed size, so arbitrary keys (from
+# a bad attribute value, say) cannot make it grow without bound.
+my %camelized;
+my $CAMELIZED_CACHE_MAX = 4096;
+
 sub camelize_string ($key) {
+	my $cached = $camelized{$key};
+	return $cached if defined $cached;
+	my $camel = _camelize($key);
+	$camelized{$key} = $camel if keys %camelized < $CAMELIZED_CACHE_MAX;
+	return $camel;
+}
+
+sub _camelize ($key) {
 	return $key unless $key =~ /_/;
 	my @parts = split /_/, $key, -1;
 	my $head  = shift @parts;
@@ -33,23 +48,25 @@ sub camelize_keys ($node) {
 
 	my $type = reftype $node;
 
+	# Leaves are copied inline: this runs for every widget every frame.
 	if ($type eq 'HASH') {
 		my %out;
 		for my $key (keys %$node) {
-			my $new_key = camelize_string($key);
+			my $new_key = $camelized{$key} // camelize_string($key);
 			if ($new_key ne $key && exists $node->{$new_key}) {
 				die "Clay::UI: key '$key' camelizes to '$new_key', which is already present in the same hash";
 			}
 			if (exists $out{$new_key}) {
 				die "Clay::UI: key '$key' collides with another key that camelized to '$new_key'";
 			}
-			$out{$new_key} = camelize_keys($node->{$key});
+			my $value = $node->{$key};
+			$out{$new_key} = ref $value ? camelize_keys($value) : $value;
 		}
 		return \%out;
 	}
 
 	if ($type eq 'ARRAY') {
-		return [ map { camelize_keys($_) } @$node ];
+		return [ map { ref $_ ? camelize_keys($_) : $_ } @$node ];
 	}
 
 	return $node;

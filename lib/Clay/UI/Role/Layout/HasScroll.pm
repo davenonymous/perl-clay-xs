@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional required clay_struct clay_field);
+use Clay::UI::_validate qw(optional required clay_struct clay_field copy_value);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
@@ -45,10 +45,10 @@ role Clay::UI::Role::Layout::HasScroll
 	}
 
 	method child_offset (@new) {
-		return $child_offset unless @new;
+		return copy_value($child_offset) unless @new;
 		$child_offset = optional(clay_struct('Clay_Vector2'), child_offset => @new);
 		bump_revision();
-		return $child_offset;
+		return copy_value($child_offset);
 	}
 
 	method contribute_clip ($config) {
@@ -98,7 +98,8 @@ C<add_child>) and L<Clay::UI::Role::Events::Emitter>.
 
 Constructor parameters, each also a read/write accessor (call with no
 argument to read, with one to write; a write takes effect on the next
-C<render>):
+C<render>; C<child_offset> is copied on write and on read, so changing
+the hash afterwards does not change the widget):
 
 =over
 

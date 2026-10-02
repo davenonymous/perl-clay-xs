@@ -133,4 +133,15 @@ subtest 'setting a scroll position bumps the revision' => sub {
 	is( bump_revision(), current_revision(), 'bump_revision still returns the current value' );
 };
 
+subtest 'scrolling inside render bumps the revision' => sub {
+	my $root = ScrollBox->new(id => 'log', layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(2) } });
+	$root->add_child(Clay::UI::Test::Box->new(layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(9) } }));
+	my $ui = Clay::UI->new(width => 20, height => 20, root => $root);
+	$ui->render(pointer_state => { x => 5, y => 1, down => 0 });
+	$ui->render;
+
+	ok( bumps(sub { $ui->render(scroll_delta => [0, -1]) }), 'wheel input that moves the container' );
+	ok( !bumps(sub { $ui->render }), 'a frame without movement does not' );
+};
+
 done_testing;

@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional clay_struct);
+use Clay::UI::_validate qw(optional clay_struct copy_value);
 use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
@@ -20,10 +20,10 @@ role Clay::UI::Role::Style::HasCornerRadius {
 	}
 
 	method corner_radius (@new) {
-		return $corner_radius unless @new;
+		return copy_value($corner_radius) unless @new;
 		$corner_radius = optional(clay_struct('Clay_CornerRadius'), corner_radius => @new);
 		bump_revision();
-		return $corner_radius;
+		return copy_value($corner_radius);
 	}
 
 	method contribute_corner_radius ($config) {
@@ -66,6 +66,8 @@ expands to a uniform hashref; pass a hashref for per-corner control.
 C<corner_radius> is a read/write accessor: call with no argument to read,
 with one argument to write. A write takes effect on the next C<render>.
 A value that is neither a number nor a hashref with C<top_left>,
-C<top_right>, C<bottom_left>, C<bottom_right> dies when set.
+C<top_right>, C<bottom_left>, C<bottom_right> dies when set. The widget keeps its own copy of what was written and every read returns
+a fresh copy: changing the passed or returned structure afterwards does
+not change the widget (write it back to do that).
 
 =cut

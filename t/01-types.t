@@ -68,6 +68,19 @@ subtest 'helpers validate their arguments' => sub {
 
     is( sizing_grow(0, 0)->{max}, 0, 'sizing_grow(0, 0) keeps Clay\'s "no max" zero' );
     is( sizing_fit(10, 9**9**9)->{max}, 9**9**9, '+Inf is accepted as an unbounded max' );
+    like( dies { sizing_fixed(1e39) }, qr/sizing_fixed: size: expected a finite number/,
+        'a size beyond the range of a C float' );
+    is( sizing_fit(0, 1e39)->{max}, 9**9**9, 'a max beyond it is unbounded' );
+};
+
+subtest 'optional arguments see magical values' => sub {
+    # $1 caches its flags from the last read: read it while undef first, so
+    # only get-magic can tell that it now holds a number.
+    my $stale;
+    "u" =~ /(x)?u/; $stale = $1; "x25" =~ /(\d+)/;
+    is( sizing_fit($1)->{min}, 25, 'a capture variable as sizing_fit min' );
+    "u" =~ /(x)?u/; $stale = $1; "x7" =~ /(\d+)/;
+    is( Clay__HashString('a', $1)->{id}, Clay__HashString('a', 7)->{id}, 'a capture variable as a hash seed' );
 };
 
 done_testing;

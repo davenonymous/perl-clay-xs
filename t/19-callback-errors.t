@@ -404,6 +404,62 @@ subtest 'Clay::XS::_dispatch cannot be called directly' => sub {
 	like( $inner, qr/_dispatch is internal/, 'inside a callback' );
 };
 
+subtest 'code that runs while callback arguments are freed cannot re-enter Clay' => sub {
+	package Reenter { our @errors; sub DESTROY { eval { Clay::XS::Clay_BeginLayout(); 1 } or push @errors, $@ } }
+	my $ctx = fresh_context(measure => sub ($text, $config, $userdata) {
+		bless $config, 'Reenter';   # freed with the arguments, after the callback returned
+		return { width => length($text), height => 10 };
+	});
+	my $commands = text_frame('guarded');
+	ok( scalar @Reenter::errors, 'the DESTROY ran' );
+	like( $Reenter::errors[0], qr/^Clay_BeginLayout: cannot be called from inside a Clay callback/,
+		'and its Clay call was refused' );
+	is( $commands->[0]{renderData}{stringContents}, 'guarded', 'the frame finished intact' );
+};
+
+subtest 'replacing the internal dispatcher does not break callbacks' => sub {
+	# In a process of its own: the replacement frees the glob's original.
+	my $code = <<'PERL';
+use Clay::XS qw(:all);
+my $ctx = Clay_Initialize(Clay_MinMemorySize(), [100, 100]);
+Clay_SetMeasureTextFunction(sub { [1, 1] });
+{ no warnings 'redefine'; *Clay::XS::_dispatch = sub { die "replacement called\n" }; }
+Clay_BeginLayout(); Clay__OpenTextElement('measured', {});
+print eval { Clay_EndLayout(); 1 } ? "measured\n" : "died: $@";
+PERL
+	open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+	my $output = do { local $/; <$child> };
+	close $child;
+	is( $output, "measured\n", 'the trampolines keep calling the original dispatcher' );
+};
+
+subtest 'a measure function returning undef is an error' => sub {
+	my $ctx = fresh_context(measure => sub { return undef });
+	like( dies { text_frame() }, qr/measure_text callback result: expected a hash or array reference, got undef/,
+		'Clay_EndLayout croaks' );
+};
+
+subtest 'a dying warn handler does not keep a destroyed context alive' => sub {
+	my $ctx = fresh_context(measure => sub { die "measure failed\n" });
+	Clay_BeginLayout();
+	Clay__OpenTextElement('abandoned', {});
+	{
+		local $SIG{__WARN__} = sub { die "warned: $_[0]" };
+		like( dies { $ctx->DESTROY }, qr/^warned: Clay::XS: context destroyed with a held callback error/,
+			'the warning still reaches the handler' );
+	}
+	like( dies { Clay::XS::_string_arena_chunk_count($ctx) }, qr/not a live Clay::XS::Context/,
+		'the context was freed before it' );
+
+	package Unprintable { use overload '""' => sub { die "cannot print\n" }, fallback => 1 }
+	my $other = fresh_context(measure => sub { die bless {}, 'Unprintable' });
+	Clay_BeginLayout();
+	Clay__OpenTextElement('abandoned', {});
+	like( dies { $other->DESTROY }, qr/^cannot print$/, 'an error object that cannot be printed dies in DESTROY' );
+	like( dies { Clay::XS::_string_arena_chunk_count($other) }, qr/not a live Clay::XS::Context/,
+		'after the context was freed' );
+};
+
 subtest 'the caller $@ survives callbacks' => sub {
 	my $ctx = fresh_context();
 	eval { die "outer error\n" };

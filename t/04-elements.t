@@ -221,6 +221,23 @@ subtest 'unbalanced open/close croaks instead of crashing' => sub {
         'text outside a frame croaks' );
 };
 
+subtest 'an element is configured once, right after it is opened' => sub {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("twice") );
+    Clay__ConfigureOpenElement({});
+    like( dies { Clay__ConfigureOpenElement({}) }, qr/Clay__ConfigureOpenElement: the open element is already configured/,
+        'a second configuration croaks' );
+    Clay__OpenTextElement("child", {});
+    Clay__CloseElement();
+    Clay__OpenElementWithId( Clay_GetElementId("late") );
+    Clay__OpenElementWithId( Clay_GetElementId("inner") );
+    Clay__CloseElement();
+    like( dies { Clay__ConfigureOpenElement({}) }, qr/already configured or has children/,
+        'so does configuring after a child' );
+    Clay__CloseElement();
+    ok( lives { Clay_EndLayout(0) }, 'the frame still ends' );
+};
+
 subtest 'undef text and ids croak' => sub {
     like( dies { Clay_GetElementId(undef) }, qr/Clay_GetElementId: element id string must be defined/,
         'undef id string' );

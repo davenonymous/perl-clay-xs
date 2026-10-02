@@ -13,9 +13,9 @@
 use v5.22;
 use warnings;
 use feature 'signatures';
+no warnings 'experimental::signatures';
 
 use lib "examples/lib";
-no warnings 'experimental::signatures';
 
 use Clay::XS qw(:all);
 use Clay::UI;

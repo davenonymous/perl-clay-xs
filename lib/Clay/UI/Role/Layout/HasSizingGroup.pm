@@ -17,23 +17,35 @@ role Clay::UI::Role::Layout::HasSizingGroup {
 	field $width_group  :param = 0;
 	field $height_group :param = 0;
 
+	# The lease of the Grid whose packed ids this widget carries: while the
+	# widget holds them, no other Grid can be given the same grid id.
+	field $_grid_lease;
+
 	ADJUST {
 		$width_group  = required(\&validate_group_id, width_group  => $width_group);
 		$height_group = required(\&validate_group_id, height_group => $height_group);
 	}
 
 	method width_group (@new) {
-		return $width_group unless @new;
+		return $self->_group_in_effect($width_group) unless @new;
 		$width_group = _write_group(width_group => $width_group, @new);
 		bump_revision();
-		return $width_group;
+		return $self->_group_in_effect($width_group);
 	}
 
 	method height_group (@new) {
-		return $height_group unless @new;
+		return $self->_group_in_effect($height_group) unless @new;
 		$height_group = _write_group(height_group => $height_group, @new);
 		bump_revision();
-		return $height_group;
+		return $self->_group_in_effect($height_group);
+	}
+
+	# The group the widget is sized with: an id a Grid packed means nothing
+	# once that Grid is freed, so cells kept from it do not keep equalizing
+	# with each other.
+	method _group_in_effect ($group) {
+		return $group unless defined $_grid_lease && $_grid_lease->owns_group($group);
+		return $_grid_lease->is_live ? $group : 0;
 	}
 
 	# Writing back the current id is a no-op, even for an id Grid owns.
@@ -44,19 +56,20 @@ role Clay::UI::Role::Layout::HasSizingGroup {
 	}
 
 	# Clay::UI::Grid stamps its packed (grid id << 20 | index) group ids
-	# here; they are outside the range users may set.
-	method _set_grid_groups ($width, $height) {
+	# here, with the lease of its grid id (undef once none are left); they
+	# are outside the range users may set.
+	method _set_grid_groups ($width, $height, $lease) {
 		$width_group  = $width;
 		$height_group = $height;
+		$_grid_lease  = $lease;
 		return;
 	}
 
 	method contribute_sizing_group ($config) {
-		return if $width_group == 0 && $height_group == 0;
-		$config->{sizing_group} = {
-			width  => $width_group,
-			height => $height_group,
-		};
+		my $width  = $self->_group_in_effect($width_group);
+		my $height = $self->_group_in_effect($height_group);
+		return if $width == 0 && $height == 0;
+		$config->{sizing_group} = { width => $width, height => $height };
 		return;
 	}
 }
@@ -114,7 +127,8 @@ reserved for the ids L<Clay::UI::Grid> assigns; other values die.
 Read/write accessor: C<< $widget->width_group >> reads,
 C<< $widget->width_group($id) >> writes. Writing back the value just read
 is always allowed, even for a cell whose id Grid assigned (nothing
-changes).
+changes). An id a Grid assigned is in effect while that Grid exists; a
+cell kept after its Grid is freed reads 0 there and is sized alone.
 
 =head2 height_group (default 0)
 

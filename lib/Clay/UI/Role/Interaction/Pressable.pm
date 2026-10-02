@@ -80,10 +80,13 @@ I<armed>.
 =item L<Clay::UI::Events::OnRelease>
 
 When the pointer goes up, on the innermost I<armed> Pressable still
-under the pointer - that is a completed click. Releasing off the widget
-(press, drag off, release) or releasing over a widget the press did not
-start on (press elsewhere, drag in, release) fires nothing. Every
-release disarms all widgets.
+under the pointer - that is a completed click. A press arms every
+Pressable under the pointer, so a press on a button inside a pressable
+card that is dragged off the button onto the card and released there
+gives the card its OnRelease (the card never saw OnPress if the
+button's listener handled it). Releasing over no armed widget (press,
+drag off everything, release; or press elsewhere, drag in, release)
+fires nothing. Every release disarms all widgets.
 
 =back
 

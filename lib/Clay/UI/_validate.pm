@@ -5,7 +5,8 @@ use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use Scalar::Util qw(blessed looks_like_number);
+use Scalar::Util qw(blessed reftype looks_like_number);
+use overload ();
 use Exporter 'import';
 
 use Clay::XS qw(check_struct);
@@ -17,6 +18,8 @@ our @EXPORT_OK = qw(
 	required
 	clay_struct
 	clay_field
+	copy_value
+	is_finite_number
 	validate_border_width
 	validate_id
 	validate_group_id
@@ -31,9 +34,26 @@ sub _fail ($name, $message) {
 	die "Clay::UI: '$name' $message\n";
 }
 
-sub _is_number ($value) {
+# A plain (non-reference) number that is neither NaN nor infinite.
+sub is_finite_number ($value) {
 	return defined $value && !ref $value && looks_like_number($value)
 		&& $value == $value && $value != 9**9**9 && $value != -9**9**9;
+}
+
+# A deep copy of the hashes and arrays in $value, as plain (unblessed)
+# data: Clay reads a blessed hash like any other. Scalars and objects with
+# overloading (value objects such as Math::BigInt numbers) are kept as
+# they are. Attribute values are copied where they are validated and
+# where they are read, so the widget never shares a container with its
+# caller.
+sub copy_value ($value) {
+	return $value if !ref $value || (blessed $value && overload::Overloaded($value));
+	my $type = reftype $value;
+	if ($type eq 'HASH') {
+		return { map { my $v = $value->{$_}; $_ => (ref $v ? copy_value($v) : $v) } keys %$value };
+	}
+	return [ map { ref $_ ? copy_value($_) : $_ } @$value ] if $type eq 'ARRAY';
+	return $value;
 }
 
 # Accessor helpers: apply $validator to the single value written to an
@@ -67,7 +87,7 @@ sub clay_field ($type, $field) {
 sub _check ($name, $type, $value, $field = undef) {
 	_fail($name, 'must be defined') unless defined $value;
 	my $input = defined $field ? { $field => $value } : camelize_keys($value);
-	return $value if eval { check_struct($type, $input, $name); 1 };
+	return copy_value($value) if eval { check_struct($type, $input, $name); 1 };
 
 	my $error = $@;
 	die $error unless blessed $error && $error->isa('Clay::XS::StructError');
@@ -104,7 +124,7 @@ sub validate_id ($name, $value) {
 
 sub validate_group_id ($name, $value) {
 	_fail($name, "must be an integer in 0..$GROUP_ID_MAX (larger ids are reserved for Clay::UI::Grid)")
-		unless _is_number($value) && $value == int($value) && $value >= 0 && $value <= $GROUP_ID_MAX;
+		unless is_finite_number($value) && $value == int($value) && $value >= 0 && $value <= $GROUP_ID_MAX;
 	return $value;
 }
 
@@ -129,7 +149,11 @@ rendered. C<optional> and C<required> wrap a validator for the
 one-argument write of an accessor (C<optional> accepts undef). Each
 validator takes the attribute name (used in the message) and the value,
 dies with C<< Clay::UI: '<name>' ... >> when the value is wrong, and
-otherwise returns the value unchanged.
+otherwise returns the value: the Clay validators return a deep copy
+(C<copy_value>), so a widget never shares a hash or array with the
+caller that passed it, and accessors return copies of what they hold.
+Objects with overloading (value objects such as L<Math::BigInt>
+numbers) are kept as they are.
 
 Clay values are checked by L<Clay::XS/CHECKING STRUCTS>:
 C<clay_struct($type)> returns a validator for a whole struct (for
@@ -144,6 +168,11 @@ The other validators hold Clay::UI's own rules: element ids must not
 start with C<anon:>, user sizing-group ids must stay below C<2**20> (the
 range L<Clay::UI::Grid> reserves for its packed ids), text must be a
 defined string, and C<border_width> may also be a single number.
+
+C<is_finite_number> is true for a plain number that is neither NaN nor
+infinite. C<copy_value> deep-copies hashes and arrays (blessed ones
+into plain data) and keeps scalars and objects with overloading as they
+are.
 
 This module is internal. The API is not part of the public contract.
 

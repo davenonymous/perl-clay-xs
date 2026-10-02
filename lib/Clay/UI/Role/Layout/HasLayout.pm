@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(required clay_struct);
+use Clay::UI::_validate qw(required clay_struct copy_value);
 use Clay::UI::Revision qw(bump_revision);
 
 our $VERSION = '0.01';
@@ -20,10 +20,10 @@ role Clay::UI::Role::Layout::HasLayout {
 	}
 
 	method layout (@new) {
-		return $layout unless @new;
+		return copy_value($layout) unless @new;
 		$layout = required(clay_struct('Clay_LayoutConfig'), layout => @new);
 		bump_revision();
-		return $layout;
+		return copy_value($layout);
 	}
 
 	# Merges the user's layout over any slice another contributor wrote
@@ -69,8 +69,10 @@ Mixin role that contributes a C<layout> slice to the Clay element
 declaration. Pass any subset of Clay's layout fields; snake_case keys
 will be camelized by the walker before reaching the C binding.
 
-C<layout> is a read/write accessor: call with no argument to read the
-stored hashref, with one argument to replace it. A write takes effect on
+C<layout> is a read/write accessor: call with no argument to read a copy
+of the stored hashref, with one argument to replace it. The widget keeps its own copy of what was written and every read returns
+a fresh copy: changing the passed or returned structure afterwards does
+not change the widget (write it back to do that). A write takes effect on
 the next C<render>. The value is validated when set: it must be a
 hashref using only the keys Clay reads (C<sizing>, C<padding>,
 C<child_gap>, C<child_alignment>, C<layout_direction>, in snake_case or

@@ -61,6 +61,65 @@ sub make_ui (@children) {
 # Focusable defaults.
 # -----------------------------------------------------------------------------
 
+subtest 'can_focus takes a plain boolean' => sub {
+	my $a = TestInput->new(id => 'a');
+	is( $a->can_focus('yes'), 1, 'a true value is stored as 1' );
+	is( $a->can_focus(''), 0, 'a false value as 0' );
+	like( dies { $a->can_focus([]) }, qr/'can_focus' must be a plain boolean value/, 'a reference dies' );
+	like( dies { TestInput->new(id => 'b', can_focus => {}) }, qr/'can_focus' must be a plain boolean value/,
+		'also at construction' );
+};
+
+subtest 'an OnBlur listener that moves focus again drops the stale OnFocus' => sub {
+	my $a = TestInput->new(id => 'a');
+	my $b = TestInput->new(id => 'b');
+	my $ui = make_ui($a, $b);
+	my @log;
+	for my $w ($a, $b) {
+		$w->on('OnFocus', sub ($e) { push @log, $w->id . ':OnFocus'; return });
+		$w->on('OnBlur',  sub ($e) { push @log, $w->id . ':OnBlur'; return });
+	}
+	$ui->interaction->set_focused_widget($a);
+	$a->on('OnBlur', sub ($e) { $ui->interaction->set_focused_widget($a); return });
+	@log = ();
+	$ui->interaction->set_focused_widget($b);
+	is( \@log, [ 'a:OnBlur', 'a:OnFocus' ], 'b never announced focus, so it gets no OnBlur either' );
+	same( $ui->interaction->get_focused_widget, $a, 'a keeps the focus' );
+};
+
+subtest 'a nested refocus of the same widget delivers OnFocus once' => sub {
+	my ($a, $b, $c) = map { TestInput->new(id => $_) } qw(a b c);
+	my $ui = make_ui($a, $b, $c);
+	my @log;
+	for my $w ($a, $b, $c) {
+		$w->on('OnFocus', sub ($e) { push @log, $w->id . ':OnFocus'; return });
+		$w->on('OnBlur',  sub ($e) { push @log, $w->id . ':OnBlur'; return });
+	}
+	$ui->interaction->set_focused_widget($a);
+	$a->on('OnBlur', sub ($e) {
+		$ui->interaction->set_focused_widget($c);
+		$ui->interaction->set_focused_widget($b);
+		return;
+	});
+	@log = ();
+	$ui->interaction->set_focused_widget($b);
+	is( \@log, [ 'a:OnBlur', 'c:OnFocus', 'c:OnBlur', 'b:OnFocus' ], 'b gets its OnFocus exactly once' );
+};
+
+subtest 'an OnBlur listener cannot focus into the subtree being removed' => sub {
+	my $panel = Clay::UI::Test::Box->new(id => 'panel');
+	my $x = TestInput->new(id => 'x');
+	my $y = TestInput->new(id => 'y');
+	$panel->add_child($x, $y);
+	my $ui = make_ui($panel);
+	$ui->interaction->set_focused_widget($x);
+	$x->on('OnBlur', sub ($e) { $ui->interaction->set_focused_widget($y); return });
+	like( dies { $ui->root->remove_child('panel') }, qr/does not belong to this Clay::UI/,
+		'the listener\'s attempt dies' );
+	is( $ui->interaction->get_focused_widget, undef, 'nothing is focused' );
+	is( $panel->parent, undef, 'the panel was removed all the same' );
+};
+
 subtest 'Focusable defaults: can_focus returns 1; is_focused false before focus' => sub {
 	my $a  = TestInput->new(id => 'a');
 	my $ui = make_ui($a);

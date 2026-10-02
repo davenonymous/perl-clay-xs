@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Clay::UI::_validate qw(optional required validate_text clay_struct clay_field);
+use Clay::UI::_validate qw(optional required validate_text clay_struct clay_field copy_value);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Core::TextNode;
 
@@ -57,10 +57,10 @@ role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 	}
 
 	method text_color (@new) {
-		return $text_color unless @new;
+		return copy_value($text_color) unless @new;
 		$text_color = required(clay_struct('Clay_Color'), text_color => @new);
 		bump_revision();
-		return $text_color;
+		return copy_value($text_color);
 	}
 
 	method letter_spacing (@new) {
@@ -166,6 +166,8 @@ L<Clay::XS>.
 Every parameter above is also a read/write accessor: call with no argument
 to read, with one argument to write (e.g. C<< $label->text('new') >>,
 C<< $label->font_size(20) >>). A write takes effect on the next C<render>.
+C<text_color> reads return a copy, and the widget keeps a copy of what
+was written.
 Values are validated when set: C<text> must be a defined string, the
 numeric parameters numbers, C<text_color> a colour, and C<wrap_mode> /
 C<text_alignment> one of the C<CLAY_TEXT_WRAP_*> / C<CLAY_TEXT_ALIGN_*>

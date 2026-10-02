@@ -31,8 +31,9 @@
  *
  *   - For per-context callbacks (measure_text, error_handler,
  *     query_scroll_offset), Clay's userData slot carries the
- *     clay_perl_context*; a context that never installed a function has
- *     NULL userData, and the trampoline falls back to the current context.
+ *     clay_perl_context*. Clay_Initialize installs the measure and
+ *     query-scroll trampolines for every new context, so the userData is
+ *     always set, whether or not a Perl function was installed.
  *
  *   - For hover, the element id is supplied as a function argument; the
  *     context is supplied as Clay's userData. The trampoline looks up the
@@ -136,13 +137,12 @@ void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx)
  * Dispatch.
  *
  * call_dispatcher publishes (kind, result slot) in clay_perl_pending_dispatch,
- * pushes (callback, args...) and calls Clay::XS::_dispatch under G_EVAL,
- * counting itself in clay_perl_callback_depth. The previous pending
- * dispatch is restored afterwards, so nested dispatches (an error reported
- * while a callback runs) work. It runs inside invoke_callback's
- * ENTER/SAVETMPS ... FREETMPS/LEAVE, with $@ localised there, so the
- * caller's $@ survives the callback. Returns true on failure (the error
- * is held on ctx).
+ * pushes (callback, args...) and calls Clay::XS::_dispatch under G_EVAL.
+ * The previous pending dispatch is restored afterwards, so nested
+ * dispatches (an error reported while a callback runs) work. It runs
+ * inside invoke_callback's ENTER/SAVETMPS ... FREETMPS/LEAVE, with $@
+ * localised there, so the caller's $@ survives the callback. Returns true
+ * on failure (the error is held on ctx).
  * ------------------------------------------------------------------------ */
 
 static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
@@ -163,9 +163,7 @@ static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
     clay_perl_active_dispatch saved = clay_perl_pending_dispatch;
     clay_perl_pending_dispatch.kind   = kind;
     clay_perl_pending_dispatch.result = result;
-    clay_perl_callback_depth++;
     call_sv((SV *) ctx->dispatch_cv, G_VOID | G_DISCARD | G_EVAL);
-    clay_perl_callback_depth--;
     clay_perl_pending_dispatch = saved;
 
     /* Test for an exception without truth-testing it: an exception object
@@ -186,13 +184,18 @@ typedef int (*callback_args_builder)(pTHX_ const void *data, SV **args);
 /* Calls a Perl callback for a trampoline: builds its arguments (plus the
  * userdata, always last) inside a temporaries scope of their own, with $@
  * localised, and dispatches. Returns true on failure (the error is
- * held on ctx). */
+ * held on ctx).
+ *
+ * The whole scope counts as running a callback (clay_perl_callback_depth):
+ * freeing the arguments and restoring $@ can run DESTROY methods, and
+ * Clay is still inside its own function while they run. */
 static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
                             clay_perl_dispatch_result *result, const clay_perl_callback *callback,
                             callback_args_builder build_args, const void *data)
 {
     SV *args[MAX_CALLBACK_ARGS + 1];
 
+    clay_perl_callback_depth++;
     ENTER;
     SAVETMPS;
     save_scalar(PL_errgv);
@@ -201,7 +204,19 @@ static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
     bool failed = call_dispatcher(aTHX_ ctx, kind, result, callback->code, args, argc);
     FREETMPS;
     LEAVE;
+    clay_perl_callback_depth--;
     return failed;
+}
+
+/* A result the callback must return: undef (usually a forgotten return)
+ * croaks instead of reading as zero. */
+static SV *required_result(pTHX_ SV *ret, const char *what)
+{
+    SvGETMAGIC(ret);
+    if (!SvOK(ret)) {
+        croak("%s: expected a hash or array reference, got undef (did the callback return its result?)", what);
+    }
+    return ret;
 }
 
 void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
@@ -210,11 +225,13 @@ void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
 {
     switch (kind) {
     case CLAY_PERL_DISPATCH_MEASURE_TEXT:
-        result->dimensions = clay_dimensions_from_sv(aTHX_ ret, "measure_text callback result");
+        result->dimensions = clay_dimensions_from_sv(aTHX_
+            required_result(aTHX_ ret, "measure_text callback result"), "measure_text callback result");
         return;
 
     case CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET:
-        result->vector = clay_vector2_from_sv(aTHX_ ret, "query_scroll_offset callback result");
+        result->vector = clay_vector2_from_sv(aTHX_
+            required_result(aTHX_ ret, "query_scroll_offset callback result"), "query_scroll_offset callback result");
         return;
 
     case CLAY_PERL_DISPATCH_TRANSITION_HANDLER: {
@@ -256,10 +273,17 @@ void clay_perl_dispatch_store_result(pTHX_ clay_perl_dispatch_kind kind,
  * ------------------------------------------------------------------------ */
 
 /* Replaces a slot with a copy of new_value (NULL for undef), copying
- * before the old value is released. */
+ * before the old value is released. Get-magic runs once. */
 static void replace_sv_slot(pTHX_ SV **slot, SV *new_value)
 {
-    SV *copy = (new_value && SvOK(new_value)) ? newSVsv(new_value) : NULL;
+    SV *copy = NULL;
+    if (new_value) {
+        SvGETMAGIC(new_value);
+        if (SvOK(new_value)) {
+            copy = newSV(0);
+            sv_setsv_nomg(copy, new_value);
+        }
+    }
     SV *old  = *slot;
     *slot = copy;
     SvREFCNT_dec(old);
@@ -283,13 +307,6 @@ void clay_perl_callbacks_free(pTHX_ clay_perl_context *ctx)
     }
 }
 
-/* The context of a per-context callback: Clay's userData, or the current
- * context for one that never installed the function (NULL userData). */
-static clay_perl_context *context_or_current(void *userData)
-{
-    return userData ? (clay_perl_context *) userData : clay_perl_current_ctx;
-}
-
 /* ---------------------------------------------------------------------------
  * The hover registry.
  * ------------------------------------------------------------------------ */
@@ -311,7 +328,7 @@ void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
     AV *entry = newAV();
     av_push(entry, newSVsv(cb));
     av_push(entry, newSVsv(userdata ? userdata : &PL_sv_undef));
-    av_push(entry, newSVuv(ctx->frame_generation));
+    av_push(entry, newSVuv(ctx->completed_frames));
 
     char key[16];
     make_id_key(element_id, key);
@@ -320,8 +337,8 @@ void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
 
 void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx)
 {
-    if (ctx->frame_generation < HOVER_KEEP_COMPLETED_FRAMES) return;
-    uint32_t cutoff = ctx->frame_generation - HOVER_KEEP_COMPLETED_FRAMES;
+    if (ctx->completed_frames < HOVER_KEEP_COMPLETED_FRAMES) return;
+    uint32_t cutoff = ctx->completed_frames - HOVER_KEEP_COMPLETED_FRAMES;
 
     /* Collect first, delete afterwards: deleting invalidates the iterator. */
     HV *hv = ctx->hover_callbacks;
@@ -373,7 +390,7 @@ Clay_Dimensions clay_perl_measure_text_trampoline(Clay_StringSlice text,
     dTHX;
     Clay_Dimensions zero = { 0, 0 };
 
-    clay_perl_context *ctx = context_or_current(userData);
+    clay_perl_context *ctx = (clay_perl_context *) userData;
     if (!ctx) return zero;
     if (ctx->held_error) {
         ctx->measure_cache_poisoned = true;
@@ -448,7 +465,7 @@ Clay_Vector2 clay_perl_query_scroll_offset_trampoline(uint32_t element_id,
     dTHX;
     Clay_Vector2 zero = { 0, 0 };
 
-    clay_perl_context *ctx = context_or_current(userData);
+    clay_perl_context *ctx = (clay_perl_context *) userData;
     if (!ctx) return zero;
     const clay_perl_callback *callback = &ctx->callbacks[CLAY_PERL_DISPATCH_QUERY_SCROLL_OFFSET];
     if (!callback->code) {

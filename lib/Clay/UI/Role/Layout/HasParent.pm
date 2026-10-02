@@ -117,8 +117,6 @@ the id derived from its new position.
 
 =head1 METHODS
 
-=head1 METHODS
-
 =head2 parent
 
 Read-only accessor. Returns the widget that owns this one, or C<undef>

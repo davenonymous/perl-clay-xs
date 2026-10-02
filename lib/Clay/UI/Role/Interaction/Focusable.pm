@@ -16,7 +16,25 @@ our $VERSION = '0.01';
 role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasParent)
                                             :does(Clay::UI::Role::Events::Emitter)
                                             :does(Clay::UI::Role::Style::HasStates) {
-	field $can_focus :param :accessor = 1;
+	field $can_focus :param = 1;
+
+	ADJUST {
+		$can_focus = _focus_flag($can_focus);
+	}
+
+	# Whether the widget may take focus. Not drawn, so a write does not
+	# bump the revision.
+	method can_focus (@new) {
+		return $can_focus unless @new;
+		die "Clay::UI: 'can_focus' takes one value\n" unless @new == 1;
+		$can_focus = _focus_flag($new[0]);
+		return $can_focus;
+	}
+
+	sub _focus_flag ($value) {
+		die "Clay::UI: 'can_focus' must be a plain boolean value\n" if ref $value;
+		return $value ? 1 : 0;
+	}
 
 	method is_focused () {
 		my $ui = $self->ui;
@@ -70,7 +88,9 @@ fired and bubble up the parent chain).
 
 =head2 can_focus, can_focus($bool)
 
-Read or write the per-instance focusability flag. Defaults to true; pass
+Read or write the per-instance focusability flag, 1 or 0 (a write takes
+any plain boolean value and dies for a reference; it does not bump the
+revision, since nothing drawn depends on it). Defaults to true; pass
 the C<can_focus> named argument to the constructor (e.g.
 C<< My::Input->new(id => 'x', can_focus => 0) >>) to start disabled, or
 toggle it later with C<< $widget->can_focus(0) >>.

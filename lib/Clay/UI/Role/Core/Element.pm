@@ -92,6 +92,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return 'anon:' . length($base) . ":$base/" . join('/', @$indices);
 	}
 
+	# The slices are fresh; the values in them may be the widget's own.
 	method to_config {
 		my %config;
 		$self->$_(\%config) for @{ _contributors_of(ref $self) };
@@ -144,21 +145,19 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	}
 
 	# Runs after the child list has changed: tells the interaction tracker
-	# (hover and focus inside a leaving subtree are released, with
+	# (hover and focus inside the leaving subtrees are released, with
 	# OnHoverStopped / OnBlur bubbling through the still-intact parent
 	# slots), then clears each child's parent slot. The
-	# children are detached even if an OnBlur listener dies; its error is
+	# children are detached even if a listener dies; its error is
 	# rethrown once they are.
 	method _release_children (@kids) {
 		return unless @kids;
 		my $ui = $self->ui;
 		my $listener_error;
 		if (defined $ui) {
-			for my $kid (@kids) {
-				local $@;
-				eval { $ui->interaction->release_subtree($kid); 1 }
-					or $listener_error //= $@ || 'unknown listener error';
-			}
+			local $@;
+			eval { $ui->interaction->release_subtrees(@kids); 1 }
+				or $listener_error = $@ || 'unknown listener error';
 		}
 		$_->_detach_parent for @kids;
 		die $listener_error if defined $listener_error;
@@ -238,8 +237,11 @@ Contributors must not depend on running before or after one another: a
 contributor that adds to a slice another one may also write merges into
 it (as L<Clay::UI::Role::Layout::HasLayout> and L<Clay::UI::Grid> do for
 C<layout>). If two unrelated contributors write the same key, the
-alphabetically last one wins. Contributors should put fresh hashes into
-the config rather than hashes the widget keeps; the walker may add keys.
+alphabetically last one wins. Contributors build each slice as a fresh
+hash; the values inside it may be the widget's own (the copies its
+accessors made when they were set), so treat the returned config as
+read-only and copy what you want to change. The walker works on a
+camelized copy of it.
 
 Widgets normally do not override C<to_config>; they declare fields and
 let the mixins contribute their slices. Override C<to_config> only when

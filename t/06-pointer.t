@@ -105,6 +105,29 @@ Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100),
 Clay__CloseElement();
 Clay_EndLayout(0);
 
+# ----- Pointer input needs a completed frame --------------------------------
+Clay_BeginLayout();
+build_layout();
+like( dies { Clay_SetPointerState({ x => 30, y => 30 }, 0) },
+    qr/Clay_SetPointerState: cannot be called between Clay_BeginLayout and Clay_EndLayout/,
+    'Clay_SetPointerState croaks mid-frame' );
+like( dies { Clay_UpdateScrollContainers(0, [0, 0], 0) }, qr/Clay_UpdateScrollContainers: cannot be called between/,
+    'so does Clay_UpdateScrollContainers' );
+Clay_EndLayout(0);
+
+Clay_SetMeasureTextFunction(sub { die "measure failed\n" });
+Clay_BeginLayout();
+Clay__OpenTextElement("abandoned", {});
+like( dies { Clay_BeginLayout() }, qr/^measure failed \(from the previous unfinished frame\)/,
+    'the frame is abandoned' );
+like( dies { Clay_SetPointerState({ x => 30, y => 30 }, 0) }, qr/the last frame was never finished/,
+    'Clay_SetPointerState croaks after an abandoned frame' );
+Clay_SetMeasureTextFunction(sub { return { width => 0, height => 0 } });
+Clay_BeginLayout();
+build_layout();
+Clay_EndLayout(0);
+ok( lives { Clay_SetPointerState({ x => 30, y => 30 }, 0) }, 'and works again after the next completed frame' );
+
 # ----- Pointer state round-trip ---------------------------------------------
 Clay_SetPointerState({ x => 10, y => 20 }, 1);
 my $state = Clay_GetPointerState();

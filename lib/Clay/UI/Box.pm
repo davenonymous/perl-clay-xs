@@ -71,7 +71,10 @@ C<border_width>, C<corner_radius>, C<floating>) is a read/write accessor,
 so a box's styling and layout can be changed after construction; the
 change is picked up on the next C<render>. Values are validated when
 they are set, at construction or through the accessor: a wrong type or
-an unknown key dies there, naming the attribute.
+an unknown key dies there, naming the attribute. The box keeps its own
+copy of every value and each read returns a fresh copy, so changing a
+hash or array after passing it in, or one an accessor returned, does
+not change the box.
 
 Consumer classes should be declared C<:strict(params)> so a misspelled
 constructor parameter dies instead of being ignored:

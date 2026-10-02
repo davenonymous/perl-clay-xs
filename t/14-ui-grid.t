@@ -407,6 +407,40 @@ subtest 'a cell can move to a new grid after its grid is freed' => sub {
 	is( refaddr($new->cell_wrappers->[0][0]), refaddr($cell), 'the cell is in the new grid' );
 };
 
+subtest 'a cell kept after its grid is freed shares no ids with a new grid' => sub {
+	my $kept = Clay::UI::Grid::Cell->new;
+	$kept->add_child(text_cell('kept'));
+	{
+		my $old = Clay::UI::Test::Grid->new(id => 'old');
+		$old->append_row([ $kept ]);
+	}
+	is( $kept->parent, undef, 'the cell outlived its grid' );
+	my $kept_id = $kept->width_group >> 20;
+	my @claimed;
+	while (defined(my $id = eval { Clay::UI::Grid::_claim_grid_id() })) {
+		push @claimed, $id;
+	}
+	ok( !(grep { $_ == $kept_id } @claimed), 'no new grid can be given the id the kept cell still carries' );
+	Clay::UI::Grid::_release_grid_id($_) for @claimed;
+};
+
+subtest 'cells kept from a freed grid are no longer sized together' => sub {
+	my ($narrow, $wide) = map { Clay::UI::Grid::Cell->new(background_color => [1, 1, 1, 255]) } 1 .. 2;
+	$narrow->add_child(text_cell('a'));
+	$wide->add_child(text_cell('x' x 20));
+	{
+		my $grid = Clay::UI::Test::Grid->new(id => 'gone');
+		$grid->append_row([$narrow]);
+		$grid->append_row([$wide]);
+	}
+	is( [ $narrow->width_group, $narrow->height_group ], [ 0, 0 ], 'the freed grid\'s ids read 0' );
+	my $page = Clay::UI::Test::Box->new(id => 'page');
+	$page->add_child($narrow, $wide);
+	my $ui = make_ui($page);
+	my ($rect) = grep { ($ui->widget_for($_->{userData}) // 0) == $narrow } @{ $ui->render };
+	is( $rect->{boundingBox}{width}, $GLYPH_W, 'the narrow cell keeps its own width' );
+};
+
 subtest 'cells removed from a grid can be attached again' => sub {
 	my $grid  = Clay::UI::Test::Grid->new(id => 'reuse');
 	my $cell  = Clay::UI::Grid::Cell->new;

@@ -89,9 +89,10 @@ arrayrefs. The POD of `Clay::XS` documents contexts, frames, callbacks,
 the render-command hashes and the mapping from every C macro to Perl.
 
 Input is checked where it crosses into Clay: misuse (no current
-context, unbalanced open/close, a wrong-typed or out-of-range struct
-field) croaks with a descriptive message instead of crashing inside
-Clay. An exception thrown by one of your callbacks while Clay is
+context, unbalanced open/close, configuring an element twice, pointer
+input in the middle of a frame or after one that was never finished, a
+wrong-typed or out-of-range struct field) croaks with a descriptive
+message instead of crashing inside Clay. An exception thrown by one of your callbacks while Clay is
 running is re-thrown once Clay returns - by `Clay_EndLayout` for the
 measure, error and transition callbacks, by `Clay_SetPointerState` for
 hover callbacks. Strings are characters in and out (UTF-8 inside
@@ -228,9 +229,11 @@ The events:
   bubble: every hovered widget gets its own.
 - `OnPress` - when the pointer goes down, on exactly one widget: the
   innermost Pressable of the topmost stack under the pointer.
-- `OnRelease` - when the pointer goes up over a Pressable the press
-  started on: a completed click. Releasing elsewhere, or over a widget
-  the press did not start on, fires nothing.
+- `OnRelease` - when the pointer goes up, on the innermost Pressable
+  still under the pointer that the press started over (a press arms
+  every Pressable under the pointer, so dragging from a button onto the
+  pressable card around it and releasing there gives the card its
+  OnRelease). Releasing over no such widget fires nothing.
 - `OnScroll` - a HasScroll widget's scroll position changed; carries
   `delta_x` / `delta_y`.
 - `OnFocus` / `OnBlur` - focus moved, through the tracker's
@@ -351,9 +354,21 @@ Widgets whose `can_focus` is false are skipped.
 Every setter that changes what a frame lays out or draws (widget
 attributes, children, user states, the viewport size, and hover, press
 and focus changes) bumps one process-wide counter,
-`Clay::UI::Revision::current_revision()`. A renderer remembers the value
-it drew and skips frames while it has not changed. Widget classes with
-state of their own call `$widget->mark_changed` from their setters.
+`Clay::UI::Revision::current_revision()`, and so does scrolling inside
+`render`. A renderer still calls `render` every frame (input reaches the
+widgets only there), remembers the value it drew and skips drawing
+while it has not changed:
+
+```perl
+my $commands = $ui->render(%input);
+unless (current_revision() == $drawn_revision) {
+    $drawn_revision = current_revision();
+    draw($commands);
+}
+```
+
+Widget classes with state of their own call `$widget->mark_changed`
+from their setters.
 
 ### Tree size
 
@@ -373,7 +388,7 @@ makes `render` die with a message naming the parameter.
   current context. Several contexts can be used from one interpreter
   through `Clay_SetCurrentContext` (a `Clay::UI` object switches to its
   own context on every call); contexts are not copied into new threads,
-  and using one from another thread croaks.
+  and while another thread's context is current every Clay call croaks.
 
 ## Renderers
 

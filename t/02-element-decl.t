@@ -159,6 +159,27 @@ subtest 'wrong-typed nested values croak' => sub {
         qr/layout\.padding: expected a hash reference, got '8'/, 'scalar padding' );
 };
 
+subtest 'pointer-sized integers round-trip exactly' => sub {
+    my $declare = sub ($user_data) {
+        Clay_BeginLayout();
+        Clay__OpenElement();
+        my $ok = eval {
+            Clay__ConfigureOpenElement({ userData => $user_data, backgroundColor => [1, 1, 1, 255],
+                layout => { sizing => { width => sizing_fixed(5), height => sizing_fixed(5) } } });
+            1;
+        };
+        my $error = $@;
+        Clay__CloseElement();
+        my ($rect) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout() };
+        die $error unless $ok;
+        return $rect->{userData};
+    };
+    is( $declare->(2**63), '9223372036854775808', '2**63 comes back unsigned' );
+    is( $declare->('18446744073709551615'), '18446744073709551615', 'the largest pointer value as a string' );
+    like( dies { $declare->(-1) }, qr/userData: expected an integer in 0\.\./, 'a negative value croaks' );
+    like( dies { $declare->(1e30) }, qr/userData: expected an integer in 0\.\./, 'a value beyond a pointer croaks' );
+};
+
 subtest 'floating.parentId accepts an element id hash' => sub {
     Clay_BeginLayout();
     Clay__OpenElementWithId( Clay_GetElementId("anchor") );

@@ -18,15 +18,17 @@
  *     of a text element until the end of the following frame (an element
  *     can start an exit transition one frame after its last declaration)
  *     and for as long as an exit transition of its element is running.
- *     The arena therefore retains the previous frame's chunks, and every
- *     chunk while any exit transition runs. isStaticallyAllocated is
- *     always false.
+ *     The arena therefore retains the previous frame's chunks and every
+ *     older chunk an exiting element still points into; after an
+ *     unfinished frame it retains everything until a frame completes.
+ *     isStaticallyAllocated is always false.
  *
  *   - Element id strings (Clay_ElementId.stringId) are interned in a
  *     per-context hash. Clay copies element ids into its persistent hash
- *     map and into pointerOverIds, so the interned buffers live until the
- *     id has been unused for two frames, no exit transition runs and the
- *     id is not part of the current pointer-over list.
+ *     map, into pointerOverIds and into the id strings of exiting
+ *     elements, so the interned buffers live until the id has been unused
+ *     for two completed frames, no exiting element carries it and it is
+ *     not part of the current pointer-over list.
  *
  *   - Callback and userdata slots hold private copies (newSVsv) of the
  *     values the caller passed, one refcount each. Replacing a slot
@@ -96,6 +98,23 @@ typedef struct clay_perl_string_arena {
 } clay_perl_string_arena;
 
 /* ---------------------------------------------------------------------------
+ * Where the context is in Clay's frame cycle. Clay's own layout tree is
+ * only consistent in LAYOUT_COMPLETE: Clay_BeginLayout throws the last
+ * layout away, and the tree is half built until Clay_EndLayout.
+ * ------------------------------------------------------------------------ */
+
+typedef enum {
+    /* No frame open; Clay holds the last completed layout (or none yet). */
+    CLAY_PERL_LAYOUT_COMPLETE = 0,
+    /* Between Clay_BeginLayout and Clay_EndLayout. */
+    CLAY_PERL_LAYOUT_DECLARING,
+    /* A frame was begun and never ended (its held error was re-thrown by
+     * the next Clay_BeginLayout); Clay's tree stays half built until the
+     * next frame completes. */
+    CLAY_PERL_LAYOUT_ABANDONED
+} clay_perl_layout_state;
+
+/* ---------------------------------------------------------------------------
  * Per-Perl-context state.
  *
  * One of these is allocated per successful Clay_Initialize. The blessed
@@ -147,10 +166,17 @@ typedef struct clay_perl_context {
     int32_t max_element_count;
     int32_t max_measure_text_cache_word_count;
 
-    /* Frame bookkeeping for the open/close balance guards. */
-    bool     in_frame;
+    /* Frame bookkeeping for the wrapper guards: the frame state, the
+     * open/close balance, and whether the innermost open element may
+     * still be configured (only right after it was opened). */
+    clay_perl_layout_state layout_state;
     int32_t  open_depth;
-    uint32_t frame_generation;
+    bool     open_element_configurable;
+
+    /* Frames that reached Clay_EndLayout. Interned ids and hover entries
+     * are stamped with it when used, so a stamp names the frame being
+     * declared and the sweeps count completed frames. */
+    uint32_t completed_frames;
 
     /* Per-frame text copies and interned element id strings. */
     clay_perl_string_arena strings;
@@ -158,7 +184,9 @@ typedef struct clay_perl_context {
 
     /* Held callback error: the first exception raised by a Perl
      * callback while Clay was running, re-thrown at the next safe point.
-     * Later errors of the same period are only counted. */
+     * Later errors of the same period are only counted. dispatch_cv is
+     * the Clay::XS::_dispatch XSUB the trampolines call (one refcount, so
+     * replacing the glob cannot free it). */
     CV      *dispatch_cv;
     SV      *held_error;
     uint32_t suppressed_errors;
@@ -184,7 +212,8 @@ typedef struct clay_perl_context {
  * ------------------------------------------------------------------------ */
 
 /* Allocates a context and its Clay arena. Returns NULL (after freeing
- * everything) when the arena cannot be allocated. */
+ * everything) when the arena cannot be allocated; croaks when the
+ * Clay::XS::_dispatch XSUB is missing. */
 clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity);
 void               clay_perl_context_free(pTHX_ clay_perl_context *self);
 
@@ -208,11 +237,13 @@ clay_perl_context *clay_perl_context_peek(pTHX_ SV *sv, MAGIC **magic_out);
  * Frame lifecycle, string arena and id interning (src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
-/* Called at Clay_BeginLayout: advances frame_generation, recycles the
- * string arena and sweeps interned ids and hover entries. Both sweeps keep
- * what the last N completed frames used (N per table: 2 for ids, 1 for
- * hover); an entry stamped with generation g survives while
- * g >= frame_generation - N. */
+/* Called at Clay_BeginLayout, before Clay discards the last layout and
+ * while layout_state still tells whether that layout is complete:
+ * recycles the string arena and sweeps interned ids and hover entries.
+ * Both sweeps keep what the last N completed frames used (N per table: 2
+ * for ids, 1 for hover); an entry stamped s survives while
+ * s >= completed_frames - N. After an unfinished frame the arena keeps
+ * every chunk and the id sweep is skipped until a frame completes. */
 void        clay_perl_context_begin_frame(pTHX_ clay_perl_context *self);
 
 /* Copies the (UTF-8) bytes of sv into the arena. Croaks if sv is undef. */
@@ -264,6 +295,15 @@ double   clay_perl_parse_float(pTHX_ SV *sv, const char *what);
 double   clay_perl_parse_max_float(pTHX_ SV *sv, const char *what);
 UV       clay_perl_parse_uint(pTHX_ SV *sv, const char *what, UV max);
 NV       clay_perl_parse_integer(pTHX_ SV *sv, const char *what, NV min, NV max);
+
+/* Optional arguments: fallback for undef. Get-magic runs once, before
+ * the definedness test. */
+double   clay_perl_parse_float_or(pTHX_ SV *sv, const char *what, double fallback);
+double   clay_perl_parse_max_float_or(pTHX_ SV *sv, const char *what, double fallback);
+UV       clay_perl_parse_uint_or(pTHX_ SV *sv, const char *what, UV max, UV fallback);
+
+/* NULL for undef when allow_undef, else a mortal, non-magical copy of a
+ * CODE reference; croaks for anything else. */
 SV      *clay_perl_require_code(pTHX_ SV *sv, const char *what, bool allow_undef);
 
 Clay_Color           clay_color_from_sv(pTHX_ SV *sv, const char *what);

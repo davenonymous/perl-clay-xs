@@ -15,6 +15,7 @@ use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Role::Interaction::Pressable;
+use Clay::UI::Role::Layout::HasScroll;
 
 # -----------------------------------------------------------------------------
 # The interaction tracker turns pointer input into hover / armed / pressed
@@ -32,6 +33,8 @@ class Button :strict(params)
 	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Interaction::Pressable)
 {}
+
+class ScrollPanel :strict(params) :does(Clay::UI::Role::Layout::HasScroll) {}
 
 sub make_ui (@children) {
 	my $root = Clay::UI::Test::Box->new(id => 'page');
@@ -139,6 +142,46 @@ subtest 'update validates its input' => sub {
 		'a widget of no UI is rejected' );
 	like( dies { $i->update(over => [], down => 0, scrolled => [ [ $box, 1 ] ]) }, qr/'scrolled' entries must be/,
 		'scrolled entries are checked' );
+	like( dies { $i->update(over => [], down => 0, scrolled => [ [ $box, 0, 1 ] ]) },
+		qr/'scrolled' must hold scroll containers/, 'only scroll containers scroll' );
+	my $panel = ScrollPanel->new(id => 'panel');
+	$ui->root->add_child($panel);
+	like( dies { $i->update(over => [], down => 0, scrolled => [ [ $panel, 0, 1 ], [ $panel, 0, 2 ] ]) },
+		qr/'scrolled' lists the same widget twice/, 'each container at most once' );
+};
+
+subtest 'events an earlier listener made stale are dropped' => sub {
+	my $outer = HoverBox->new(id => 'outer');
+	my $inner = Button->new(id => 'inner');
+	$outer->add_child($inner);
+	my $ui = make_ui($outer);
+	my @log;
+	log_events(\@log, $inner, qw(OnHoverStart OnHoverStopped OnPress));
+	$outer->on('OnHoverStart', sub ($e) { push @log, 'outer:OnHoverStart'; $outer->remove_child('inner'); return });
+	$ui->interaction->update(over => [ $outer, $inner ], down => 1);
+	is( \@log, ['outer:OnHoverStart'], 'the removed widget gets neither its OnHoverStart, its OnHoverStopped nor its OnPress' );
+	is( [ $inner->is_hovered, $inner->parent ], [ 0, undef ], 'it is detached and not hovered' );
+};
+
+subtest 'events of one kind fire in tree order before the first render' => sub {
+	my @boxes = map { HoverBox->new(id => "b$_") } 1 .. 6;
+	my $ui = make_ui(@boxes);
+	my @log;
+	log_events(\@log, $_, 'OnHoverStart') for @boxes;
+	$ui->interaction->update(over => [ reverse @boxes ], down => 0);
+	is( \@log, [ map { "b$_:OnHoverStart" } 1 .. 6 ], 'the live tree decides the order' );
+};
+
+subtest 'a release over an armed ancestor reaches the ancestor' => sub {
+	my $card   = Button->new(id => 'card');
+	my $button = Button->new(id => 'btn');
+	$card->add_child($button);
+	my $ui = make_ui($card);
+	my @log;
+	log_events(\@log, $_, qw(OnPress OnRelease)) for $card, $button;
+	$ui->interaction->update(over => [ $card, $button ], down => 1);
+	$ui->interaction->update(over => [$card], down => 0);
+	is( \@log, [ 'btn:OnPress', 'card:OnRelease' ], 'the press armed the card, so releasing on it is its click' );
 };
 
 subtest 'update cannot be called from its own listeners' => sub {

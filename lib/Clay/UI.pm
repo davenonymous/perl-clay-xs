@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-use Scalar::Util qw(blessed refaddr looks_like_number);
+use Scalar::Util qw(blessed refaddr);
 
 use Clay::XS qw(
 	Clay_Initialize
@@ -35,6 +35,7 @@ use Clay::XS qw(
 	CLAY_POINTER_DATA_PRESSED_THIS_FRAME
 );
 use Clay::UI::_keys qw(camelize_keys);
+use Clay::UI::_validate qw(is_finite_number);
 use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
 use Clay::UI::Revision qw(bump_revision);
@@ -80,11 +81,12 @@ class Clay::UI :strict(params) {
 		}
 		die "Clay::UI: 'root' must not have a parent; the root is the top of its widget tree"
 			if defined $root->parent;
-		unless (looks_like_number($width) && $width > 0
-			&& looks_like_number($height) && $height > 0) {
-			die "Clay::UI: 'width' and 'height' must be positive numbers";
+		die "Clay::UI: 'root' is already the root of another Clay::UI"
+			if defined $root->_local_ui_controller;
+		unless (_is_viewport_size($width) && _is_viewport_size($height)) {
+			die "Clay::UI: 'width' and 'height' must be positive finite numbers";
 		}
-		unless (looks_like_number($max_element_count) && $max_element_count == int($max_element_count)
+		unless (is_finite_number($max_element_count) && $max_element_count == int($max_element_count)
 			&& $max_element_count >= 1) {
 			die "Clay::UI: 'max_element_count' must be a positive integer";
 		}
@@ -105,17 +107,24 @@ class Clay::UI :strict(params) {
 			die "Clay::UI: 'measure_text' must be a coderef";
 		}
 
+		# A failure frees the new context at once and makes the caller's
+		# context current again.
 		my $previous = Clay_GetCurrentContext();
-		my $ok = eval { $_ctx = $self->_initialize_context; 1 };
+		my $ok = eval {
+			$_ctx = $self->_initialize_context;
+			Clay_SetMeasureTextFunction($measure_text);
+			# Clay's pointer state starts zeroed, which reads as "pressed
+			# this frame"; settle it so the first real pointer frame is no
+			# click.
+			Clay_SetPointerState({ x => -1, y => -1 }, 0);
+			1;
+		};
 		unless ($ok) {
 			my $error = $@;
+			undef $_ctx;
 			Clay_SetCurrentContext($previous) if defined $previous;
 			die $error;
 		}
-		Clay_SetMeasureTextFunction($measure_text);
-		# Clay's pointer state starts zeroed, which reads as "pressed this
-		# frame"; settle it so the first real pointer frame is no click.
-		Clay_SetPointerState({ x => -1, y => -1 }, 0);
 
 		# Events follow the tree order of the last completed frame.
 		$interaction = Clay::UI::Interaction->new(
@@ -140,7 +149,7 @@ class Clay::UI :strict(params) {
 
 		my $min_memory = Clay_MinMemorySize();
 		$memory_size //= $min_memory;
-		unless (looks_like_number($memory_size) && $memory_size == int($memory_size)
+		unless (is_finite_number($memory_size) && $memory_size == int($memory_size)
 			&& $memory_size >= $min_memory) {
 			die "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)"
 				. " for max_element_count $max_element_count";
@@ -155,44 +164,49 @@ class Clay::UI :strict(params) {
 		return $max_element_count > 2 ? $max_element_count - 2 : 0;
 	}
 
-	# Read with no args; write with one arg, propagating to Clay.
+	sub _is_viewport_size ($value) {
+		return is_finite_number($value) && $value > 0;
+	}
+
+	sub _one_value ($name, @value) {
+		die "Clay::UI: $name takes one value" unless @value == 1;
+		return $value[0];
+	}
+
+	# Read with no args; write with one arg, propagating to Clay. Clay gets
+	# the new size before the field does, so a size Clay refuses leaves
+	# both unchanged.
 	method width (@v) {
-		if (@v) {
-			my ($new) = @v;
-			die "Clay::UI: width must be a positive number"
-				unless looks_like_number($new) && $new > 0;
-			$width = $new;
-			Clay_SetCurrentContext($_ctx);
-			Clay_SetLayoutDimensions({ width => $width, height => $height });
-			bump_revision();
-		}
+		return $width unless @v;
+		my $new = _one_value(width => @v);
+		die "Clay::UI: width must be a positive finite number" unless _is_viewport_size($new);
+		Clay_SetCurrentContext($_ctx);
+		Clay_SetLayoutDimensions({ width => $new, height => $height });
+		$width = $new;
+		bump_revision();
 		return $width;
 	}
 
 	method height (@v) {
-		if (@v) {
-			my ($new) = @v;
-			die "Clay::UI: height must be a positive number"
-				unless looks_like_number($new) && $new > 0;
-			$height = $new;
-			Clay_SetCurrentContext($_ctx);
-			Clay_SetLayoutDimensions({ width => $width, height => $height });
-			bump_revision();
-		}
+		return $height unless @v;
+		my $new = _one_value(height => @v);
+		die "Clay::UI: height must be a positive finite number" unless _is_viewport_size($new);
+		Clay_SetCurrentContext($_ctx);
+		Clay_SetLayoutDimensions({ width => $width, height => $new });
+		$height = $new;
+		bump_revision();
 		return $height;
 	}
 
 	method measure_text (@v) {
-		if (@v) {
-			my ($new) = @v;
-			die "Clay::UI: measure_text must be a coderef"
-				unless ref $new eq 'CODE';
-			$measure_text = $new;
-			Clay_SetCurrentContext($_ctx);
-			Clay_SetMeasureTextFunction($measure_text);
-			Clay_ResetMeasureTextCache();
-			bump_revision();
-		}
+		return $measure_text unless @v;
+		my $new = _one_value(measure_text => @v);
+		die "Clay::UI: measure_text must be a coderef" unless ref $new eq 'CODE';
+		Clay_SetCurrentContext($_ctx);
+		Clay_SetMeasureTextFunction($new);
+		Clay_ResetMeasureTextCache();
+		$measure_text = $new;
+		bump_revision();
 		return $measure_text;
 	}
 
@@ -209,15 +223,15 @@ class Clay::UI :strict(params) {
 			my @bad = grep { !$POINTER_KEYS{$_} } keys %$pointer;
 			die "Clay::UI::render: unknown pointer_state key(s): @{[ sort @bad ]}" if @bad;
 			for my $axis (qw(x y)) {
-				die "Clay::UI::render: pointer_state '$axis' must be a number"
-					unless looks_like_number($pointer->{$axis});
+				die "Clay::UI::render: pointer_state '$axis' must be a finite number"
+					unless is_finite_number($pointer->{$axis});
 			}
 			$pointer = { x => $pointer->{x}, y => $pointer->{y}, down => $pointer->{down} ? 1 : 0 };
 		}
 
 		my $delta_time = $args{delta_time} // 0;
 		die "Clay::UI::render: 'delta_time' must be a finite number >= 0"
-			unless looks_like_number($delta_time) && $delta_time >= 0 && $delta_time < 9**9**9;
+			unless is_finite_number($delta_time) && $delta_time >= 0;
 
 		my $scroll_delta = $args{scroll_delta} // [0, 0];
 		if (ref $scroll_delta eq 'HASH') {
@@ -225,9 +239,9 @@ class Clay::UI :strict(params) {
 			die "Clay::UI::render: unknown scroll_delta key(s): @{[ sort @bad ]}" if @bad;
 			$scroll_delta = [ @{$scroll_delta}{qw(x y)} ];
 		}
-		die "Clay::UI::render: 'scroll_delta' must be { x => ..., y => ... } or [x, y]"
+		die "Clay::UI::render: 'scroll_delta' must be { x => ..., y => ... } or [x, y] of finite numbers"
 			unless ref $scroll_delta eq 'ARRAY' && @$scroll_delta == 2
-				&& !grep { !looks_like_number($_) } @$scroll_delta;
+				&& !grep { !is_finite_number($_) } @$scroll_delta;
 
 		my $drag = $args{enable_drag_scrolling} // 0;
 		die "Clay::UI::render: 'enable_drag_scrolling' must be a plain boolean value"
@@ -268,10 +282,10 @@ class Clay::UI :strict(params) {
 		Clay_SetCurrentContext($_ctx);
 
 		my $pointer = $frame->{pointer} // $_last_pointer;
-		$_last_pointer = $pointer;
 		if (defined $pointer) {
 			Clay_SetPointerState({ x => $pointer->{x}, y => $pointer->{y} }, $pointer->{down});
 		}
+		$_last_pointer = $pointer;
 		my @under_pointer = $self->_widgets_under_pointer;
 		my $pointer_data  = Clay_GetPointerState();
 
@@ -282,13 +296,18 @@ class Clay::UI :strict(params) {
 		{
 			local $@;
 			eval {
+				# Wheel, drag and momentum scrolling move containers without
+				# any setter: the frame changes all the same.
+				my @scrolled = $_frame->scroll_changes($scroll_before);
+				bump_revision() if @scrolled;
+
 				my $state = $pointer_data->{state};
 				$interaction->update(
 					over     => \@under_pointer,
 					down     => $state == CLAY_POINTER_DATA_PRESSED || $state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME,
 					x        => $pointer_data->{position}{x},
 					y        => $pointer_data->{position}{y},
-					scrolled => [ $_frame->scroll_changes($scroll_before) ],
+					scrolled => \@scrolled,
 				);
 				1;
 			} or $dispatch_error = $@ || 'unknown listener error';
@@ -519,14 +538,16 @@ Required:
 
 The root widget. Must be a blessed object consuming
 L<Clay::UI::Role::Core::Element> or L<Clay::UI::Role::Core::TextNode>,
-and must not currently have a parent (it is the top of its tree); a
-widget that was removed from its parent may become a root. Immutable after
+and must not currently have a parent (it is the top of its tree) nor be
+the root of another Clay::UI; a widget that was removed from its parent
+may become a root. A constructor that dies leaves the Clay context that
+was current before it current again. Immutable after
 construction (the I<tree> below the root is still mutable through the
 widgets' own child-mutation methods).
 
 =item C<width>, C<height>
 
-Positive numbers; the viewport dimensions. Mutable post-construction
+Positive finite numbers; the viewport dimensions. Mutable post-construction
 via the same-named accessor methods, which propagate the change to
 Clay automatically.
 
@@ -599,9 +620,10 @@ Read-only accessor for the C<max_element_count> passed at construction
 
 =head2 width, width($new)
 
-Read or write the viewport width. Setting also issues
-C<Clay_SetLayoutDimensions> so the new size takes effect on the next
-C<render>.
+Read or write the viewport width, a positive finite number. Setting
+also issues C<Clay_SetLayoutDimensions> so the new size takes effect on
+the next C<render>; a value that is refused leaves the width as it
+was.
 
 =head2 height, height($new)
 
@@ -627,8 +649,8 @@ Named arguments:
 
 =item C<pointer_state> (optional)
 
-Hashref C<< { x => $x, y => $y, down => $bool } >> with numeric C<x> and
-C<y>; no other keys. When omitted, the pointer state from the previous
+Hashref C<< { x => $x, y => $y, down => $bool } >> with finite numeric
+C<x> and C<y>; no other keys. When omitted, the pointer state from the previous
 frame is reused.
 
 =item C<delta_time> (optional, default 0)
@@ -639,7 +661,7 @@ C<Clay_UpdateScrollContainers> and C<Clay_EndLayout>.
 =item C<scroll_delta> (optional, default C<< { x => 0, y => 0 } >>)
 
 Wheel input for this frame, C<< { x => ..., y => ... } >> (no other
-keys) or C<[x, y]>.
+keys) or C<[x, y]>, finite numbers.
 Scroll containers (L<Clay::UI::Role::Layout::HasScroll>) under the
 pointer scroll by it; Clay applies momentum and clamping.
 
@@ -761,7 +783,8 @@ widget's listeners return C<< Clay::UI::Enum::Result->CONTINUE >>.
 
 A widget composing L<Clay::UI::Role::Layout::HasScroll> gets OnScroll
 with C<delta_x> / C<delta_y> whenever its scroll position changed in
-this frame (wheel input, drag scrolling or momentum).
+this frame (wheel input, drag scrolling or momentum). Such a change also
+bumps the revision (L<Clay::UI::Revision>), as the frame shows it.
 
 =back
 

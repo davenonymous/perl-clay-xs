@@ -35,20 +35,91 @@
 
 #include "clay_impl_helpers.h"
 
+#include <stdlib.h>
+
 /* Upper bound on the alignment padding Clay adds between its arena arrays:
  * less than 64 bytes per array, and Clay allocates fewer than 64 arrays. */
 #define CLAY_PERL_ALIGNMENT_SLACK ((uint64_t) 64 * 64)
 
-bool clay_perl_clay_has_exiting_transitions(void)
+/* Unless the frame exceeded the element cap, Clay_EndLayout clones every
+ * exiting element and its subtree into the top of layoutElements
+ * (Clay__CloneElementsWithExitTransition), with their children in the top
+ * of layoutElementChildren and their id strings at the same indices of
+ * layoutElementIdStrings. The walk follows those clones from each exiting
+ * transition's elementThisFrame, depth first, with an explicit stack:
+ * every index is checked against the arrays' capacity, and an element is
+ * never visited twice. */
+static bool is_exiting(const Clay__TransitionDataInternal *transition)
+{
+    return transition->state == CLAY_TRANSITION_STATE_EXITING || transition->transitionOut;
+}
+
+static void visit_element_buffers(Clay_Context *context, int32_t index,
+                                  clay_perl_buffer_visitor visit, void *data)
+{
+    const Clay_LayoutElement *element = &context->layoutElements.internalArray[index];
+    if (element->isTextElement && element->textElementData.text.length > 0) {
+        visit(element->textElementData.text.chars, data);
+    }
+    const Clay_String *id_string = &context->layoutElementIdStrings.internalArray[index];
+    if (id_string->length > 0 && id_string->chars) {
+        visit(id_string->chars, data);
+    }
+}
+
+void clay_perl_clay_visit_exiting_buffers(clay_perl_buffer_visitor visit, void *data)
 {
     Clay_Context *context = Clay_GetCurrentContext();
-    if (!context) return false;
+    if (!context) return;
+
+    bool any_exiting = false;
+    for (int32_t i = 0; i < context->transitionDatas.length && !any_exiting; ++i) {
+        any_exiting = is_exiting(&context->transitionDatas.internalArray[i]);
+    }
+    if (!any_exiting) return;
+
+    /* A frame over the element cap skips the clones: elementThisFrame then
+     * points at elements Clay never closed. Report the walk incomplete. */
+    int32_t capacity = context->layoutElements.capacity;
+    if (context->booleanWarnings.maxElementsExceeded || capacity <= 0) {
+        visit(NULL, data);
+        return;
+    }
+
+    int32_t *stack   = (int32_t *) malloc(sizeof(int32_t) * (size_t) capacity);
+    bool    *visited = (bool *) calloc((size_t) capacity, sizeof(bool));
+    if (!stack || !visited) {
+        free(stack);
+        free(visited);
+        visit(NULL, data);   /* tells the caller the walk is incomplete */
+        return;
+    }
+
     for (int32_t i = 0; i < context->transitionDatas.length; ++i) {
-        if (context->transitionDatas.internalArray[i].state == CLAY_TRANSITION_STATE_EXITING) {
-            return true;
+        const Clay__TransitionDataInternal *transition = &context->transitionDatas.internalArray[i];
+        if (!is_exiting(transition)) continue;
+        if (!transition->elementThisFrame) continue;
+        int32_t root = (int32_t) (transition->elementThisFrame - context->layoutElements.internalArray);
+        if (root < 0 || root >= capacity || visited[root]) continue;
+
+        int32_t depth = 0;
+        stack[depth++] = root;
+        visited[root] = true;
+        while (depth > 0) {
+            int32_t index = stack[--depth];
+            visit_element_buffers(context, index, visit, data);
+            const Clay_LayoutElement *element = &context->layoutElements.internalArray[index];
+            if (element->isTextElement || !element->children.elements) continue;
+            for (int32_t j = 0; j < element->children.length; ++j) {
+                int32_t child = element->children.elements[j];
+                if (child < 0 || child >= capacity || visited[child]) continue;
+                visited[child] = true;
+                stack[depth++] = child;
+            }
         }
     }
-    return false;
+    free(stack);
+    free(visited);
 }
 
 void clay_perl_clay_default_counts(int32_t *element_count, int32_t *word_count)

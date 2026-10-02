@@ -75,10 +75,20 @@ through Clay::UI and replaces `userData` with widget class and id.
   `wrapper_enter` (refuses mutating calls inside callbacks, pins the
   context) and, when the rethrow policy is AFTER, `wrapper_leave`. A new
   XSUB needs a table row; t/19 checks the table against the exports and
-  the POD.
-- **Never give Clay a pointer into an SV buffer.** Text goes into a
-  per-context chunked arena that lives an extra frame (longer while exit
-  transitions run); element id strings are interned.
+  the POD. "Inside a callback" spans the whole trampoline scope
+  (`invoke_callback`), so DESTROYs of callback arguments count too.
+- **Frame state** (`layout_state`): COMPLETE, DECLARING (between
+  `Clay_BeginLayout` and `Clay_EndLayout`) or ABANDONED (a begun frame
+  whose held error the next `Clay_BeginLayout` re-threw). Functions that
+  walk Clay's layout tree (`Clay_SetPointerState`,
+  `Clay_UpdateScrollContainers`) need COMPLETE; an element may be
+  configured once, right after it is opened.
+- **Never give Clay a pointer it keeps into a caller's SV.** Text goes
+  into a per-context chunked arena that lives an extra frame (longer for
+  chunks an exiting element still shows, and for everything after an
+  unfinished frame); element id strings are interned in private,
+  read-only SVs. Only the hashing helpers borrow the caller's buffer for
+  the duration of the call.
 - Open/close balance is tracked; `Clay_EndLayout` auto-closes leftovers,
   then croaks.
 - Pointer-over, hover and scroll test against the previous frame's layout,
@@ -108,11 +118,14 @@ through Clay::UI and replaces `userData` with widget class and id.
   `is_focused` and the derived `hovered` / `pressed` / `focused` states
   ask the tracker.
   Clay::UI registers no `Clay_OnHover` callbacks. Every queued event
-  fires, the layout pass always runs, then the first listener error is
-  rethrown. Focus moves only through the tracker's `set_focused_widget` /
+  that is still due fires (each carries a claim check: events an earlier
+  listener made stale are dropped, and stop / blur only follow a
+  delivered start / focus), the layout pass always runs, then the first
+  listener error is rethrown. Focus moves only through the tracker's `set_focused_widget` /
   `focus_next` / `focus_previous` (live tree order, not frame order);
   detaching a subtree drops its interaction state (`OnHoverStopped`) and
-  focus (`OnBlur`) at once.
+  focus (`OnBlur`) at once (`release_subtrees`; while its events fire the
+  subtree no longer counts as part of the UI).
 - A scroll container is a widget composing HasScroll
   (`_FrameRegistry::is_scroll_container`): only it gets Clay's scroll
   offset injected as `childOffset` and receives OnScroll. The frame
@@ -125,15 +138,19 @@ through Clay::UI and replaces `userData` with widget class and id.
   attached whenever it has no parent (removed ones can come back). `$widget->ui` walks to the root, which a Clay::UI
   stamps at construction (write-once).
 - Attributes are validated where set (accessors and `ADJUST` via
-  `Clay::UI::_validate`). Clay values go through `check_struct`, the
+  `Clay::UI::_validate`) and copied there; readers return copies too
+  (`copy_value`), so no container is shared with callers. Contributors
+  build fresh slices around the widget's own values (no per-frame deep
+  copy: the walker's `camelize_keys` makes one), so `to_config` output is
+  read-only. Clay values go through `check_struct`, the
   strict check mode of the struct schemas in `src/marshal.c`, so there is
   no Perl copy of Clay's keys or ranges. Classes are `:strict(params)`. User ids must not start with `anon:`; user
   sizing-group ids are `0 .. 2**20 - 1` (higher ones belong to `Grid`).
 - Every setter that changes what a frame lays out or draws calls
   `bump_revision()` (`Clay::UI::Revision`) after its value is accepted,
   never on a read; child changes bump in `Element`'s primitives, the
-  tracker when its hovered / armed / pressed / focused sets change. A new
-  setter must bump too.
+  tracker when its hovered / armed / pressed / focused sets change,
+  `render` when a scroll container moved. A new setter must bump too.
 - `max_element_count` reaches Clay through a throwaway seed context
   (`Clay::UI::_initialize_context`): `Clay_MinMemorySize` and
   `Clay_Initialize` read the current context's counts, and setting them

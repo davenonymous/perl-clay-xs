@@ -201,6 +201,20 @@ subtest 'capacity setters validate their argument' => sub {
 	like( dies { Clay_SetMaxElementCount(2**31 - 1) },  qr/limited to 4 GiB/, 'element count whose arena overflows' );
 	like( dies { Clay_SetMaxMeasureTextCacheWordCount(31) }, qr/expected an integer in 32\.\./, 'word count below 32' );
 	is( Clay_GetMaxElementCount(), 8192, 'rejected values leave the count unchanged' );
+	like( dies { Clay_Initialize(2**64, { width => 10, height => 10 }) },
+		qr/Clay_Initialize: capacity must be a non-negative integer/, 'a capacity beyond size_t' );
+};
+
+subtest 'Clay_Initialize refuses a measure cache below 32 words' => sub {
+	my $ctx = new_context();
+	$ctx->DESTROY;
+	Clay_SetMaxElementCount(15);
+	like( dies { Clay_Initialize(Clay_MinMemorySize(), { width => 10, height => 10 }) },
+		qr/30 measure-cache words are below the minimum of 32/, 'the word count Clay derived from 15 elements' );
+	Clay_SetMaxMeasureTextCacheWordCount(32);
+	ok( lives { new_context() }, 'setting the word count afterwards fixes it' );
+	is( Clay_GetCurrentContext(), undef, 'that context is gone again' );
+	Clay_SetMaxElementCount(8192);   # back to Clay's defaults (and 2 x 8192 words)
 };
 
 subtest 'counts whose arena exceeds 4 GiB are rejected' => sub {
