@@ -164,7 +164,9 @@ on your classes makes misspelled constructor parameters die too.
   and `HasScroll` (a Stateful Container that clips and scrolls its
   children).
 - Interaction: `Hoverable`, `Pressable` (implies Hoverable),
-  `Focusable`, and `HasFocusOrder` for custom focus traversal.
+  `Focusable`, `HasFocusOrder` for custom focus traversal, and
+  `Disableable` (a `disabled` flag: a disabled widget takes no focus and
+  is never pressed).
 - Events: `Listener` (every widget can listen) and `Emitter` (widgets
   that fire events: Box and every Hoverable, Pressable, Focusable and
   HasScroll widget).
@@ -401,7 +403,12 @@ for an SVG demo.
 move focus between `Focusable` widgets in
 depth-first order; a container composing `HasFocusOrder` can take over
 the order for its subtree (the root also decides the first focus).
-Widgets whose `can_focus` is false are skipped.
+Widgets whose `can_focus` is false are skipped: `can_focus` reads whether
+a widget can take the focus now (the users' wish, its class's
+`accepts_focus` and, with `Disableable`, not disabled). A focused widget
+that becomes disabled or unfocusable loses the focus at once (`OnBlur`),
+and `$ui->interaction->can_take_focus($widget)` asks the same question
+the tracker asks.
 
 ### Skipping unchanged frames
 

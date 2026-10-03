@@ -81,10 +81,24 @@ Only an armed widget can receive OnRelease.
 _Avoid_: pending press
 
 **Derived state**:
-The state names `hovered`, `pressed` and `focused`. HasStates answers them
-live from the interaction tracker, and they are read-only.
-All other state names are user states.
+The state names `hovered`, `pressed`, `focused` and `disabled`. HasStates
+answers them live from the interaction tracker and from Disableable, and
+they are read-only. All other state names are user states.
 _Avoid_: auto-synced state, mirrored state
+
+**Disabled widget**:
+A widget composing `Disableable` whose `disabled` flag is set. It cannot
+take the focus (its `can_focus` reads 0 while its users' wish is kept),
+the tracker never arms or presses it, and it loses focus, arming and press
+at once when it becomes disabled.
+_Avoid_: inactive, greyed out (a look, not the state)
+
+**Focus eligibility**:
+What `can_focus` reads: the widget's users want it focusable (the
+`can_focus` argument or the last write), its class accepts the focus
+(`accepts_focus`, overridden by subclasses) and it is not disabled. The
+tracker's `can_take_focus` adds that the widget belongs to the UI.
+_Avoid_: focusable flag (the flag is only the users' wish)
 
 ### Frames
 

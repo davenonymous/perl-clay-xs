@@ -13,13 +13,13 @@ our $VERSION = '0.01';
 
 # Derived states and the reader each one is answered by. A widget
 # without the reader (no matching interaction role) never has the state.
-my %DERIVED = (hovered => 'is_hovered', pressed => 'is_pressed', focused => 'is_focused');
+my %DERIVED = (hovered => 'is_hovered', pressed => 'is_pressed', focused => 'is_focused', disabled => 'disabled');
 
 role Clay::UI::Role::Style::HasStates {
 	field %_states;
 
 	sub _require_user_state ($name) {
-		die "Clay::UI: state '$name' is derived from interaction and cannot be set\n" if exists $DERIVED{$name};
+		die "Clay::UI: state '$name' is derived and cannot be set\n" if exists $DERIVED{$name};
 		return;
 	}
 
@@ -86,9 +86,9 @@ Clay::UI::Role::Style::HasStates - free-form state-set mixin for Clay::UI widget
 	{}
 
 	my $btn = My::Button->new(id => 'go');
-	$btn->add_state('disabled');
-	$btn->has_state('disabled');   # 1
-	$btn->remove_state('disabled');
+	$btn->add_state('loading');
+	$btn->has_state('loading');    # 1
+	$btn->remove_state('loading');
 	$btn->toggle_state('selected');
 	my @active = $btn->states;     # list of active state names
 
@@ -97,17 +97,18 @@ Clay::UI::Role::Style::HasStates - free-form state-set mixin for Clay::UI widget
 Mixin role that gives a widget a free-form set of state names. State
 names are arbitrary strings; the set is unordered and de-duplicated.
 Intended for tracking interactive and visual states such as
-C<hovered>, C<pressed>, C<focused>, C<disabled>, C<selected>, so
+C<selected> or C<loading>, next to the derived states, so
 themes and consumers have a single place to read "what is this widget
 currently doing?".
 
 =head1 DERIVED STATES
 
-C<hovered>, C<pressed> and C<focused> are derived states: they are
-never stored, but answered live by the widget's C<is_hovered>,
+C<hovered>, C<pressed>, C<focused> and C<disabled> are derived states:
+they are never stored, but answered live by the widget's C<is_hovered>,
 C<is_pressed> and C<is_focused> readers, which ask the UI's interaction
-tracker (L<Clay::UI::Interaction>). A widget without the
-matching interaction role never has the state. Derived states appear
+tracker (L<Clay::UI::Interaction>), and by the C<disabled> reader of
+L<Clay::UI::Role::Interaction::Disableable>. A widget without the
+matching role never has the state. Derived states appear
 in C<has_state> and C<states>, but cannot be written: C<add_state>,
 C<remove_state> and C<toggle_state> die for them, and C<clear_states>
 leaves them alone.

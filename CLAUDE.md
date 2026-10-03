@@ -124,7 +124,7 @@ through Clay::UI and replaces `userData` with widget class and id.
   which owns hover / armed / pressed / focus state and fires the events.
   Widgets hold no interaction state; `is_hovered`, `is_pressed`,
   `is_focused` and the derived `hovered` / `pressed` / `focused` states
-  ask the tracker.
+  ask the tracker (the derived `disabled` state asks Disableable).
   Clay::UI registers no `Clay_OnHover` callbacks. Every queued event
   that is still due fires (each carries a claim check: events an earlier
   listener made stale are dropped, and stop / blur only follow a
@@ -134,6 +134,17 @@ through Clay::UI and replaces `userData` with widget class and id.
   detaching a subtree drops its interaction state (`OnHoverStopped`) and
   focus (`OnBlur`) at once (`release_subtrees`; while its events fire the
   subtree no longer counts as part of the UI).
+- Focus eligibility is derived, never pushed into a flag: Focusable's
+  `can_focus` reader answers "the users' wish (the `can_focus` argument
+  or last write) and `accepts_focus` and not `disabled`"; the writer
+  only records the wish. A class that never takes focus overrides
+  `accepts_focus` in a subclass (a class cannot override a method of a
+  role it composes itself). Writers that can make a widget ineligible
+  (`can_focus`, Disableable's `disabled`) call the tracker's
+  `release_ineligible`, which disarms and unpresses a disabled widget
+  and blurs a focused widget that cannot focus any more, at once. The
+  tracker never arms or presses a disabled widget; `can_take_focus` is
+  the one predicate for "may be focused now".
 - A scroll container is a widget composing HasScroll
   (`_FrameRegistry::is_scroll_container`): only it gets Clay's scroll
   offset injected as `childOffset` and receives OnScroll. The frame

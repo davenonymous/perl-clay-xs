@@ -14,6 +14,7 @@ use Clay::UI;
 use Clay::UI::Test::Box;
 use Clay::UI::Role::Core::Element;
 use Clay::UI::Role::Core::Container;
+use Clay::UI::Role::Interaction::Disableable;
 use Clay::UI::Role::Interaction::Focusable;
 use Clay::UI::Role::Interaction::HasFocusOrder;
 
@@ -26,10 +27,8 @@ sub same ($a, $b, $name) { is(refaddr($a), refaddr($b), $name) }
 class TestInput
 	:does(Clay::UI::Role::Core::Element)
 	:does(Clay::UI::Role::Interaction::Focusable)
-{
-	field $disabled :param :reader = 0;
-	ADJUST { $self->can_focus(0) if $disabled }
-}
+	:does(Clay::UI::Role::Interaction::Disableable)
+{}
 
 # Container that always returns the same widget first, then defers.
 class TestOverride
@@ -129,7 +128,7 @@ subtest 'Focusable defaults: can_focus returns 1; is_focused false before focus'
 	is($ui->interaction->get_focused_widget, undef, 'no widget focused initially');
 };
 
-subtest 'can_focus override (disabled widget)' => sub {
+subtest 'a disabled widget cannot focus' => sub {
 	my $a = TestInput->new(id => 'a', disabled => 1);
 	make_ui($a);
 	is($a->can_focus, 0, 'disabled widget can_focus is 0');
@@ -445,17 +444,18 @@ subtest 'a dying OnBlur listener still completes the focus change' => sub {
 	is( \@log, ['b:focus'], 'OnFocus still fired' );
 };
 
-subtest 'focus_next from a disabled focused widget continues in order' => sub {
-	my @w  = map { TestInput->new(id => $_) } qw(a b c d);
+subtest 'a focused widget that can no longer focus loses the focus at once' => sub {
+	my @w  = map { TestInput->new(id => $_) } qw(a b c);
 	my $ui = make_ui(@w);
-	$ui->interaction->set_focused_widget($w[2]);
-	$w[2]->can_focus(0);
-	$ui->interaction->focus_next;
-	same($ui->interaction->get_focused_widget, $w[3], 'c -> d, not back to a');
+	my @log;
+	$w[1]->on('OnBlur', sub ($e) { push @log, 'b:blur'; return });
 	$ui->interaction->set_focused_widget($w[1]);
 	$w[1]->can_focus(0);
-	$ui->interaction->focus_previous;
-	same($ui->interaction->get_focused_widget, $w[0], 'b -> a going backwards');
+	is( [ \@log, $ui->interaction->get_focused_widget ], [ ['b:blur'], undef ], 'can_focus(0) blurs it' );
+	$ui->interaction->focus_next;
+	same($ui->interaction->get_focused_widget, $w[0], 'Tab starts again at the first focusable widget');
+	$w[0]->can_focus(1);
+	same($ui->interaction->get_focused_widget, $w[0], 'a write that keeps it focusable changes nothing');
 };
 
 # -----------------------------------------------------------------------------

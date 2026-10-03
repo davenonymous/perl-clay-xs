@@ -27,6 +27,7 @@ my %UPDATE_ARGS = map { $_ => 1 } qw(over down x y scrolled);
 my $HOVERABLE   = 'Clay::UI::Role::Interaction::Hoverable';
 my $PRESSABLE   = 'Clay::UI::Role::Interaction::Pressable';
 my $FOCUSABLE   = 'Clay::UI::Role::Interaction::Focusable';
+my $DISABLEABLE = 'Clay::UI::Role::Interaction::Disableable';
 my $FOCUS_ORDER = 'Clay::UI::Role::Interaction::HasFocusOrder';
 my $SCROLLABLE  = 'Clay::UI::Role::Layout::HasScroll';
 my $FLOATING    = 'Clay::UI::Role::Layout::HasFloating';
@@ -140,7 +141,7 @@ class Clay::UI::Interaction :strict(params) {
 		$_down = $input->{down};
 
 		my %over            = map { refaddr($_) => $_ } grep { $_->DOES($HOVERABLE) } @{ $input->{over} };
-		my @over_pressables = grep { $_->DOES($PRESSABLE) } @{ $input->{over} };
+		my @over_pressables = grep { $_->DOES($PRESSABLE) && _is_enabled($_) } @{ $input->{over} };
 
 		# Everything whose state may change: what is under the pointer now
 		# plus what was hovered, armed or pressed before.
@@ -174,7 +175,7 @@ class Clay::UI::Interaction :strict(params) {
 		%_pressed = ();
 		for my $widget (@pressables) {
 			_remember(\%_pressed, $widget)
-				if $input->{down} && $self->is_armed($widget) && exists $over{ refaddr $widget };
+				if $input->{down} && $self->is_armed($widget) && exists $over{ refaddr $widget } && _is_enabled($widget);
 		}
 		_prune(\%_hovered, \%_armed);
 
@@ -289,6 +290,20 @@ class Clay::UI::Interaction :strict(params) {
 		return;
 	}
 
+	# Called by a widget that became disabled or can no longer take focus:
+	# it is disarmed and unpressed, and loses the focus (OnBlur) at once.
+	method release_ineligible ($widget) {
+		_require_ui($ui, 'release_ineligible');
+		my $states_before = $self->_state_signature;
+		if (!_is_enabled($widget)) {
+			delete $_armed{ refaddr $widget };
+			delete $_pressed{ refaddr $widget };
+		}
+		bump_revision() if $self->_state_signature ne $states_before;
+		$self->set_focused_widget(undef) if $self->is_focused($widget) && !$widget->can_focus;
+		return;
+	}
+
 	# Who is hovered, armed, pressed and focused, as a string that changes
 	# exactly when one of those does.
 	method _state_signature () {
@@ -357,13 +372,19 @@ class Clay::UI::Interaction :strict(params) {
 		return $self->_step_focus(-1);
 	}
 
+	# What set_focused_widget accepts, without dying.
+	method can_take_focus ($widget) {
+		return 0 unless blessed $widget && $widget->DOES($FOCUSABLE) && $self->_owns($widget);
+		return $widget->can_focus ? 1 : 0;
+	}
+
 	method _check_focus_target ($widget) {
+		return if $self->can_take_focus($widget);
 		my $fail = sub ($message) { die "Clay::UI::Interaction::set_focused_widget: target $message\n" };
 		$fail->('must be a blessed widget') unless blessed $widget;
 		$fail->("must consume $FOCUSABLE") unless $widget->DOES($FOCUSABLE);
 		$fail->('does not belong to this Clay::UI') unless $self->_owns($widget);
-		$fail->('is not currently focusable (can_focus returned false)') unless $widget->can_focus;
-		return;
+		$fail->('is not currently focusable (can_focus returned false)');
 	}
 
 	method _move_focus ($step) {
@@ -440,6 +461,10 @@ class Clay::UI::Interaction :strict(params) {
 			unshift @stack, @{ $node->children } if $node->DOES('Clay::UI::Role::Core::Element');
 		}
 		return @focusables;
+	}
+
+	sub _is_enabled ($widget) {
+		return !$widget->DOES($DISABLEABLE) || $widget->is_enabled;
 	}
 
 	sub _holds ($state, $widget) {
@@ -597,7 +622,9 @@ that has left the tree, C<OnHoverStart> for a widget that is no longer
 hovered. A widget gets C<OnHoverStopped> only after its
 C<OnHoverStart>, and C<OnBlur> only after its C<OnFocus>.
 
-A press arms every Pressable under the pointer and fires C<OnPress> at
+A press arms every enabled Pressable under the pointer (a widget
+composing L<Clay::UI::Role::Interaction::Disableable> that is disabled
+is never armed or pressed) and fires C<OnPress> at
 the one drawn on top: the last Pressable of C<over> that lies in the
 same root as the first one, skipping that one's ancestors. Nested
 Pressables give the innermost one; overlapping siblings, such as the
@@ -607,6 +634,16 @@ Pressable is pressed
 while it is armed, under the pointer and the button is down. A release
 fires C<OnRelease> at the armed Pressable under the pointer chosen the
 same way, then disarms everything.
+
+=head2 release_ineligible($widget)
+
+Called by a widget of this UI right after it became disabled (see
+L<Clay::UI::Role::Interaction::Disableable>) or its C<can_focus> was
+written. A disabled widget stops being armed and pressed at once, and a
+focused widget whose C<can_focus> is now false loses the focus: it gets
+C<OnBlur> before this returns, as from C<set_focused_widget(undef)>.
+Nothing happens to a widget that may keep what it has. Widget classes
+call it from their setters; you do not call it yourself.
 
 =head2 is_hovered($widget), is_armed($widget), is_pressed($widget)
 
@@ -620,8 +657,10 @@ and are still in the tree, Hoverable or not.
 =head1 FOCUS
 
 Focus changes only through C<set_focused_widget>, C<focus_next>,
-C<focus_previous> and the removal of a subtree holding the focused
-widget (which blurs it). C<render> never changes focus. Event listeners,
+C<focus_previous>, the removal of a subtree holding the focused widget
+(which blurs it) and the focused widget becoming unable to take the
+focus, by C<can_focus(0)> or by being disabled (which blurs it too, see
+L</"release_ineligible($widget)">). C<render> never changes focus. Event listeners,
 including pointer listeners running inside C<update>, may move focus.
 
 Focus follows the widget tree as it is now, while pointer events follow
@@ -640,6 +679,14 @@ weakly.
 =head2 is_focused($widget)
 
 1 or 0.
+
+=head2 can_take_focus($widget)
+
+1 when C<set_focused_widget> would accept C<$widget> now: a widget
+composing L<Clay::UI::Role::Interaction::Focusable>, part of this UI,
+whose C<can_focus> is true; otherwise 0 (for anything, also a
+non-widget). Use it to find a widget to focus, for example the nearest
+ancestor of a clicked widget that can take the focus.
 
 =head2 set_focused_widget($widget)
 
@@ -664,10 +711,7 @@ Move focus to the next / previous focusable widget.
 The default order is the depth-first pre-order of the tree, skipping
 widgets whose C<can_focus> is false, wrapping from end to beginning
 (and vice versa). With no focused widget, C<focus_next> focuses the
-first widget of the chain and C<focus_previous> the last. The focused
-widget itself does not have to be focusable any more: after
-C<< $focused->can_focus(0) >>, C<focus_next> moves on from its
-position.
+first widget of the chain and C<focus_previous> the last.
 
 If the focused widget or one of its ancestors composes
 L<Clay::UI::Role::Interaction::HasFocusOrder>, the nearest such widget

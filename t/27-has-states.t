@@ -23,7 +23,7 @@ subtest 'add_state and has_state' => sub {
 	my $w = TestStatesWidget->new;
 	$w->add_state('selected');
 	ok( $w->has_state('selected'), 'state is now active' );
-	ok( !$w->has_state('disabled'), 'other states stay inactive' );
+	ok( !$w->has_state('loading'), 'other states stay inactive' );
 };
 
 subtest 'add_state is idempotent and dedupes' => sub {
@@ -36,9 +36,9 @@ subtest 'add_state is idempotent and dedupes' => sub {
 
 subtest 'remove_state' => sub {
 	my $w = TestStatesWidget->new;
-	$w->add_state('disabled');
-	$w->remove_state('disabled');
-	ok( !$w->has_state('disabled'), 'state is gone after remove' );
+	$w->add_state('loading');
+	$w->remove_state('loading');
+	ok( !$w->has_state('loading'), 'state is gone after remove' );
 };
 
 subtest 'remove_state is idempotent on absent names' => sub {
@@ -95,12 +95,12 @@ subtest 'state-sets are per-instance' => sub {
 
 subtest 'derived state names are read-only' => sub {
 	my $w = TestStatesWidget->new;
-	for my $name (qw(hovered pressed focused)) {
+	for my $name (qw(hovered pressed focused disabled)) {
 		for my $mutator (qw(add_state remove_state toggle_state)) {
-			like( dies { $w->$mutator($name) }, qr/state '$name' is derived from interaction and cannot be set/,
+			like( dies { $w->$mutator($name) }, qr/state '$name' is derived and cannot be set/,
 				"$mutator('$name') dies" );
 		}
-		ok( !$w->has_state($name), "$name is false without the interaction role" );
+		ok( !$w->has_state($name), "$name is false without the matching role" );
 	}
 };
 
