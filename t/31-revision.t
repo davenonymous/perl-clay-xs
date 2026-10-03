@@ -133,6 +133,24 @@ subtest 'setting a scroll position bumps the revision' => sub {
 	is( bump_revision(), current_revision(), 'bump_revision still returns the current value' );
 };
 
+subtest 'laid_out_revision is the revision a frame shows' => sub {
+	my $root = HoverBox->new(id => 'root');
+	$root->add_child(Clay::UI::Test::Box->new(layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } }));
+	my $ui = Clay::UI->new(width => 20, height => 20, root => $root);
+	is( $ui->laid_out_revision, undef, 'undef before the first frame' );
+	my $hovered = 0;
+	$root->on(OnHoverStart => sub ($event) { $hovered++; $root->add_child(Clay::UI::Test::Box->new); return });
+	$ui->render;
+	is( $ui->laid_out_revision, current_revision(), 'a frame shows every change before its layout' );
+	my $before = current_revision();
+	$ui->render(pointer_state => { x => 2, y => 2, down => 0 });
+	is( $hovered, 1, 'a listener changed the tree during the frame' );
+	ok( current_revision() > $before, 'which bumped the revision' );
+	is( $ui->laid_out_revision, current_revision(), 'and the frame shows that change too' );
+	bump_revision();
+	isnt( $ui->laid_out_revision, current_revision(), 'a later change is not shown yet' );
+};
+
 subtest 'scrolling inside render bumps the revision' => sub {
 	my $root = ScrollBox->new(id => 'log', layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(2) } });
 	$root->add_child(Clay::UI::Test::Box->new(layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(9) } }));

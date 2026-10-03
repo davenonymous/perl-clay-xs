@@ -27,6 +27,9 @@ use Clay::XS qw(
 	Clay_BeginLayout
 	Clay_EndLayout
 	Clay_GetElementId
+	Clay_GetElementData
+	Clay_GetScrollContainerData
+	set_scroll_position
 	Clay__OpenElementWithId
 	Clay__ConfigureOpenElement
 	Clay__CloseElement
@@ -38,7 +41,8 @@ use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::_validate qw(is_finite_number);
 use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
-use Clay::UI::Revision qw(bump_revision);
+use Clay::UI::Role::Core::Preparable;
+use Clay::UI::Revision qw(bump_revision current_revision);
 
 our $VERSION = '0.03';
 
@@ -72,6 +76,9 @@ class Clay::UI :strict(params) {
 	# hover, armed, pressed and focus state.
 	field $_last_pointer;
 	field $interaction :reader;
+
+	# The revision (Clay::UI::Revision) the last layout pass started at.
+	field $_laid_out_revision :reader(laid_out_revision);
 
 	ADJUST {
 		unless (blessed $root
@@ -269,9 +276,9 @@ class Clay::UI :strict(params) {
 		return $commands;
 	}
 
-	# One frame: pointer and scroll input, event dispatch (plain Perl, with
-	# no element open, so listeners may change the tree), then the layout
-	# pass.
+	# One frame: pointer and scroll input, event dispatch and the widgets
+	# that asked to be prepared (plain Perl, with no element open, so they
+	# may change the tree), then the layout pass.
 	#
 	# Clay_UpdateScrollContainers clears every scroll container's "declared
 	# this frame" mark, and the next update drops the scroll state of any
@@ -314,6 +321,12 @@ class Clay::UI :strict(params) {
 		}
 		{
 			local $@;
+			eval { Clay::UI::Role::Core::Preparable::_prepare_pending($self); 1 }
+				or $dispatch_error //= $@ || 'unknown prepare_layout error';
+		}
+		{
+			local $@;
+			$_laid_out_revision = current_revision();    # nothing changes the tree from here on
 			eval { $commands = $self->_layout_frame($frame->{delta_time}); 1 }
 				or $layout_error = $@ || 'unknown layout error';
 		}
@@ -393,6 +406,72 @@ class Clay::UI :strict(params) {
 	method widget_for ($user_data) {
 		return undef unless defined $user_data && $user_data;
 		return $_frame->widget_for($user_data);
+	}
+
+	# ---------------------------------------------------------------------
+	# Geometry and scrolling of the last completed frame.
+	# ---------------------------------------------------------------------
+
+	# The element id the last frame declared the widget with, or undef when
+	# the widget was not part of it.
+	method _laid_out_element ($widget) {
+		die "Clay::UI: expected a widget, got " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+			unless blessed $widget;
+		return $_frame->element_id_of($widget);
+	}
+
+	method bounding_box ($widget) {
+		my $element = $self->_laid_out_element($widget) // return undef;
+		Clay_SetCurrentContext($_ctx);
+		my $data = Clay_GetElementData($element);
+		return undef unless $data->{found};
+		return { map { $_ => $data->{boundingBox}{$_} + 0 } qw(x y width height) };
+	}
+
+	# ( element id, Clay's scroll data ) of a scroll container, or an empty
+	# list when the last frame did not lay it out.
+	method _scroll_data ($widget) {
+		die "Clay::UI: " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+			. " is not a scroll container (it does not compose Clay::UI::Role::Layout::HasScroll)"
+			unless blessed $widget && $_frame->is_scroll_container($widget);
+		my $element = $self->_laid_out_element($widget) // return;
+		Clay_SetCurrentContext($_ctx);
+		my $data = Clay_GetScrollContainerData($element);
+		return $data->{found} ? ($element, $data) : ();
+	}
+
+	method scroll_state ($widget) {
+		my (undef, $data) = $self->_scroll_data($widget) or return undef;
+		return {
+			position => { map { $_ => $data->{scrollPosition}{$_} + 0 } qw(x y) },
+			viewport => { map { $_ => $data->{scrollContainerDimensions}{$_} + 0 } qw(width height) },
+			content  => { map { $_ => $data->{contentDimensions}{$_} + 0 } qw(width height) },
+		};
+	}
+
+	# Moves a scroll container, kept within its content; an axis left out
+	# keeps its position. Returns the position, or undef when the last frame
+	# did not lay the container out.
+	method scroll_to ($widget, $position) {
+		die "Clay::UI: scroll_to needs a position { x => ..., y => ... }"
+			unless ref $position eq 'HASH';
+		my @unknown = grep { !$VECTOR_KEYS{$_} } sort keys %$position;
+		die "Clay::UI: scroll_to got unknown position key(s): @unknown" if @unknown;
+		for my $axis (sort keys %$position) {
+			die "Clay::UI: scroll_to position '$axis' must be a finite number"
+				unless is_finite_number($position->{$axis});
+		}
+		my ($element, $data) = $self->_scroll_data($widget) or return undef;
+		my %extent = (x => 'width', y => 'height');
+		my %clamped;
+		for my $axis (qw(x y)) {
+			my $lowest = $data->{scrollContainerDimensions}{ $extent{$axis} } - $data->{contentDimensions}{ $extent{$axis} };
+			$lowest = 0 if $lowest > 0;
+			my $wanted = $position->{$axis} // $data->{scrollPosition}{$axis};
+			$clamped{$axis} = $wanted > 0 ? 0 : $wanted < $lowest ? $lowest : $wanted + 0;
+		}
+		set_scroll_position($element, \%clamped);
+		return \%clamped;
 	}
 
 	# Injects the back-reference into a config hash the walker owns (a
@@ -697,6 +776,57 @@ falsy or unknown).
 		# dispatch on ref $widget, read its fields, etc.
 	}
 
+=head2 laid_out_revision
+
+	my $shown = $ui->laid_out_revision;
+
+The revision (L<Clay::UI::Revision>) at which the last C<render> began
+its layout pass, after the frame's events and preparations: every
+change up to it is part of that frame. A renderer that skips unchanged
+frames compares it with C<current_revision> to know whether another
+frame is due; changes made during the render before the layout pass
+(by event listeners or L<Clay::UI::Role::Core::Preparable> widgets) then
+need no frame of their own. C<undef> before the first C<render>.
+
+=head2 bounding_box
+
+	my $box = $ui->bounding_box($widget);    # { x, y, width, height } or undef
+
+Where the last completed C<render> placed the widget, as a new hash of
+C<x>, C<y>, C<width> and C<height> in layout units (the same numbers as
+the C<boundingBox> of its render commands); scrolling is included, so
+a widget scrolled out of view lies outside its scroll container.
+Returns C<undef> for a widget that frame did not lay out (one added
+since, removed, or never part of this UI). Works for element widgets
+only (not text widgets); anything that is not an object dies.
+
+=head2 scroll_state
+
+	my $state = $ui->scroll_state($scroll_box);
+	# { position => { x, y }, viewport => { width, height }, content => { width, height } }
+
+The scroll data of a scroll container (a widget composing
+L<Clay::UI::Role::Layout::HasScroll>) as the last completed C<render>
+left it: C<position> is Clay's scroll position (0 at the top and left,
+negative when scrolled down or right), C<viewport> the size of the
+visible area and C<content> the size of everything inside. Returns
+C<undef> when that frame did not lay the container out; dies for a
+widget that is not a scroll container.
+
+=head2 scroll_to
+
+	$ui->scroll_to($scroll_box, { y => -12 });         # 12 units down
+	$ui->scroll_to($scroll_box, { x => 0, y => 0 });   # back to the top left
+
+Moves a scroll container (see L</scroll_state>) to a scroll position,
+kept within its content (from 0 down to C<viewport - content> on each
+axis); an axis left out keeps its position. Returns the position set,
+as a new hash, or C<undef> when the last completed C<render> did not lay
+the container out (then nothing moves). The next C<render> shows the
+new position; like every C<set_scroll_position> it counts as a change
+for L<Clay::UI::Revision>. Unknown keys, non-numbers and widgets that
+are not scroll containers die.
+
 =head2 interaction
 
 Returns this UI's L<Clay::UI::Interaction>, which owns hover, armed,
@@ -741,6 +871,13 @@ OnHoverStart, OnPress, OnRelease, every OnScroll. Events of one kind
 fire in tree order (depth-first pre-order of the last layout).
 
 =item 4.
+
+Widgets that asked for it (L<Clay::UI::Role::Core::Preparable>) bring
+their subtrees up to date: C<prepare_layout> is called on each widget
+of this UI that called C<request_prepare> since its last preparation,
+so changes the listeners made above are included.
+
+=item 5.
 
 The layout pass runs and C<render> returns its commands.
 
@@ -792,14 +929,16 @@ bumps the revision (L<Clay::UI::Revision>), as the frame shows it.
 The constructor settles Clay's pointer state, so the first C<render>
 never reports a press or release that did not happen.
 
-Listeners run while no Clay element is open. They may change the tree,
+Listeners and preparations run while no Clay element is open. They may change the tree,
 widget attributes and focus, and use other Clay::UI objects; the
 changes show in this frame's layout. They must not call this object's
 C<render>. If a listener dies, the remaining events of the frame still
-fire and the layout pass still runs (Clay would otherwise forget the
-scroll positions at the next C<render>), then C<render> dies with the
-first error and the frame's render commands are discarded; the widget
-states are already up to date and the next C<render> works normally.
+fire, the widgets are still prepared and the layout pass still runs
+(Clay would otherwise forget the scroll positions at the next
+C<render>), then C<render> dies with the first error (of a listener or
+of a C<prepare_layout>) and the frame's render commands are discarded;
+the widget states are already up to date and the next C<render> works
+normally.
 
 Focus events (L<Clay::UI::Events::OnFocus>, L<Clay::UI::Events::OnBlur>)
 do not come from C<render>; see L<Clay::UI::Interaction/FOCUS>.

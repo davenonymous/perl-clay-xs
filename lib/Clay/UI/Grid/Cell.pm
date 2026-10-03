@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::Role::Core::Container;
+use Clay::UI::Role::Layout::GridCell;
 use Clay::UI::Role::Layout::HasLayout;
 use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
@@ -21,6 +22,7 @@ class Clay::UI::Grid::Cell :strict(params)
 	:does(Clay::UI::Role::Style::HasBackground)
 	:does(Clay::UI::Role::Style::HasBorder)
 	:does(Clay::UI::Role::Style::HasCornerRadius)
+	:does(Clay::UI::Role::Layout::GridCell)
 {}
 
 1;
@@ -68,8 +70,9 @@ C<add_child> puts content into it), L<Clay::UI::Role::Layout::HasLayout>,
 L<Clay::UI::Role::Style::HasBackground>,
 L<Clay::UI::Role::Style::HasBorder> and
 L<Clay::UI::Role::Style::HasCornerRadius> - but not floating or events.
-The distinct class exists because the Grid needs a container it can
-recognise and use directly rather than re-wrapping.
+It also composes L<Clay::UI::Role::Layout::GridCell>, the marker that
+makes the Grid use it directly rather than re-wrapping it. A cell class
+of your own that composes that role works the same way.
 
 When you build a Grid:
 
@@ -78,7 +81,9 @@ When you build a Grid:
 =item *
 
 Pass a C<Clay::UI::Grid::Cell> directly to control the cell's visual
-styling (background, border, padding, corner radius). The Grid will set
+styling (background, border, padding, corner radius) and its width
+(a C<sizing_grow()> width takes a share of the space left in a wide
+grid, a C<sizing_fit($min, $max)> width limits the column). The Grid will set
 the cell's C<width_group> / C<height_group> on this object so its
 rendered box is exactly the equalized column width and row height.
 

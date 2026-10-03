@@ -61,6 +61,17 @@ sub _validate_attachment ($anchor, @kids) {
 	return;
 }
 
+# True when $order is an array reference holding each of 0..$count-1
+# exactly once.
+sub _is_permutation ($order, $count) {
+	return 0 unless ref $order eq 'ARRAY' && @$order == $count;
+	my %seen;
+	for my $index (@$order) {
+		return 0 unless defined $index && !ref $index && $index =~ /\A[0-9]+\z/ && $index < $count && !$seen{$index}++;
+	}
+	return 1;
+}
+
 sub _self_and_ancestors ($node) {
 	my @chain;
 	for (my $cursor = $node; defined $cursor; $cursor = $cursor->parent) {
@@ -132,6 +143,18 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		bump_revision();
 		$self->_release_children(@removed);
 		return @removed;
+	}
+
+	# Puts the children in a new order without detaching any: child $k
+	# becomes the child that was at $order->[$k]. $order must hold every
+	# index exactly once.
+	method _reorder_children ($order) {
+		my $count = scalar @_children;
+		die "Clay::UI: a new child order must be an array reference of the indices 0.." . ($count - 1) . " in any order"
+			unless _is_permutation($order, $count);
+		@_children = @_children[@$order];
+		bump_revision();
+		return;
 	}
 
 	method _detach_children (@kids) {
@@ -294,6 +317,9 @@ widget as it was. It dies if a child is not a widget
 appears twice in the call, is the widget itself or one of its ancestors
 (a cycle), is the root of a L<Clay::UI>, or is still attached to a
 parent (see L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>).
+
+Widgets that manage their children themselves may also reorder them
+(L<Clay::UI::Grid/reorder_rows>); no child is detached by that.
 
 Removed children are detached: their C<parent> becomes undef and they
 are no longer part of the Clay::UI, until they are attached again. If the focused widget is inside a

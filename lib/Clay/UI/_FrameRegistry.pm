@@ -17,7 +17,7 @@ class Clay::UI::_FrameRegistry :strict(params) {
 	# like one the frame never saw.
 	field %_by_user_data;   # render-command userData (refaddr) -> widget
 	field %_by_element;     # Clay element id -> widget
-	field %_rank;           # refaddr -> [ position in the walk (pre-order), widget ]
+	field %_rank;           # refaddr -> [ position in the walk (pre-order), widget, element id hash ]
 	field @_scroll;         # [ widget, element id hash ] per scroll container
 
 	# Records a widget that emits render commands; returns the userData
@@ -34,7 +34,7 @@ class Clay::UI::_FrameRegistry :strict(params) {
 	method add_element ($widget, $element_id) {
 		$_by_element{ $element_id->{id} } = $widget;
 		weaken $_by_element{ $element_id->{id} };
-		$_rank{ refaddr $widget } = [ scalar keys %_rank, $widget ];
+		$_rank{ refaddr $widget } = [ scalar keys %_rank, $widget, $element_id ];
 		weaken $_rank{ refaddr $widget }[1];
 		if ($self->is_scroll_container($widget)) {
 			push @_scroll, [ $widget, $element_id ];
@@ -61,6 +61,13 @@ class Clay::UI::_FrameRegistry :strict(params) {
 
 	method widget_for_element ($id) {
 		return $_by_element{$id};
+	}
+
+	# The element id hash the walk declared the widget with, or undef if
+	# the walk did not reach it.
+	method element_id_of ($widget) {
+		return undef unless defined $self->_walk_rank($widget);
+		return $_rank{ refaddr $widget }[2];
 	}
 
 	# Widgets sorted by their position in the walk. Widgets the walk did not

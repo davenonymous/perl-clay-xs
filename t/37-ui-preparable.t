@@ -1,0 +1,107 @@
+use v5.22;
+use warnings;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+
+use Test2::V0;
+
+use lib "t/lib";
+
+use Object::Pad;
+use Scalar::Util qw(weaken);
+use Clay::XS qw(:all);
+use Clay::UI;
+use Clay::UI::Revision qw(current_revision);
+use Clay::UI::Role::Core::Preparable;
+use Clay::UI::Test::Box;
+use Clay::UI::Test::Text;
+
+# A list whose labels follow its items; it counts its preparations.
+class Clay::UI::Test::List :strict(params) :does(Clay::UI::Box) :does(Clay::UI::Role::Core::Preparable) {
+	field @items;
+	field $prepared :reader = 0;
+	field $on_prepare :param = undef;
+
+	method add_item ($item) {
+		push @items, $item;
+		return $self->request_prepare;
+	}
+
+	method prepare_layout () {
+		$prepared++;
+		$self->clear_children;
+		$self->add_child( map { Clay::UI::Test::Text->new(text => $_) } @items );
+		$on_prepare->($self) if $on_prepare;
+		return;
+	}
+}
+
+sub ui_with (@children) {
+	my $root = Clay::UI::Test::Box->new(id => 'root');
+	$root->add_child(@children);
+	return Clay::UI->new(root => $root, width => 100, height => 100, measure_text => sub { { width => length $_[0], height => 1 } });
+}
+
+sub texts ($commands) {
+	return [ map { $_->{renderData}{stringContents} } grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @$commands ];
+}
+
+subtest 'requests are prepared once, before the layout' => sub {
+	my $list = Clay::UI::Test::List->new(id => 'list');
+	my $ui   = ui_with($list);
+	my $revision = current_revision();
+	$list->add_item($_) for qw(a b c);
+	ok( current_revision() > $revision, 'a request bumps the revision' );
+	ok( $list->is_prepare_pending, 'the list is pending' );
+	is( texts($ui->render), [qw(a b c)], 'the frame shows the prepared children' );
+	is( $list->prepared, 1, 'three requests, one preparation' );
+	ok( !$list->is_prepare_pending, 'nothing pending after it' );
+	$ui->render;
+	is( $list->prepared, 1, 'a frame without requests prepares nothing' );
+};
+
+subtest 'widgets of other UIs, or of none, stay pending' => sub {
+	my $loose = Clay::UI::Test::List->new(id => 'loose');
+	$loose->add_item('x');
+	my $other = Clay::UI::Test::List->new(id => 'other');
+	my $ui    = ui_with($other);
+	$ui->render;
+	is( $loose->prepared, 0, 'a widget outside the UI is not prepared' );
+	ok( $loose->is_prepare_pending, 'and stays pending' );
+	my $second = ui_with($loose);
+	is( texts($second->render), ['x'], 'until a UI it belongs to renders' );
+};
+
+subtest 'a preparation may request another' => sub {
+	my $count = 0;
+	my $list  = Clay::UI::Test::List->new(id => 'chain', on_prepare => sub ($self) { $self->add_item('again') if ++$count < 3 });
+	my $ui    = ui_with($list);
+	$list->add_item('first');
+	$ui->render;
+	is( $list->prepared, 3, 'prepared until no request was left' );
+
+	my $endless = Clay::UI::Test::List->new(id => 'endless', on_prepare => sub ($self) { $self->request_prepare });
+	my $other   = ui_with($endless);
+	$endless->request_prepare;
+	like( dies { $other->render }, qr/kept requesting preparation/, 'endless requests die' );
+};
+
+subtest 'an error in prepare_layout leaves render after the layout pass' => sub {
+	my $list = Clay::UI::Test::List->new(id => 'failing', on_prepare => sub { die "broken\n" });
+	my $ui   = ui_with($list);
+	$list->request_prepare;
+	like( dies { $ui->render }, qr/\Abroken/, 'render dies with the error' );
+	ok( lives { $ui->render }, 'the next render works' );
+};
+
+subtest 'the queue holds widgets weakly' => sub {
+	my $list = Clay::UI::Test::List->new(id => 'gone');
+	$list->request_prepare;
+	my $weak = $list;
+	weaken $weak;
+	undef $list;
+	is( $weak, undef, 'a queued widget can be freed' );
+	ok( lives { ui_with()->render }, 'and is forgotten' );
+};
+
+done_testing;

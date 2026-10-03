@@ -12,6 +12,7 @@ use Clay::UI;
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
 use Clay::UI::Test::Grid;
+use Clay::UI::Test::GridCell;
 use Clay::UI::Grid::Cell;
 use Object::Pad;
 use Object::Pad::MetaFunctions qw(ref_field);
@@ -480,7 +481,7 @@ subtest 'a layout with padding keeps rows stacked and row_gap' => sub {
 
 subtest 'removed rows free their height id' => sub {
 	my $grid = Clay::UI::Test::Grid->new(id => 'rolling');
-	${ ref_field('Clay::UI::Grid.$_next_height_local', $grid) } = (1 << 20) - 1;
+	${ ref_field('Clay::UI::Grid::_IdSpace.$next_height_local', $grid->_id_space) } = (1 << 20) - 1;
 	$grid->append_row([ text_cell('last fresh id') ]);
 	like( dies { $grid->append_row([ text_cell('one too many') ]) }, qr/local index 1048576 out of range/,
 		'the local id space is exhausted' );
@@ -508,6 +509,182 @@ subtest 'the grid id is released when the grid is freed' => sub {
 	my $reclaimed = Clay::UI::Grid::_claim_grid_id();
 	is( $reclaimed, $grid_id, 'its grid id went back to the pool' );
 	Clay::UI::Grid::_release_grid_id($_) for @held, $reclaimed;
+};
+
+# -----------------------------------------------------------------------------
+# Rows stretch to the grid's width: grow cells share the space left over and
+# stay aligned across rows.
+# -----------------------------------------------------------------------------
+
+sub grow_cell ($text) {
+	my $cell = Clay::UI::Grid::Cell->new(layout => { sizing => { width => sizing_grow(), height => sizing_fit() } });
+	$cell->add_child(text_cell($text));
+	return $cell;
+}
+
+sub text_boxes ($ui) {
+	return { map { $_->{renderData}{stringContents} => $_->{boundingBox} }
+		grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ $ui->render } };
+}
+
+subtest 'grow cells take the space left in a wide grid' => sub {
+	@errors = ();
+	my $grid = Clay::UI::Test::Grid->new(id => 'wide', layout => { sizing => { width => sizing_fixed(400) } });
+	$grid->append_row([ text_cell('aa'),   grow_cell('b'),    text_cell('c') ]);
+	$grid->append_row([ text_cell('aaaa'), grow_cell('bbbb'), text_cell('cc') ]);
+	my $at = text_boxes(make_ui($grid));
+	is( scalar(@errors), 0, 'no Clay errors' );
+	is( $at->{c}{x}, $at->{cc}{x}, 'the column after the grow column is aligned' );
+	is( $at->{cc}{x} + 2 * $GLYPH_W, 400, 'the grow column took all the space left' );
+	is( $at->{b}{x}, 4 * $GLYPH_W, 'columns before it keep their fit width' );
+};
+
+# -----------------------------------------------------------------------------
+# Spanning rows.
+# -----------------------------------------------------------------------------
+
+subtest 'a spanning row belongs to no column' => sub {
+	@errors = ();
+	my $grid = Clay::UI::Test::Grid->new(id => 'span');
+	$grid->append_row([ text_cell('a'), text_cell('b') ]);
+	$grid->append_spanning_row(text_cell('a heading wider than the columns'));
+	$grid->insert_spanning_row(0, text_cell('top'));
+	$grid->append_row([ text_cell('cc'), text_cell('d') ]);
+	is( [ map { $grid->is_spanning_row($_) ? 1 : 0 } 0 .. 3 ], [ 1, 0, 1, 0 ], 'is_spanning_row' );
+	my $wrappers = $grid->cell_wrappers;
+	is( scalar @{ $wrappers->[2] }, 1, 'a spanning row has one cell' );
+	is( $wrappers->[2][0]->width_group, 0, 'which has no column width id' );
+	isnt( $wrappers->[2][0]->height_group, 0, 'but a row height id' );
+
+	my $ui = make_ui($grid);
+	my $at = text_boxes($ui);
+	is( scalar(@errors), 0, 'no Clay errors' );
+	is( $at->{b}{x}, 2 * $GLYPH_W, 'the heading does not widen the first column' );
+	is( $ui->bounding_box($grid)->{width}, 3 * $GLYPH_W, 'nor the grid: it is as wide as its columns' );
+	ok( $at->{columns}{y} > $at->{wider}{y}, 'the heading wraps instead' );
+	is( $at->{d}{x}, $at->{b}{x}, 'the columns stay aligned across it' );
+	like( dies { $grid->set_cell(2, 0, text_cell('x')) }, qr/row 2 spans all columns/, 'set_cell on a spanning row dies' );
+	like( dies { $grid->is_spanning_row(9) }, qr/row index 9 out of range 0\.\.3/, 'is_spanning_row checks the index' );
+};
+
+subtest 'spanning rows and normal rows replace each other' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'span-replace');
+	$grid->append_row([ text_cell('a'), text_cell('b') ]);
+	my $height = $grid->cell_wrappers->[0][0]->height_group;
+	my $old    = $grid->cell_wrappers->[0][0];
+	$grid->replace_spanning_row(0, text_cell('heading'));
+	ok( $grid->is_spanning_row(0), 'the row spans now' );
+	is( $grid->cell_wrappers->[0][0]->height_group, $height, 'with the same height id' );
+	is( $old->parent, undef, 'the old cells are detached' );
+	$grid->replace_row(0, [ text_cell('x'), text_cell('y') ]);
+	ok( !$grid->is_spanning_row(0), 'and back to a normal row' );
+	is( scalar @{ $grid->cell_wrappers->[0] }, 2, 'with two cells' );
+};
+
+subtest 'a cell class of your own composing GridCell is used as it is' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'own-cell');
+	my $cell = Clay::UI::Test::GridCell->new(background_color => [ 9, 9, 9, 255 ]);
+	$cell->add_child(text_cell('mine'));
+	$grid->append_row([ $cell, text_cell('wrapped') ]);
+	my $row = $grid->cell_wrappers->[0];
+	is( refaddr($row->[0]), refaddr($cell), 'the own cell is the wrapper' );
+	isnt( $cell->width_group, 0, 'and carries the column id' );
+	ok( $row->[1]->isa('Clay::UI::Grid::Cell'), 'another widget is wrapped' );
+};
+
+# -----------------------------------------------------------------------------
+# reorder_rows and clear_rows.
+# -----------------------------------------------------------------------------
+
+subtest 'reorder_rows moves rows without detaching them' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'order');
+	my @first = map { text_cell($_) } qw(a1 a2);
+	$grid->append_row([@first]);
+	$grid->append_spanning_row(text_cell('heading'));
+	$grid->append_row([ text_cell('c1'), text_cell('c2') ]);
+	my @rows    = @{ $grid->children };
+	my $heights = [ map { $_->[0]->height_group } @{ $grid->cell_wrappers } ];
+	my $parent  = $first[0]->parent;
+
+	$grid->reorder_rows([ 2, 0, 1 ]);
+	is( [ map { refaddr $_ } @{ $grid->children } ], [ map { refaddr $_ } @rows[ 2, 0, 1 ] ], 'the rows are in the new order' );
+	is( [ map { $_->[0]->height_group } @{ $grid->cell_wrappers } ], [ @$heights[ 2, 0, 1 ] ], 'the cells follow' );
+	is( [ map { $grid->is_spanning_row($_) ? 1 : 0 } 0 .. 2 ], [ 0, 0, 1 ], 'and so do the spanning flags' );
+	is( refaddr($first[0]->parent), refaddr($parent), 'no cell was detached' );
+
+	for my $bad ([ 0, 1 ], [ 0, 0, 1 ], [ 0, 1, 3 ], [ 0, 1, 'x' ], 'nope') {
+		like( dies { $grid->reorder_rows($bad) }, qr/new child order must be an array reference of the indices 0\.\.2/, 'a bad order dies' );
+	}
+	is( [ map { refaddr $_ } @{ $grid->children } ], [ map { refaddr $_ } @rows[ 2, 0, 1 ] ], 'and changes nothing' );
+};
+
+subtest 'clear_rows removes every row' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'clear');
+	my $cell = Clay::UI::Grid::Cell->new;
+	$grid->append_row([ $cell, text_cell('b') ]);
+	$grid->append_spanning_row(text_cell('heading'));
+	$grid->clear_rows;
+	is( $grid->row_count, 0, 'no rows left' );
+	is( $cell->parent, undef, 'the cells are detached' );
+	is( [ $cell->width_group, $cell->height_group ], [ 0, 0 ], 'and dropped the group ids' );
+	ok( lives { $grid->append_row([ $cell ]) }, 'the grid keeps working' );
+};
+
+# -----------------------------------------------------------------------------
+# share_columns_with.
+# -----------------------------------------------------------------------------
+
+subtest 'grids sharing columns are sized as one' => sub {
+	@errors = ();
+	my $page   = Clay::UI::Test::Box->new(id => 'page', layout => { layout_direction => CLAY_TOP_TO_BOTTOM });
+	my $header = Clay::UI::Test::Grid->new(id => 'header');
+	my $body   = Clay::UI::Test::Grid->new(id => 'body', share_columns_with => $header);
+	$header->append_row([ text_cell('Name'), text_cell('Size') ]);
+	$body->append_row([ text_cell('a-long-name'), text_cell('1') ]);
+	$body->append_row([ text_cell('b'), text_cell('22') ]);
+	$page->add_child($header, $body);
+
+	is( $body->cell_wrappers->[0][1]->width_group, $header->cell_wrappers->[0][1]->width_group, 'column 1 has one width id' );
+	my %heights = map { $_->[0]->height_group => 1 } @{ $header->cell_wrappers }, @{ $body->cell_wrappers };
+	is( scalar keys %heights, 3, 'no two rows share a height id' );
+
+	my $at = text_boxes(make_ui($page));
+	is( scalar(@errors), 0, 'no Clay errors' );
+	is( $at->{Size}{x}, $at->{1}{x}, 'the header column lines up with the body column' );
+	is( $at->{Size}{x}, 11 * $GLYPH_W, 'sized by the widest cell of either grid' );
+
+	like( dies { Clay::UI::Test::Grid->new(id => 'x', share_columns_with => 'header') }, qr/share_columns_with must be a Clay::UI::Grid, got 'header'/, 'a non-grid dies' );
+};
+
+subtest 'grids sharing columns are as wide as each other' => sub {
+	@errors = ();
+	my $page   = Clay::UI::Test::Box->new(id => 'shared-width', layout => { layout_direction => CLAY_TOP_TO_BOTTOM });
+	my $header = Clay::UI::Test::Grid->new(id => 'sw-header');
+	my $body   = Clay::UI::Test::Grid->new(id => 'sw-body', share_columns_with => $header);
+	my $empty  = Clay::UI::Test::Grid->new(id => 'sw-empty', share_columns_with => $header);
+	$header->append_row([ text_cell('Name'), text_cell('Size') ]);
+	$body->append_spanning_row(text_cell('nothing'));
+	$page->add_child($header, $body, $empty);
+	is( $body->width_group, $header->width_group, 'the grids share a width group' );
+	my $ui = make_ui($page);
+	$ui->render;
+	is( scalar(@errors), 0, 'no Clay errors' );
+	is( $ui->bounding_box($body)->{width}, 8 * $GLYPH_W, 'a grid of spanning rows is as wide as the columns' );
+	is( $ui->bounding_box($empty)->{width}, 8 * $GLYPH_W, 'and so is one without rows' );
+
+	my $own = Clay::UI::Test::Grid->new(id => 'sw-own', width_group => 7, share_columns_with => $header);
+	is( $own->width_group, 7, 'a width group given to a grid stays' );
+};
+
+subtest 'shared ids stay in effect while any sharing grid lives' => sub {
+	my $header = Clay::UI::Test::Grid->new(id => 'h');
+	my $body   = Clay::UI::Test::Grid->new(id => 'b', share_columns_with => $header);
+	$body->append_row([ text_cell('x') ]);
+	my $cell = $body->cell_wrappers->[0][0];
+	undef $header;
+	isnt( $cell->width_group, 0, 'the body keeps the ids alive after the header is freed' );
+	undef $body;
+	is( $cell->width_group, 0, 'and they read 0 once every grid is gone' );
 };
 
 class DestroyingGrid :does(Clay::UI::Grid) {
