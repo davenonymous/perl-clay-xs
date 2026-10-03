@@ -145,6 +145,27 @@ through Clay::UI and replaces `userData` with widget class and id.
   and blurs a focused widget that cannot focus any more, at once. The
   tracker never arms or presses a disabled widget; `can_take_focus` is
   the one predicate for "may be focused now".
+- Preparation runs between the events and the layout pass: `render`
+  calls `Clay::UI::Role::Core::Preparable::_prepare_pending`, which
+  calls `prepare_layout` on every queued widget that belongs to this UI
+  (the queue is process-global and holds widgets weakly), again while
+  preparations queue more, and dies after 100 rounds. A
+  `prepare_layout` error is held like a listener error and rethrown
+  after the layout pass. Widgets whose children follow from their own
+  state call `request_prepare` from their setters (it bumps the
+  revision) and rebuild in `prepare_layout`, not in every setter.
+- `render` stores `current_revision()` in `laid_out_revision` right
+  before the layout pass; nothing may change the tree after that point.
+  Renderers remember `laid_out_revision` as the revision they drew, so
+  changes made by listeners and preparations need no second frame.
+- `Clay::UI::Role::Layout::GridCell` is a marker role (no fields, no
+  methods): Grid stamps its column and row group ids on such a widget
+  directly and wraps any other widget in a `Clay::UI::Grid::Cell`
+  (which composes the marker). Grids made with `share_columns_with`
+  share one `Clay::UI::Grid::_IdSpace` (grid id and id counters) and a
+  common grid `width_group`. Object::Pad 0.825 keeps `ADJUST :params`
+  values alive until the next construction, so an `ADJUST :params`
+  that receives another widget undefs it when done (see Grid).
 - A scroll container is a widget composing HasScroll
   (`_FrameRegistry::is_scroll_container`): only it gets Clay's scroll
   offset injected as `childOffset` and receives OnScroll. The frame

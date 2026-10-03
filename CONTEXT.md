@@ -51,6 +51,31 @@ children on top of each other, each aligned on its own by
 `childAlignment`, and draws later children over earlier ones.
 _Avoid_: z-stack, overlay (reserved for `overlayColor`)
 
+**Grid cell**:
+A widget composing the marker role `Clay::UI::Role::Layout::GridCell`.
+`Clay::UI::Grid` stamps its column `width_group` and row `height_group`
+on it directly, so its box, background and border cover the equalized
+column width and row height. Any other widget is wrapped in an unstyled
+`Clay::UI::Grid::Cell` first.
+_Avoid_: wrapper (the Cell the Grid makes around other widgets)
+
+**Spanning row**:
+A Grid row holding one cell as wide as the whole grid, such as a group
+heading. It belongs to no column: it widens none, and the columns do not
+size it. It gets a row `height_group` like any row.
+_Avoid_: colspan, full-width row
+
+**Shared columns**:
+Grids linked with `share_columns_with`: column N of all of them is one
+Clay column (one `width_group`). They draw their ids from one id space,
+so their rows never share a height.
+_Avoid_: linked grids, column sync
+
+**Shared grid width**:
+The common `width_group` grids with shared columns get, so each is as
+wide as the widest of them, also one with only spanning rows or none.
+_Avoid_: grid width group (the mechanism, not the term)
+
 ### Binding
 
 **Held error**:
@@ -109,6 +134,22 @@ element ids they were declared under. The walk builds a new one, and it replaces
 the previous one only when the frame completes. It also turns its scroll
 containers' position changes into tracker input.
 _Avoid_: pending registries, id map
+
+**Preparation**:
+The call of `prepare_layout` on a widget composing
+`Clay::UI::Role::Core::Preparable` that asked for it with
+`request_prepare`. `render` prepares the requesting widgets of its UI
+after the frame's events and before the layout pass, once however many
+requests came before, and again while preparations request more (at
+most 100 rounds).
+_Avoid_: deferred rebuild, invalidation
+
+**Laid-out revision**:
+`$ui->laid_out_revision`: the `Clay::UI::Revision` value at which the
+last `render` started its layout pass, after events and preparations.
+Every change up to it is in that frame, so a renderer remembers it as
+the revision it drew.
+_Avoid_: drawn revision (the renderer's copy of it)
 
 **Scroll container**:
 A widget composing HasScroll. Only scroll containers get Clay's scroll offset

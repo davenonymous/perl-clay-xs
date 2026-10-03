@@ -159,10 +159,15 @@ on your classes makes misspelled constructor parameters die too.
   added again, attaching one that still has a parent dies.
 - `Clay::UI::Role::Core::TextNode` - the base of text leaves.
 - `Clay::UI::Role::Core::Stateful` - an Element that requires an `id`.
+- `Clay::UI::Role::Core::Preparable` - a widget that brings its subtree
+  up to date once per frame: `request_prepare` queues it, and `render`
+  calls its `prepare_layout` after the frame's events and before the
+  layout pass, however many changes came before.
 - Style and layout mixins: `HasLayout`, `HasBackground`, `HasBorder`,
   `HasCornerRadius`, `HasFloating`, `HasSizingGroup` (every Element),
-  and `HasScroll` (a Stateful Container that clips and scrolls its
-  children).
+  `HasScroll` (a Stateful Container that clips and scrolls its
+  children), and the marker `GridCell` (`Clay::UI::Grid` uses such a
+  widget as a cell as it is instead of wrapping it).
 - Interaction: `Hoverable`, `Pressable` (implies Hoverable),
   `Focusable`, `HasFocusOrder` for custom focus traversal, and
   `Disableable` (a `disabled` flag: a disabled widget takes no focus and
@@ -297,6 +302,14 @@ $ui->render;
 $ui->render(pointer_state => { x => 50, y => 50 }, scroll_delta => { x => 0, y => -3 }, delta_time => 0.016);
 ```
 
+The geometry of the last completed frame is available between renders:
+`$ui->scroll_state($log)` returns a scroll container's `position`,
+`viewport` and `content` size, `$ui->scroll_to($log, { y => -40 })`
+moves it (kept within its content; the next `render` shows it), and
+`$ui->bounding_box($widget)` returns where any element widget was
+placed (`{ x, y, width, height }`). All three return `undef` for a
+widget that frame did not lay out.
+
 ### Auto-sized grids
 
 `Clay::UI::Grid` lays out rows of cells whose columns shrink-wrap to
@@ -342,6 +355,22 @@ own sizing `max`. Groups may nest (a grid in a grid cell). Use them for
 form-label alignment, equal-height buttons and the like, independent of
 the Grid widget. See `examples/05-ui-grid.pl` for an SVG demo and
 `examples/04-ui-sidebar.pl` for the sidebar demo rebuilt on Clay::UI.
+
+Grids have more for tables:
+
+- Spanning rows (`append_spanning_row`, `insert_spanning_row`,
+  `replace_spanning_row`) hold one cell as wide as the grid, for example
+  a group heading; they size no column, and a long heading wraps
+  instead of widening the grid.
+- `share_columns_with => $other_grid` makes column N of both grids one
+  column for Clay, and gives the grids a common width: a header grid
+  stays aligned with a body grid that scrolls below it.
+- `reorder_rows(\@order)` puts the rows in a new order without detaching
+  any, so focus and hover stay where they were; `clear_rows` removes
+  them all.
+- A widget composing `Clay::UI::Role::Layout::GridCell` (such as
+  `Clay::UI::Grid::Cell`) is used as the cell as it is, so a cell class
+  of your own can carry events or styles.
 
 ### Flow layout
 
@@ -430,6 +459,13 @@ unless (current_revision() == $drawn_revision) {
 
 Widget classes with state of their own call `$widget->mark_changed`
 from their setters.
+
+Event listeners and `Preparable` widgets may change the tree inside
+`render`, before its layout pass. `$ui->laid_out_revision` is the
+revision that layout pass started at, so every change up to it is in
+the frame `render` returned. Remember it instead of `current_revision()`
+when your drawing code may change widgets itself: those later changes
+then still get a frame of their own.
 
 ### Tree size
 
