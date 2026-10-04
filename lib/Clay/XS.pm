@@ -3059,8 +3059,10 @@ of its children, then C<BORDER>, the bars between children,
 C<OVERLAY_COLOR_END> and C<SCISSOR_END>. Each is present only when the
 declaration asks for it. Colours with alpha 0 emit nothing: no
 C<RECTANGLE> for a transparent C<backgroundColor>, no overlay commands
-for a transparent C<overlayColor>, no C<BORDER> for a transparent border
-colour. An C<IMAGE> or C<CUSTOM> element emits no C<RECTANGLE>: its
+for a transparent C<overlayColor>. A C<BORDER> is emitted for any width
+above 0, whatever the alpha of its colour, so a renderer that draws
+borders without a colour of their own (a terminal's default colour) still
+sees them. An C<IMAGE> or C<CUSTOM> element emits no C<RECTANGLE>: its
 C<backgroundColor> travels in its own command.
 
 With culling on (the default, see L</Clay_SetCullingEnabled>), elements

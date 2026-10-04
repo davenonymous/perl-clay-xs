@@ -131,15 +131,6 @@
                  if (generateRenderCommands && !Clay__ElementIsOffscreen(&currentElementData->boundingBox)) {
                      // DFS is returning upwards backwards
                      bool closeClipElement = false;
-@@ -3528,7 +3540,7 @@
-                         }
-                     }
- 
--                    if (Clay__BorderHasAnyWidth(&currentElement->config.border)) {
-+                    if (Clay__BorderHasAnyWidth(&currentElement->config.border) && currentElement->config.border.color.a > 0) {
-                         Clay_BoundingBox currentElementBoundingBox = currentElementData->boundingBox;
-                         Clay_BorderElementConfig *borderConfig = &currentElement->config.border;
-                         Clay_RenderCommand renderCommand = {
 @@ -3540,15 +3552,16 @@
                              }},
                              .userData = currentElement->config.userData,
@@ -148,8 +139,7 @@
                              .commandType = CLAY_RENDER_COMMAND_TYPE_BORDER,
                          };
                          Clay__AddRenderCommand(renderCommand);
--                        if (borderConfig->width.betweenChildren > 0 && borderConfig->color.a > 0) {
-+                        if (borderConfig->width.betweenChildren > 0) {
+                         if (borderConfig->width.betweenChildren > 0 && borderConfig->color.a > 0) {
                              float halfGap = layoutConfig->childGap / 2;
                              float halfWidth = borderConfig->width.betweenChildren / 2;
                              Clay_Vector2 borderOffset = { (float)layoutConfig->padding.left - halfGap, (float)layoutConfig->padding.top - halfGap };

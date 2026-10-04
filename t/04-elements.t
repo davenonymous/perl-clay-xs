@@ -284,11 +284,11 @@ subtest 'an image or custom element emits no background rectangle' => sub {
         [CLAY_RENDER_COMMAND_TYPE_CUSTOM], 'and in the CUSTOM command only' );
 };
 
-subtest 'a border with a transparent colour emits no BORDER' => sub {
+subtest 'a border is emitted for its width, whatever the alpha of its colour' => sub {
     is( command_types(sub { element('b', { layout => $square, border => { width => border_all(2), color => [1, 2, 3, 0] } }) }),
-        [], 'nothing is emitted' );
-    is( command_types(sub { element('b', { layout => $square, border => { width => border_all(2), color => [1, 2, 3, 255] } }) }),
-        [CLAY_RENDER_COMMAND_TYPE_BORDER], 'a visible border still is' );
+        [CLAY_RENDER_COMMAND_TYPE_BORDER], 'a transparent colour still emits the BORDER: renderers may draw it in a default colour' );
+    is( command_types(sub { element('b', { layout => $square, border => { width => border_all(0), color => [1, 2, 3, 255] } }) }),
+        [], 'a width of 0 emits nothing' );
 };
 
 subtest 'every command of a floating element carries its zIndex' => sub {
