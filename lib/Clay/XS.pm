@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Exporter 5.57 'import';
 use XSLoader;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
