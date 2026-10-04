@@ -11,6 +11,7 @@ use Exporter 'import';
 
 use Clay::XS qw(check_struct);
 use Clay::UI::_keys qw(camelize_keys snake_string);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION   = '0.01';
 our @EXPORT_OK = qw(
@@ -31,7 +32,7 @@ our @EXPORT_OK = qw(
 my $GROUP_ID_MAX = (1 << 20) - 1;
 
 sub _fail ($name, $message) {
-	die "Clay::UI: '$name' $message\n";
+	croak_ui "Clay::UI: '$name' $message";
 }
 
 # A plain (non-reference) number that is neither NaN nor infinite.
@@ -60,13 +61,13 @@ sub copy_value ($value) {
 # attribute. optional() lets undef through (attribute unset); required()
 # does not.
 sub optional ($validator, $name, @value) {
-	die "Clay::UI: '$name' takes one value\n" unless @value == 1;
+	croak_ui "Clay::UI: '$name' takes one value" unless @value == 1;
 	return undef unless defined $value[0];
 	return $validator->($name, $value[0]);
 }
 
 sub required ($validator, $name, @value) {
-	die "Clay::UI: '$name' takes one value\n" unless @value == 1;
+	croak_ui "Clay::UI: '$name' takes one value" unless @value == 1;
 	return $validator->($name, $value[0]);
 }
 

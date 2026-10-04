@@ -9,6 +9,7 @@ use Object::Pad 0.800;
 use Scalar::Util qw(refaddr weaken);
 
 use Clay::UI::Revision qw(bump_revision);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -20,6 +21,11 @@ my %_pending;
 # none is left (a preparation may request another one). Widgets of other
 # UIs, or of none yet, stay pending. Dies when preparations keep
 # requesting new ones.
+#
+# A dying prepare_layout does not stop the round: the other due widgets
+# are still prepared (as the remaining events still fire after a listener
+# error), then the first error is rethrown. Whatever that round queued
+# stays pending for the next render.
 use constant _MAX_ROUNDS => 100;
 
 sub _prepare_pending ($ui) {
@@ -27,9 +33,14 @@ sub _prepare_pending ($ui) {
 		my @due = grep { _belongs_to($_, $ui) } map { $_pending{$_} } sort keys %_pending;
 		return unless @due;
 		delete $_pending{ refaddr $_ } for @due;
-		$_->prepare_layout for @due;
+		my $first_error;
+		for my $widget (@due) {
+			local $@;
+			eval { $widget->prepare_layout; 1 } or $first_error //= $@ || 'unknown prepare_layout error';
+		}
+		die $first_error if defined $first_error;
 	}
-	die "Clay::UI: widgets kept requesting preparation; " . _MAX_ROUNDS . " rounds of prepare_layout did not settle\n";
+	croak_ui "Clay::UI: widgets kept requesting preparation; " . _MAX_ROUNDS . " rounds of prepare_layout did not settle";
 }
 
 sub _belongs_to ($widget, $ui) {
@@ -155,12 +166,11 @@ its children) up to date. C<render> calls it with no arguments and
 ignores the return value. By the time it runs the widget is no longer
 queued, so a C<request_prepare> inside it queues it again.
 
-If C<prepare_layout> dies, C<render> stops preparing: the other
-widgets that were due in the same round are taken off the queue without
-being prepared, and stay out of date until something calls their
-C<request_prepare> again. C<render> still runs the layout pass and then
-dies with the error (or with an earlier listener error of the same
-frame).
+If C<prepare_layout> dies, the other widgets due in the same round are
+still prepared, then C<render> stops preparing: requests made during
+that round stay queued for the next C<render>. C<render> still runs the
+layout pass and then dies with the first error (or with an earlier
+listener error of the same frame).
 
 =head2 request_prepare
 

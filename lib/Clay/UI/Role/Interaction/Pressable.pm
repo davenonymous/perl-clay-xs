@@ -103,9 +103,9 @@ never a second event of its own.
 A Pressable that also composes
 L<Clay::UI::Role::Interaction::Disableable> takes no part while
 disabled: it is never armed or pressed and gets neither event. A press
-over a disabled Pressable goes to the nearest enabled Pressable under
-the pointer instead, for example a pressable card around a disabled
-button (see F<KNOWN-ISSUES.md>, issue 16).
+over a disabled Pressable is absorbed, as in HTML: a pressable card
+around a disabled button gets no C<OnPress> either (see
+L<Clay::UI::Interaction/PRESS AND RELEASE>).
 
 Clay::UI has no separate click event; combine C<OnPress> and
 C<OnRelease> as you need:

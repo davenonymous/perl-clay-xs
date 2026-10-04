@@ -70,7 +70,7 @@ subtest 'callbacks must be CODE references' => sub {
 		'measure function' );
 	like( dies { Clay_SetTransitionHandlers(undef, 'x') }, qr/setInitialState: expected a CODE reference/,
 		'transition handler' );
-	like( dies { Clay_SetQueryScrollOffsetFunction([]) }, qr/expected a CODE reference or undef, got a ARRAY/,
+	like( dies { Clay_SetQueryScrollOffsetFunction([]) }, qr/expected a CODE reference or undef, got an ARRAY/,
 		'query scroll offset function' );
 	Clay_BeginLayout();
 	box('hoverable');
@@ -115,7 +115,7 @@ subtest 'a bad transition handler result croaks from Clay_EndLayout' => sub {
 	};
 	$frame->([255, 0, 0, 255]);
 	like( dies { $frame->([0, 0, 255, 255]) },
-		qr/transition handler args\.current\.boundingBox: expected a hash reference, got a ARRAY reference/,
+		qr/transition handler args\.current\.boundingBox: expected a hash reference, got an ARRAY reference/,
 		'the malformed result is reported' );
 	Clay_SetTransitionHandlers();
 };

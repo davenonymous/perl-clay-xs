@@ -43,6 +43,7 @@ use Clay::UI::Interaction;
 use Clay::UI::_FrameRegistry;
 use Clay::UI::Role::Core::Preparable;
 use Clay::UI::Revision qw(bump_revision current_revision);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.03';
 
@@ -84,18 +85,18 @@ class Clay::UI :strict(params) {
 		unless (blessed $root
 			&& ($root->DOES('Clay::UI::Role::Core::Element')
 			 || $root->DOES('Clay::UI::Role::Core::TextNode'))) {
-			die "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode";
+			croak_ui "Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode";
 		}
-		die "Clay::UI: 'root' must not have a parent; the root is the top of its widget tree"
+		croak_ui "Clay::UI: 'root' must not have a parent; the root is the top of its widget tree"
 			if defined $root->parent;
-		die "Clay::UI: 'root' is already the root of another Clay::UI"
+		croak_ui "Clay::UI: 'root' is already the root of another Clay::UI"
 			if defined $root->_local_ui_controller;
 		unless (_is_viewport_size($width) && _is_viewport_size($height)) {
-			die "Clay::UI: 'width' and 'height' must be positive finite numbers";
+			croak_ui "Clay::UI: 'width' and 'height' must be positive finite numbers";
 		}
 		unless (is_finite_number($max_element_count) && $max_element_count == int($max_element_count)
 			&& $max_element_count >= 1) {
-			die "Clay::UI: 'max_element_count' must be a positive integer";
+			croak_ui "Clay::UI: 'max_element_count' must be a positive integer";
 		}
 
 		$_uses_default_error_handler = !defined $error_handler;
@@ -108,10 +109,10 @@ class Clay::UI :strict(params) {
 		};
 
 		unless (ref $error_handler eq 'CODE') {
-			die "Clay::UI: 'error_handler' must be a coderef";
+			croak_ui "Clay::UI: 'error_handler' must be a coderef";
 		}
 		unless (ref $measure_text eq 'CODE') {
-			die "Clay::UI: 'measure_text' must be a coderef";
+			croak_ui "Clay::UI: 'measure_text' must be a coderef";
 		}
 
 		# A failure frees the new context at once and makes the caller's
@@ -120,10 +121,6 @@ class Clay::UI :strict(params) {
 		my $ok = eval {
 			$_ctx = $self->_initialize_context;
 			Clay_SetMeasureTextFunction($measure_text);
-			# Clay's pointer state starts zeroed, which reads as "pressed
-			# this frame"; settle it so the first real pointer frame is no
-			# click.
-			Clay_SetPointerState({ x => -1, y => -1 }, 0);
 			1;
 		};
 		unless ($ok) {
@@ -158,7 +155,7 @@ class Clay::UI :strict(params) {
 		$memory_size //= $min_memory;
 		unless (is_finite_number($memory_size) && $memory_size == int($memory_size)
 			&& $memory_size >= $min_memory) {
-			die "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)"
+			croak_ui "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)"
 				. " for max_element_count $max_element_count";
 		}
 		# The new context copies the seed's counts and becomes current.
@@ -176,7 +173,7 @@ class Clay::UI :strict(params) {
 	}
 
 	sub _one_value ($name, @value) {
-		die "Clay::UI: $name takes one value" unless @value == 1;
+		croak_ui "Clay::UI: $name takes one value" unless @value == 1;
 		return $value[0];
 	}
 
@@ -186,7 +183,7 @@ class Clay::UI :strict(params) {
 	method width (@v) {
 		return $width unless @v;
 		my $new = _one_value(width => @v);
-		die "Clay::UI: width must be a positive finite number" unless _is_viewport_size($new);
+		croak_ui "Clay::UI: width must be a positive finite number" unless _is_viewport_size($new);
 		Clay_SetCurrentContext($_ctx);
 		Clay_SetLayoutDimensions({ width => $new, height => $height });
 		$width = $new;
@@ -197,7 +194,7 @@ class Clay::UI :strict(params) {
 	method height (@v) {
 		return $height unless @v;
 		my $new = _one_value(height => @v);
-		die "Clay::UI: height must be a positive finite number" unless _is_viewport_size($new);
+		croak_ui "Clay::UI: height must be a positive finite number" unless _is_viewport_size($new);
 		Clay_SetCurrentContext($_ctx);
 		Clay_SetLayoutDimensions({ width => $width, height => $new });
 		$height = $new;
@@ -208,7 +205,7 @@ class Clay::UI :strict(params) {
 	method measure_text (@v) {
 		return $measure_text unless @v;
 		my $new = _one_value(measure_text => @v);
-		die "Clay::UI: measure_text must be a coderef" unless ref $new eq 'CODE';
+		croak_ui "Clay::UI: measure_text must be a coderef" unless ref $new eq 'CODE';
 		Clay_SetCurrentContext($_ctx);
 		Clay_SetMeasureTextFunction($new);
 		Clay_ResetMeasureTextCache();
@@ -221,37 +218,37 @@ class Clay::UI :strict(params) {
 	# anything it does not recognise.
 	sub _parse_render_args (%args) {
 		my @unknown = grep { !$RENDER_ARGS{$_} } keys %args;
-		die "Clay::UI::render: unknown argument(s): @{[ sort @unknown ]}" if @unknown;
+		croak_ui "Clay::UI::render: unknown argument(s): @{[ sort @unknown ]}" if @unknown;
 
 		my $pointer = $args{pointer_state};
 		if (defined $pointer) {
-			die "Clay::UI::render: 'pointer_state' must be a hashref { x => ..., y => ..., down => ... }"
+			croak_ui "Clay::UI::render: 'pointer_state' must be a hashref { x => ..., y => ..., down => ... }"
 				unless ref $pointer eq 'HASH';
 			my @bad = grep { !$POINTER_KEYS{$_} } keys %$pointer;
-			die "Clay::UI::render: unknown pointer_state key(s): @{[ sort @bad ]}" if @bad;
+			croak_ui "Clay::UI::render: unknown pointer_state key(s): @{[ sort @bad ]}" if @bad;
 			for my $axis (qw(x y)) {
-				die "Clay::UI::render: pointer_state '$axis' must be a finite number"
+				croak_ui "Clay::UI::render: pointer_state '$axis' must be a finite number"
 					unless is_finite_number($pointer->{$axis});
 			}
 			$pointer = { x => $pointer->{x}, y => $pointer->{y}, down => $pointer->{down} ? 1 : 0 };
 		}
 
 		my $delta_time = $args{delta_time} // 0;
-		die "Clay::UI::render: 'delta_time' must be a finite number >= 0"
+		croak_ui "Clay::UI::render: 'delta_time' must be a finite number >= 0"
 			unless is_finite_number($delta_time) && $delta_time >= 0;
 
 		my $scroll_delta = $args{scroll_delta} // [0, 0];
 		if (ref $scroll_delta eq 'HASH') {
 			my @bad = grep { !$VECTOR_KEYS{$_} } keys %$scroll_delta;
-			die "Clay::UI::render: unknown scroll_delta key(s): @{[ sort @bad ]}" if @bad;
+			croak_ui "Clay::UI::render: unknown scroll_delta key(s): @{[ sort @bad ]}" if @bad;
 			$scroll_delta = [ @{$scroll_delta}{qw(x y)} ];
 		}
-		die "Clay::UI::render: 'scroll_delta' must be { x => ..., y => ... } or [x, y] of finite numbers"
+		croak_ui "Clay::UI::render: 'scroll_delta' must be { x => ..., y => ... } or [x, y] of finite numbers"
 			unless ref $scroll_delta eq 'ARRAY' && @$scroll_delta == 2
 				&& !grep { !is_finite_number($_) } @$scroll_delta;
 
 		my $drag = $args{enable_drag_scrolling} // 0;
-		die "Clay::UI::render: 'enable_drag_scrolling' must be a plain boolean value"
+		croak_ui "Clay::UI::render: 'enable_drag_scrolling' must be a plain boolean value"
 			if ref $drag;
 
 		return {
@@ -264,7 +261,7 @@ class Clay::UI :strict(params) {
 
 	method render (%args) {
 		my $frame = _parse_render_args(%args);
-		die "Clay::UI::render: called while this Clay::UI is already rendering"
+		croak_ui "Clay::UI::render: called while this Clay::UI is already rendering"
 			if $_rendering;
 
 		$_rendering = 1;
@@ -415,7 +412,7 @@ class Clay::UI :strict(params) {
 	# The element id the last frame declared the widget with, or undef when
 	# the widget was not part of it.
 	method _laid_out_element ($widget) {
-		die "Clay::UI: expected a widget, got " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+		croak_ui "Clay::UI: expected a widget, got " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
 			unless blessed $widget;
 		return $_frame->element_id_of($widget);
 	}
@@ -431,7 +428,7 @@ class Clay::UI :strict(params) {
 	# ( element id, Clay's scroll data ) of a scroll container, or an empty
 	# list when the last frame did not lay it out.
 	method _scroll_data ($widget) {
-		die "Clay::UI: " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+		croak_ui "Clay::UI: " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
 			. " is not a scroll container (it does not compose Clay::UI::Role::Layout::HasScroll)"
 			unless blessed $widget && $_frame->is_scroll_container($widget);
 		my $element = $self->_laid_out_element($widget) // return;
@@ -453,12 +450,12 @@ class Clay::UI :strict(params) {
 	# keeps its position. Returns the position, or undef when the last frame
 	# did not lay the container out.
 	method scroll_to ($widget, $position) {
-		die "Clay::UI: scroll_to needs a position { x => ..., y => ... }"
+		croak_ui "Clay::UI: scroll_to needs a position { x => ..., y => ... }"
 			unless ref $position eq 'HASH';
 		my @unknown = grep { !$VECTOR_KEYS{$_} } sort keys %$position;
-		die "Clay::UI: scroll_to got unknown position key(s): @unknown" if @unknown;
+		croak_ui "Clay::UI: scroll_to got unknown position key(s): @unknown" if @unknown;
 		for my $axis (sort keys %$position) {
-			die "Clay::UI: scroll_to position '$axis' must be a finite number"
+			croak_ui "Clay::UI: scroll_to position '$axis' must be a finite number"
 				unless is_finite_number($position->{$axis});
 		}
 		my ($element, $data) = $self->_scroll_data($widget) or return undef;
@@ -478,7 +475,7 @@ class Clay::UI :strict(params) {
 	# copy of what the widget returned) and records it in $frame.
 	sub _attach_back_reference ($frame, $config, $node) {
 		if (exists $config->{user_data} || exists $config->{userData}) {
-			die "Clay::UI: widget " . ref($node)
+			croak_ui "Clay::UI: widget " . ref($node)
 				. " set user_data in its config; Clay::UI auto-injects a refaddr"
 				. " back-reference here. Use one mechanism or the other, not both.";
 		}
@@ -499,7 +496,7 @@ class Clay::UI :strict(params) {
 	# during the walk.
 	method _walk ($frame, $node, $base, $indices) {
 		unless (blessed $node) {
-			die "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
+			croak_ui "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")";
 		}
 
 		if ($node->DOES('Clay::UI::Role::Core::TextNode')) {
@@ -510,7 +507,7 @@ class Clay::UI :strict(params) {
 		}
 
 		unless ($node->DOES('Clay::UI::Role::Core::Element')) {
-			die "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Core::Element or TextNode";
+			croak_ui "Clay::UI: tree node " . ref($node) . " does not consume Clay::UI::Role::Core::Element or TextNode";
 		}
 
 		my %config = %{ $node->to_config };
@@ -1165,7 +1162,7 @@ C<laid_out_revision> differs from the remembered value:
 A running transition is the exception: it changes the render commands
 from frame to frame without bumping the revision, so
 C<laid_out_revision> stays the same while the element animates (see
-F<KNOWN-ISSUES.md>, issue 27). While an element with a C<transition>
+F<KNOWN-ISSUES.md>, issue 3). While an element with a C<transition>
 may animate, draw every frame.
 
 =head2 bounding_box
@@ -1235,9 +1232,8 @@ hashref C<< { x => ..., y => ... } >>, or C<undef> when the last
 completed frame did not lay the container out (then nothing moves). The
 next C<render> shows the new position. The move counts as a change for
 L<Clay::UI::Revision>. It fires no C<OnScroll> (that event reports only the
-scrolling Clay does inside C<render>), and it does not stop momentum: a
-glide started by drag scrolling continues from the new position in
-the next frames.
+scrolling Clay does inside C<render>), and it stops momentum: a glide
+started by drag scrolling ends at the new position.
 
 Dies with
 C<Clay::UI: scroll_to needs a position { x =E<gt> ..., y =E<gt> ... }>,

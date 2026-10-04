@@ -42,12 +42,19 @@
  } Clay_ErrorType;
  
  // Data to identify the error that clay has encountered.
-@@ -1192,6 +1211,13 @@
+@@ -1187,11 +1206,20 @@
+ CLAY__ARRAY_DEFINE(bool, Clay__boolArray)
+ CLAY__ARRAY_DEFINE(int32_t, Clay__int32_tArray)
+ CLAY__ARRAY_DEFINE(char, Clay__charArray)
++CLAY__ARRAY_DEFINE(Clay_Dimensions, Clay__DimensionsArray)
+ CLAY__ARRAY_DEFINE_FUNCTIONS(Clay_ElementId, Clay_ElementIdArray)
+ CLAY__ARRAY_DEFINE(Clay_String, Clay__StringArray)
  CLAY__ARRAY_DEFINE_FUNCTIONS(Clay_RenderCommand, Clay_RenderCommandArray)
  
  typedef struct {
 +    uint32_t id;
 +    float maxSize;
++    float maxMinSize;
 +} Clay__SizingGroupEntry;
 +
 +CLAY__ARRAY_DEFINE(Clay__SizingGroupEntry, Clay__SizingGroupEntryArray)
@@ -56,7 +63,7 @@
      Clay_Dimensions dimensions;
      Clay_String line;
  } Clay__WrappedTextLine;
-@@ -1375,6 +1401,17 @@
+@@ -1375,6 +1403,20 @@
      Clay__TransitionDataInternalArray transitionDatas;
      Clay__boolArray treeNodeVisited;
      Clay__charArray dynamicStringData;
@@ -66,6 +73,9 @@
 +    Clay__SizingGroupEntryArray sizingGroups;
 +    Clay__int32_tArray sizingGroupSlots;
 +    Clay__int32_tArray sizingGroupOfElement;
++    // The size each member was equalized to on each axis, for the second
++    // pass (see Clay__RestoreSizingGroupFloors).
++    Clay__DimensionsArray sizingGroupSizeOfElement;
 +    // The frame generation each axis was last equalized in. Clay_EndLayout
 +    // runs Clay__CalculateFinalLayout twice when transitions exist; the
 +    // second pass must not equalize again (see Clay__ApplySizingGroups).
@@ -74,7 +84,7 @@
  };
  
  Clay_Context* Clay__Context_Allocate_Arena(Clay_Arena *arena) {
-@@ -2240,6 +2277,11 @@
+@@ -2240,6 +2282,12 @@
      context->reusableElementIndexBuffer = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
      context->layoutElementClipElementIds = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
      context->dynamicStringData = Clay__charArray_Allocate_Arena(maxElementCount, arena);
@@ -83,10 +93,11 @@
 +    while (sizingGroupSlotCount < maxElementCount * 2) sizingGroupSlotCount *= 2;
 +    context->sizingGroupSlots = Clay__int32_tArray_Allocate_Arena(sizingGroupSlotCount, arena);
 +    context->sizingGroupOfElement = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
++    context->sizingGroupSizeOfElement = Clay__DimensionsArray_Allocate_Arena(maxElementCount, arena);
  }
  
  void Clay__InitializePersistentMemory(Clay_Context* context) {
-@@ -2570,9 +2612,223 @@
+@@ -2570,9 +2618,235 @@
             (boundingBox->y + boundingBox->height < 0);
  }
  
@@ -149,14 +160,18 @@
 +}
 +
 +// Raises every member to its group's largest size, capped at the member's
-+// own max (Clay__CloseElement has turned "no max" into CLAY__MAXFLOAT). The
-+// member's minimum is raised likewise: a group cannot be compressed below
-+// its largest member without breaking alignment. Returns true if any size
-+// or minimum changed.
++// own max (Clay__CloseElement has turned "no max" into CLAY__MAXFLOAT), and
++// its minimum to the group's largest minimum: when a parent is too small,
++// Clay compresses the members like any other children, and equal minimums
++// keep the members of one group aligned as long as their parents compress
++// alike (the rows of a grid do). Members with wrapping text therefore wrap
++// instead of pushing their parents wide. Returns true if any size or
++// minimum changed.
 +bool Clay__EqualizeSizingGroups(bool xAxis) {
 +    Clay_Context* context = Clay_GetCurrentContext();
 +    for (int32_t g = 0; g < context->sizingGroups.length; ++g) {
 +        context->sizingGroups.internalArray[g].maxSize = 0;
++        context->sizingGroups.internalArray[g].maxMinSize = 0;
 +    }
 +    for (int32_t i = 0; i < context->layoutElements.length; ++i) {
 +        int32_t entryIndex = context->sizingGroupOfElement.internalArray[i];
@@ -164,7 +179,9 @@
 +        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
 +        Clay__SizingGroupEntry* entry = &context->sizingGroups.internalArray[entryIndex];
 +        float size = xAxis ? element->dimensions.width : element->dimensions.height;
++        float minSize = xAxis ? element->minDimensions.width : element->minDimensions.height;
 +        if (size > entry->maxSize) entry->maxSize = size;
++        if (minSize > entry->maxMinSize) entry->maxMinSize = minSize;
 +    }
 +
 +    bool changed = false;
@@ -172,19 +189,24 @@
 +        int32_t entryIndex = context->sizingGroupOfElement.internalArray[i];
 +        if (entryIndex < 0) continue;
 +        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
++        Clay__SizingGroupEntry* entry = &context->sizingGroups.internalArray[entryIndex];
 +        float memberMax = xAxis ? element->config.layout.sizing.width.size.minMax.max
 +                                : element->config.layout.sizing.height.size.minMax.max;
-+        float target = CLAY__MIN(context->sizingGroups.internalArray[entryIndex].maxSize, memberMax);
++        float target = CLAY__MIN(entry->maxSize, memberMax);
++        float minTarget = CLAY__MIN(entry->maxMinSize, memberMax);
 +        float* dim    = xAxis ? &element->dimensions.width    : &element->dimensions.height;
 +        float* minDim = xAxis ? &element->minDimensions.width : &element->minDimensions.height;
++        float* equalized = xAxis ? &context->sizingGroupSizeOfElement.internalArray[i].width
++                                 : &context->sizingGroupSizeOfElement.internalArray[i].height;
 +        if (*dim < target) {
 +            *dim = target;
 +            changed = true;
 +        }
-+        if (*minDim < target) {
-+            *minDim = target;
++        if (*minDim < minTarget) {
++            *minDim = minTarget;
 +            changed = true;
 +        }
++        *equalized = *dim;
 +    }
 +    return changed;
 +}
@@ -249,20 +271,21 @@
 +    return changed;
 +}
 +
-+// Restores every member to at least its raised minimum. Used by the second
-+// Clay__CalculateFinalLayout pass of a frame: its height pass recomputes
-+// container heights from children and can drop a member below the group
-+// size it received in the first pass. The minimums still hold that size.
++// Restores every member to at least the size it was equalized to. Used by
++// the second Clay__CalculateFinalLayout pass of a frame: its height pass
++// recomputes container heights from children and can drop a member below
++// the group size it received in the first pass.
 +bool Clay__RestoreSizingGroupFloors(bool xAxis) {
 +    Clay_Context* context = Clay_GetCurrentContext();
 +    bool changed = false;
 +    for (int32_t i = 0; i < context->layoutElements.length; ++i) {
 +        Clay_LayoutElement* element = Clay_LayoutElementArray_Get(&context->layoutElements, i);
 +        if (!Clay__IsSizingGroupMember(element, xAxis)) continue;
-+        float* dim    = xAxis ? &element->dimensions.width    : &element->dimensions.height;
-+        float minDim  = xAxis ? element->minDimensions.width  : element->minDimensions.height;
-+        if (*dim < minDim) {
-+            *dim = minDim;
++        float* dim  = xAxis ? &element->dimensions.width : &element->dimensions.height;
++        Clay_Dimensions equalized = context->sizingGroupSizeOfElement.internalArray[i];
++        float floor = xAxis ? equalized.width : equalized.height;
++        if (*dim < floor) {
++            *dim = floor;
 +            changed = true;
 +        }
 +    }
@@ -310,7 +333,7 @@
      // Calculate sizing along the X axis
      Clay__int32_tArray textElements = context->openClipElementStack;
      textElements.length = 0;
-@@ -2690,6 +2946,10 @@
+@@ -2690,6 +2964,10 @@
          }
      }
  

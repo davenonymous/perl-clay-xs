@@ -10,6 +10,7 @@ use Object::Pad 0.800;
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Style::HasStates;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -22,7 +23,7 @@ role Clay::UI::Role::Interaction::Disableable :does(Clay::UI::Role::Layout::HasP
 	}
 
 	sub _disabled_flag ($value) {
-		die "Clay::UI: 'disabled' must be a plain boolean value\n" if ref $value;
+		croak_ui "Clay::UI: 'disabled' must be a plain boolean value" if ref $value;
 		return $value ? 1 : 0;
 	}
 
@@ -30,7 +31,7 @@ role Clay::UI::Role::Interaction::Disableable :does(Clay::UI::Role::Layout::HasP
 	# once, through the tracker.
 	method disabled (@new) {
 		return $disabled unless @new;
-		die "Clay::UI: 'disabled' takes one value\n" unless @new == 1;
+		croak_ui "Clay::UI: 'disabled' takes one value" unless @new == 1;
 		my $value = _disabled_flag($new[0]);
 		return $disabled if $value == $disabled;
 		$disabled = $value;
@@ -102,9 +103,9 @@ it is never armed or pressed (see
 L<Clay::UI::Interaction/PRESS AND RELEASE>): a press over it fires no
 C<OnPress> at it, a release no C<OnRelease>, and C<is_pressed> stays 0.
 It is still hovered and still gets the hover events. A press over a
-disabled Pressable goes to the nearest enabled Pressable under the
-pointer, for example a pressable card around a disabled button, since
-the button does not take part (see F<KNOWN-ISSUES.md>, issue 16);
+disabled Pressable is absorbed: a pressable card around a disabled
+button gets no C<OnPress> either (see
+L<Clay::UI::Interaction/PRESS AND RELEASE>);
 
 =item *
 

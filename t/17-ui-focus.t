@@ -148,6 +148,10 @@ subtest 'set_focused_widget rejects non-Focusable widgets' => sub {
 		qr/must consume Clay::UI::Role::Interaction::Focusable/,
 		'rejects non-Focusable widget',
 	);
+
+	$ui->interaction->set_focused_widget($a);
+	my $warnings = warnings { like( dies { $ui->interaction->set_focused_widget(5) }, qr/target must be a blessed widget/, 'rejects a non-widget' ) };
+	is( $warnings, [], 'without warning first, even while a widget is focused' );
 };
 
 subtest 'set_focused_widget rejects can_focus == 0 widgets' => sub {

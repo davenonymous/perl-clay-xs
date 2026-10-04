@@ -7,6 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 use Scalar::Util qw(blessed weaken);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -15,9 +16,9 @@ role Clay::UI::Role::Layout::HasParent {
 	field $_ui_controller = undef;
 
 	method _set_parent ($new_parent) {
-		die "Clay::UI: parent must be a blessed widget"
+		croak_ui "Clay::UI: parent must be a blessed widget"
 			unless blessed $new_parent;
-		die "Clay::UI: widget " . ref($self) . " is still attached to a parent; remove it first"
+		croak_ui "Clay::UI: widget " . ref($self) . " is still attached to a parent; remove it first"
 			if defined $parent;
 		$parent = $new_parent;
 		weaken $parent;
@@ -40,9 +41,9 @@ role Clay::UI::Role::Layout::HasParent {
 	}
 
 	method _set_ui_controller ($ui) {
-		die "Clay::UI: ui controller must be a Clay::UI instance"
+		croak_ui "Clay::UI: ui controller must be a Clay::UI instance"
 			unless blessed($ui) && $ui->isa('Clay::UI');
-		die "Clay::UI: widget already bound to a Clay::UI controller"
+		croak_ui "Clay::UI: widget already bound to a Clay::UI controller"
 			if defined $_ui_controller;
 		$_ui_controller = $ui;
 		weaken $_ui_controller;

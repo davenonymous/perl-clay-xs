@@ -41,6 +41,7 @@ sub frame (@content) {
 }
 
 subtest 'an unrelated transition does not change the result' => sub {
+	Clay_SetTransitionHandlers(sub { 0 });    # with a handler, Clay runs its two layout passes
 	my $layout = sub ($with_transition) {
 		return sub {
 			el('col', { layout => { layoutDirection => CLAY_TOP_TO_BOTTOM, sizing => { width => sizing_fixed(400) } } },
@@ -64,6 +65,7 @@ subtest 'an unrelated transition does not change the result' => sub {
 		is( box_of('B')->{width}, 100, "B keeps the space next to S ($label)" );
 		is( box_of('S')->{x},     100, "S stays inside the column ($label)" );
 	}
+	Clay_SetTransitionHandlers();
 };
 
 subtest 'nested groups converge' => sub {

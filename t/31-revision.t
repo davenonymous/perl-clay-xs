@@ -84,6 +84,7 @@ subtest 'widget setters bump the revision' => sub {
 
 subtest 'reading an attribute does not bump the revision' => sub {
 	ok( !bumps($_->[2]), $_->[0] ) for @setters;
+	ok( !bumps(sub { $box->add_child }), 'add_child without children' );
 };
 
 subtest 'mark_changed bumps the revision and returns the widget' => sub {

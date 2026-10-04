@@ -69,6 +69,17 @@ subtest 'states() returns active names' => sub {
 	$w->add_state('selected');
 	$w->add_state('active');
 	is( [ sort $w->states ], ['active', 'selected'], 'states() lists active names' );
+	is( scalar $w->states, 2, 'in scalar context it counts them' );
+};
+
+subtest 'state names must be non-empty strings' => sub {
+	my $w = TestStatesWidget->new;
+	for my $mutator (qw(add_state remove_state toggle_state)) {
+		like( dies { $w->$mutator(undef) }, qr/a state name must be a non-empty string/, "$mutator(undef) dies" );
+		like( dies { $w->$mutator('') },    qr/a state name must be a non-empty string/, "$mutator('') dies" );
+		like( dies { $w->$mutator([]) },    qr/a state name must be a non-empty string/, "$mutator([]) dies" );
+	}
+	is( [ $w->states ], [], 'nothing was stored' );
 };
 
 subtest 'mutators chain via returned $self' => sub {

@@ -31,7 +31,7 @@ sub build () {
         },
         clip => { vertical => 1, childOffset => Clay_GetScrollOffset() },
     });
-        for my $i (0 .. 5) {
+        for my $i (0 .. 19) {   # tall enough for a drag to glide
             Clay__OpenElementWithId( Clay_GetElementIdWithIndex("row", $i) );
             Clay__ConfigureOpenElement({
                 layout          => { sizing => { width => sizing_fixed(100), height => sizing_fixed(20) } },
@@ -80,6 +80,26 @@ is( Clay_GetElementData( Clay_GetElementIdWithIndex("row", 0) )->{boundingBox}{y
     'set_scroll_position moves the children on the next frame' );
 like( dies { set_scroll_position(Clay_GetElementId("nope"), [0, 0]) }, qr/not a known scroll container/,
     'set_scroll_position croaks for an unknown container' );
+
+# A drag that is released keeps the container gliding (momentum);
+# set_scroll_position stops the glide so the position stays put.
+my $y_of = sub { Clay_GetScrollContainerData($scroll_id)->{scrollPosition}{y} };
+sub drag_frame ($y, $down) {
+    Clay_SetPointerState({ x => 50, y => $y }, $down);
+    Clay_UpdateScrollContainers(1, [0, 0], 0.016);
+    Clay_BeginLayout();
+    build();
+    Clay_EndLayout(0.016);
+}
+drag_frame(45, 1);
+drag_frame(33, 1);
+drag_frame(33, 0);
+my $released_at = $y_of->();
+drag_frame(33, 0);
+ok( $y_of->() < $released_at, "the container glides on after the release ($released_at -> @{[ $y_of->() ]})" );
+set_scroll_position($scroll_id, { x => 0, y => -30 });
+drag_frame(33, 0);
+is( $y_of->(), -30, 'set_scroll_position stops the glide' );
 
 # With external scroll handling, Clay asks the query function for the offset.
 my @queried;

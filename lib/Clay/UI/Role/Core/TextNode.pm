@@ -18,6 +18,12 @@ role Clay::UI::Role::Core::TextNode :does(Clay::UI::Role::Layout::HasParent)
 	method text;
 	method text_config;
 
+	# Text widgets have no id; the reader exists so predicates that read
+	# ids work on every child.
+	method id () {
+		return undef;
+	}
+
 	method mark_changed () {
 		bump_revision();
 		return $self;
@@ -101,6 +107,14 @@ declared: a value of the wrong shape makes C<render> die, an unknown
 key is ignored.
 
 =head1 METHODS
+
+=head2 id
+
+	my $id = $text->id;    # undef
+
+Returns undef: text widgets have no id. The reader exists so that a
+predicate reading ids (L<Clay::UI::Role::Core::Element/get_children_with>)
+works on every child.
 
 =head2 mark_changed
 

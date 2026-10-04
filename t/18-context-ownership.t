@@ -71,8 +71,6 @@ subtest 'Clay-touching calls croak without a current context' => sub {
 		[ Clay_SetDebugModeEnabled         => sub { Clay_SetDebugModeEnabled(1) } ],
 		[ Clay_IsDebugModeEnabled          => sub { Clay_IsDebugModeEnabled() } ],
 		[ Clay_SetCullingEnabled           => sub { Clay_SetCullingEnabled(1) } ],
-		[ Clay_GetMaxElementCount          => sub { Clay_GetMaxElementCount() } ],
-		[ Clay_GetMaxMeasureTextCacheWordCount => sub { Clay_GetMaxMeasureTextCacheWordCount() } ],
 		[ Clay_SetTransitionHandlers       => sub { Clay_SetTransitionHandlers() } ],
 	);
 	for my $call (@calls) {
@@ -212,6 +210,8 @@ subtest 'Clay_Initialize refuses a measure cache below 32 words' => sub {
 	like( dies { Clay_Initialize(Clay_MinMemorySize(), { width => 10, height => 10 }) },
 		qr/30 measure-cache words are below the minimum of 32/, 'the word count Clay derived from 15 elements' );
 	Clay_SetMaxMeasureTextCacheWordCount(32);
+	is( Clay_GetMaxElementCount(), 15, 'the element getter reports the process-wide default without a context' );
+	is( Clay_GetMaxMeasureTextCacheWordCount(), 32, 'so does the word getter' );
 	ok( lives { new_context() }, 'setting the word count afterwards fixes it' );
 	is( Clay_GetCurrentContext(), undef, 'that context is gone again' );
 	Clay_SetMaxElementCount(8192);   # back to Clay's defaults (and 2 x 8192 words)

@@ -42,14 +42,24 @@ through Clay::UI and replaces `userData` with widget class and id.
   `make` generates the gitignored `src/clay/clay.h` from it plus the
   patches in `@clay_patches` (`Makefile.PL`), applied in order:
   `patches/0001-clay-sizing-groups.patch` adds sizing groups
-  (`sizingGroup`, `Clay__ApplySizingGroups`, a cycle error type);
+  (`sizingGroup`, `Clay__ApplySizingGroups`, a cycle error type;
+  members share their group's largest size and largest minimum, so
+  they still compress and wrap when their parents are too small);
   `patches/0002-clay-flow-layout.patch` adds `CLAY_LEFT_TO_RIGHT_WRAP`,
   `lineGap` and `lineSizing` (per element in `flowLines`: the X sizing
   pass records where lines start, the Y sizing pass how tall they are;
   later passes read both instead of recomputing);
   `patches/0003-clay-back-to-front.patch` adds `CLAY_BACK_TO_FRONT`
   (stack layout: both axes sized like the off axis, every child placed
-  by `childAlignment`, no `betweenChildren` bars). The
+  by `childAlignment`, no `betweenChildren` bars);
+  `patches/0004-clay-upstream-fixes.patch` fixes upstream bugs without
+  adding features (a completing exit transition no longer skips the
+  next one, an exit starts from the current state, no background
+  rectangle under image or custom elements, every command of a floating
+  element carries its zIndex, `CLAY_TEXT_WRAP_NONE` never breaks,
+  `lineHeight` boxes stack from the element's top, no `BORDER` for a
+  transparent colour, a culled clip container still emits its scissor
+  commands). The
   `postamble` in `Makefile.PL` holds that rule and a `src/%.o : src/%.c`
   rule; EUMM's default rule drops subdirectory objects in the CWD, so
   removing it breaks the build.

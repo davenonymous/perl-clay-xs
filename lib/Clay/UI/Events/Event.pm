@@ -10,6 +10,7 @@ use Scalar::Util qw(blessed weaken);
 
 use Clay::UI::Enum::Bubble;
 use Clay::UI::Enum::Result;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -31,9 +32,9 @@ class Clay::UI::Events::Event :strict(params) {
 	ADJUST {
 		$name        //= (ref $self)->event_name;
 		$bubble_mode //= (ref $self)->default_bubble_mode;
-		die "Clay::UI::Events::Event: 'name' must be a non-empty string"
+		croak_ui "Clay::UI::Events::Event: 'name' must be a non-empty string"
 			unless defined $name && length $name;
-		die "Clay::UI::Events::Event: 'bubble_mode' must be a Clay::UI::Enum::Bubble value"
+		croak_ui "Clay::UI::Events::Event: 'bubble_mode' must be a Clay::UI::Enum::Bubble value"
 			unless blessed($bubble_mode) && $bubble_mode->isa('Clay::UI::Enum::Bubble');
 	}
 
@@ -41,7 +42,7 @@ class Clay::UI::Events::Event :strict(params) {
 	# overwrite an already-set target so a single event object cannot be
 	# silently re-fired with a different originator.
 	method _set_target ($widget) {
-		die "Clay::UI::Events::Event: event already dispatched; build a fresh event to fire again"
+		croak_ui "Clay::UI::Events::Event: event already dispatched; build a fresh event to fire again"
 			if $_dispatched;
 		$target = $widget;
 		weaken $target;

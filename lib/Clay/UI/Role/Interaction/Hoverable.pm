@@ -12,6 +12,7 @@ use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -19,7 +20,7 @@ role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Layout::HasPar
                                             :does(Clay::UI::Role::Events::Emitter)
                                             :does(Clay::UI::Role::Style::HasStates) {
 	ADJUST {
-		die "Clay::UI: " . ref($self) . " composes Clay::UI::Role::Interaction::Hoverable on a text node;"
+		croak_ui "Clay::UI: " . ref($self) . " composes Clay::UI::Role::Interaction::Hoverable on a text node;"
 			. " Clay cannot report the pointer over text elements - wrap the text in an Element"
 			if $self->DOES('Clay::UI::Role::Core::TextNode');
 	}

@@ -49,7 +49,11 @@ subtest 'range and type errors name the field' => sub {
 		[ Clay_LayoutConfig => { childGap => 70000 }, qr/^Clay_LayoutConfig\.childGap: expected an integer in 0\.\.65535/ ],
 		[ Clay_LayoutConfig => { layoutDirection => 4 }, qr/layoutDirection: expected an integer in 0\.\.3/ ],
 		[ Clay_FloatingElementConfig => { zIndex => 40000 }, qr/zIndex: expected an integer in -32768\.\.32767/ ],
-		[ Clay_Color => { r => 'red' }, qr/^Clay_Color\.r: expected a finite number, got 'red'/ ],
+		[ Clay_Color => { r => 'red' }, qr/^Clay_Color\.r: expected a number in 0\.\.255, got 'red'/ ],
+		[ Clay_Color => [300, 0, 0, 255], qr/^Clay_Color\.r: expected a number in 0\.\.255, got '300'/ ],
+		[ Clay_CornerRadius => { topLeft => -4 }, qr/^Clay_CornerRadius\.topLeft: expected a number >= 0, got '-4'/ ],
+		[ Clay_CornerRadius => -4, qr/^Clay_CornerRadius: expected a number >= 0, got '-4'/ ],
+		[ Clay_SizingAxis => { type => CLAY__SIZING_TYPE_PERCENT, percent => 1.5 }, qr/percent: expected a number in 0\.\.1, got '1.5'/ ],
 		[ Clay_SizingAxis => { min => 0, max => -9**9**9 }, qr/max: expected a finite number or \+Inf/ ],
 		[ Clay_LayoutConfig => { padding => { top => 1.5 } }, qr/^Clay_LayoutConfig\.padding\.top: expected an integer/ ],
 	);

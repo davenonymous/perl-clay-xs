@@ -258,4 +258,64 @@ subtest 'undef text and ids croak' => sub {
         'set_scroll_position croaks for an undef id' );
 };
 
+# -----------------------------------------------------------------------------
+# Render command details fixed by patches/0004-clay-upstream-fixes.patch.
+# -----------------------------------------------------------------------------
+
+sub element ($name, $config, @children) {
+    Clay__OpenElementWithId( Clay_GetElementId($name) );
+    Clay__ConfigureOpenElement($config);
+    $_->() for @children;
+    Clay__CloseElement();
+}
+
+sub command_types ($body) {
+    Clay_BeginLayout();
+    $body->();
+    return [ map { $_->{commandType} } @{ Clay_EndLayout(0) } ];
+}
+
+my $square = { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } };
+
+subtest 'an image or custom element emits no background rectangle' => sub {
+    is( command_types(sub { element('img', { layout => $square, image => { imageData => 7 }, backgroundColor => [1, 2, 3, 255] }) }),
+        [CLAY_RENDER_COMMAND_TYPE_IMAGE], 'the colour travels in the IMAGE command only' );
+    is( command_types(sub { element('cst', { layout => $square, custom => { customData => 7 }, backgroundColor => [1, 2, 3, 255] }) }),
+        [CLAY_RENDER_COMMAND_TYPE_CUSTOM], 'and in the CUSTOM command only' );
+};
+
+subtest 'a border with a transparent colour emits no BORDER' => sub {
+    is( command_types(sub { element('b', { layout => $square, border => { width => border_all(2), color => [1, 2, 3, 0] } }) }),
+        [], 'nothing is emitted' );
+    is( command_types(sub { element('b', { layout => $square, border => { width => border_all(2), color => [1, 2, 3, 255] } }) }),
+        [CLAY_RENDER_COMMAND_TYPE_BORDER], 'a visible border still is' );
+};
+
+subtest 'every command of a floating element carries its zIndex' => sub {
+    Clay_BeginLayout();
+    element('root', { layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(100) } } }, sub {
+        element('f', { layout => { sizing => { width => sizing_fixed(50), height => sizing_fixed(50) }, layoutDirection => CLAY_TOP_TO_BOTTOM },
+                        floating => { attachTo => CLAY_ATTACH_TO_PARENT, zIndex => 4 }, clip => { vertical => 1 },
+                        backgroundColor => [1, 1, 1, 255], border => { width => { left => 1, betweenChildren => 1 }, color => [1, 1, 1, 255] } },
+            sub { element('k1', { layout => $square }) }, sub { element('k2', { layout => $square }) });
+    });
+    my $commands = Clay_EndLayout(0);
+    is( [ map { $_->{commandType} } @$commands ],
+        [ CLAY_RENDER_COMMAND_TYPE_SCISSOR_START, CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_BORDER,
+          CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_SCISSOR_END ],
+        'scissor, background, border, bar between children, scissor end' );
+    is( [ map { $_->{zIndex} } @$commands ], [ (4) x 5 ], 'all with zIndex 4' );
+};
+
+subtest 'a culled clip container still clips its children' => sub {
+    is( command_types(sub {
+        element('root', { layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(100) } } }, sub {
+            element('clip', { layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(50) } }, clip => { horizontal => 1 },
+                               floating => { attachTo => CLAY_ATTACH_TO_PARENT, offset => { x => -150, y => 0 } } },
+                sub { element('wide', { layout => { sizing => { width => sizing_fixed(300), height => sizing_fixed(10) } }, backgroundColor => [1, 1, 1, 255] }) });
+        });
+    }), [ CLAY_RENDER_COMMAND_TYPE_SCISSOR_START, CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_SCISSOR_END ],
+        'the offscreen container emits its scissor commands around the visible child' );
+};
+
 done_testing;

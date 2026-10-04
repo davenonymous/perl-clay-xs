@@ -353,12 +353,9 @@ my @timeline = (
 		'chip-skip, enter trigger SKIP_ON_FIRST_PARENT_FRAME: drawn at once, no enter transition',
 		'chip-play, enter trigger TRIGGER_ON_FIRST_PARENT_FRAME: enters with its panel',
 	  ] },
-	# One quiet frame (30) before the removal: an exit starts from the state
-	# the last transition started from, and Clay only replaces that with
-	# the current look in a frame without a running transition. Removed at
-	# frame 30, chip-play would exit from its enter state (transparent) and
-	# never be drawn.
-	{ from => 31, shows => [ [ 'chip-skip', 'y' ], [ 'chip-play', qw(y height) ] ],
+	# Removed right after its enter transition ends: the exit starts from
+	# the chip's current look.
+	{ from => 30, shows => [ [ 'chip-skip', 'y' ], [ 'chip-play', qw(y height) ] ],
 	  change => sub { $ui{show_panel} = 0; 'panel removed' },
 	  explain => [
 		'chip-skip, exit trigger SKIP_WHEN_PARENT_EXITS: gone at once with its panel',

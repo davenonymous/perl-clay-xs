@@ -292,6 +292,7 @@ void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx);
 
 /* Scalar parsing shared by the XS wrappers. */
 double   clay_perl_parse_float(pTHX_ SV *sv, const char *what);
+double   clay_perl_parse_float_in(pTHX_ SV *sv, const char *what, double min, double max);
 double   clay_perl_parse_max_float(pTHX_ SV *sv, const char *what);
 UV       clay_perl_parse_uint(pTHX_ SV *sv, const char *what, UV max);
 NV       clay_perl_parse_integer(pTHX_ SV *sv, const char *what, NV min, NV max);

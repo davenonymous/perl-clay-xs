@@ -632,11 +632,12 @@ I<Held errors:> never.
 =head2 Clay_GetMaxElementCount
 
 Returns the element count of the current context (or what a setter
-changed it to).
+changed it to); without a context, the process-wide default the next
+C<Clay_Initialize> uses.
 
     my $count = Clay_GetMaxElementCount();
 
-I<Context:> current, but keeps working after a count change.
+I<Context:> optional, and keeps working after a count change.
 I<Frame:> any time. I<In a callback:> allowed. I<Held errors:> never.
 
 =head2 Clay_SetMaxMeasureTextCacheWordCount
@@ -661,11 +662,12 @@ I<Held errors:> never.
 =head2 Clay_GetMaxMeasureTextCacheWordCount
 
 Returns the measure-cache word count of the current context (or what a
-setter changed it to).
+setter changed it to); without a context, the process-wide default the
+next C<Clay_Initialize> uses.
 
     my $count = Clay_GetMaxMeasureTextCacheWordCount();
 
-I<Context:> current, but keeps working after a count change.
+I<Context:> optional, and keeps working after a count change.
 I<Frame:> any time. I<In a callback:> allowed. I<Held errors:> never.
 
 =head2 Clay_SetLayoutDimensions
@@ -1062,10 +1064,10 @@ C<CLAY_POINTER_DATA_RELEASED>.
 
 =back
 
-The state starts as C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME> (Clay's
-zero value), so the very first call with C<$is_down> true goes straight
-to C<CLAY_POINTER_DATA_PRESSED>. Call it once with C<$is_down> false
-after creating a context to start from a released pointer.
+A new context starts with a released pointer
+(C<CLAY_POINTER_DATA_RELEASED>: C<Clay_Initialize> sets it, where
+Clay's zero value would read as pressed), so the first call with
+C<$is_down> true gives C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>.
 
 While the last frame had more elements than the element count allows,
 Clay ignores the call.
@@ -1097,16 +1099,9 @@ One of the L</Pointer data states>.
 
 =back
 
-A new context reports
-C<< { x => 0, y => 0 } >> and state 0, which is
-C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>, until the first
-C<Clay_SetPointerState>: code that checks for a press sees one before
-any input. Because of that start value, the first real press then
-reports C<CLAY_POINTER_DATA_PRESSED>, not
-C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>. Call
-C<Clay_SetPointerState($position, 0)> once after creating the context to
-avoid both (see L</Clay_SetPointerState>). L<Clay::UI> does this in its
-constructor.
+A new context reports C<< { x => 0, y => 0 } >> and
+C<CLAY_POINTER_DATA_RELEASED> until the first C<Clay_SetPointerState>
+(see L</Clay_SetPointerState>).
 
 I<Context:> current. I<Frame:> any time. I<In a callback:> allowed.
 I<Held errors:> re-thrown.
@@ -1491,12 +1486,13 @@ they change, when the element appears (enter) or when it disappears
 declaration (see L<Clay::XS::Structs/transition>); the handlers below
 compute the animation.
 
-Install a handler whenever you use the C<transition> key. Clay::XS
-always gives Clay its own transition hook for such an element, so Clay
-starts a transition on every change even without Perl handlers. Without
-a C<$handler>, that transition completes in the frame after the change:
-the element shows its old value for one more frame, then jumps to the
-new one (in C, a missing handler means no transition at all).
+Clay runs an element's transitions only while the element has a C
+transition hook. Clay::XS gives it one while the context has a Perl
+C<$handler> (installed with C<Clay_SetTransitionHandlers> below), so
+without handlers the C<transition> key does nothing and every change
+shows at once, as in C with a NULL handler. The hook is set when the
+element is declared: install the handlers before the frame whose
+transitions they should run.
 
 L<Clay::UI> has no attribute for C<transition>, but widgets can use it:
 add the key in a C<contribute_> method of the widget class (see
@@ -1622,9 +1618,8 @@ Returns a C<PERCENT> sizing axis: a fraction of the parent's inner size
 
     sizing_percent(0.5);          # { type => CLAY__SIZING_TYPE_PERCENT, percent => 0.5 }
 
-C<$fraction> is required and must be a finite number. Clay expects
-C<0 .. 1> and reports C<CLAY_ERROR_TYPE_PERCENTAGE_OVER_1> for more;
-the helper itself does not check the range.
+C<$fraction> is required and must be a number in C<0 .. 1>; croaks
+C<sizing_percent: percent: expected a number in 0..1, got ...>.
 
 =head2 padding_all
 
@@ -1662,8 +1657,9 @@ corners. Replaces C<CLAY_CORNER_RADIUS>.
 
     corner_radius_all(8);   # { topLeft => 8, topRight => 8, bottomLeft => 8, bottomRight => 8 }
 
-C<$radius> is a finite number. A declaration's C<cornerRadius> also
-accepts the plain number.
+C<$radius> is a number of at least 0; croaks
+C<< corner_radius_all: radius: expected a number >= 0, got ... >>. A
+declaration's C<cornerRadius> also accepts the plain number.
 
 =head1 FUNCTIONS: VALIDATION
 
@@ -2838,10 +2834,12 @@ keys it has.
 
 =item *
 
-Without a C<$handler>, a transition completes one frame after it
-started, so a changed value appears one frame late (see
-L</FUNCTIONS: TRANSITIONS>); without C<$set_initial> or C<$set_final>,
-the state stays unchanged.
+Without a C<$handler>, elements declared with a C<transition> key have
+no transitions at all: Clay::XS leaves Clay's handler NULL, as a C
+program without one would, and changes show at once (see
+L</FUNCTIONS: TRANSITIONS>). Handlers apply to the elements declared
+after they were installed. Without C<$set_initial> or C<$set_final>, the
+state stays unchanged.
 
 =item *
 
@@ -3030,9 +3028,8 @@ One of the L</Render command types>; selects the C<renderData> keys.
 The C<zIndex> of the floating element the command belongs to, 0 for
 the main tree. The array is already sorted for drawing: draw the
 commands in array order and later commands correctly cover earlier
-ones. C<zIndex> only helps renderers that batch commands. C<BORDER>
-commands, the bars between children and C<SCISSOR_END> commands report
-0 even inside a floating element.
+ones. C<zIndex> only helps renderers that batch commands; every command
+of a floating element carries its C<zIndex>.
 
 =item C<id>
 
@@ -3062,7 +3059,9 @@ of its children, then C<BORDER>, the bars between children,
 C<OVERLAY_COLOR_END> and C<SCISSOR_END>. Each is present only when the
 declaration asks for it. Colours with alpha 0 emit nothing: no
 C<RECTANGLE> for a transparent C<backgroundColor>, no overlay commands
-for a transparent C<overlayColor>.
+for a transparent C<overlayColor>, no C<BORDER> for a transparent border
+colour. An C<IMAGE> or C<CUSTOM> element emits no C<RECTANGLE>: its
+C<backgroundColor> travels in its own command.
 
 With culling on (the default, see L</Clay_SetCullingEnabled>), elements
 entirely outside the layout dimensions emit no commands; for a culled
@@ -3083,8 +3082,9 @@ Fill C<boundingBox> with a colour.
     renderData => { backgroundColor => { r, g, b, a }, cornerRadius => { ... } }
 
 Clay emits it for an element whose C<backgroundColor> has an alpha
-above 0, and for each bar between children (see the C<BORDER>
-command below). Round each corner by drawing a
+above 0 (unless the element is an image or custom element, whose
+command carries the colour), and for each bar between children (see
+the C<BORDER> command below). Round each corner by drawing a
 circle of the corner's radius inset into that corner.
 
 =head2 CLAY_RENDER_COMMAND_TYPE_BORDER
@@ -3145,10 +3145,8 @@ example as a key into your own table). C<backgroundColor> is the
 declaration's C<backgroundColor>, meant as a tint; all zero means
 "untinted". C<cornerRadius> rounds the image's corners.
 
-When the declaration's C<backgroundColor> has an alpha above 0, Clay
-also emits a C<RECTANGLE> in that colour for the same box right after
-the C<IMAGE>, which covers the image. Leave C<backgroundColor> unset (or
-transparent) on image elements unless you want that.
+The declaration's C<backgroundColor> reaches the renderer only here: an
+image element emits no C<RECTANGLE> of its own.
 
 =head2 CLAY_RENDER_COMMAND_TYPE_CUSTOM
 
@@ -3159,8 +3157,8 @@ Draw something your renderer defines.
 C<customData> is the integer from the declaration's
 C<< custom => { customData => ... } >>; your renderer decides what it
 means. C<backgroundColor> and C<cornerRadius> come from the declaration.
-As with C<IMAGE>, a C<backgroundColor> with alpha above 0 also emits a
-C<RECTANGLE> for the same box after the C<CUSTOM> command.
+As with C<IMAGE>, the element emits no C<RECTANGLE> of its own:
+C<backgroundColor> reaches the renderer only in this command.
 
 =head2 CLAY_RENDER_COMMAND_TYPE_SCISSOR_START
 
@@ -3235,6 +3233,13 @@ not depend on content, so they do not.
 =item *
 
 Each member stays within its own C<max>.
+
+=item *
+
+Members also share the group's largest minimum size (for text, its
+longest word), so a parent that is too small compresses them like any
+other children, down to that minimum, and text in them wraps. Members
+whose parents compress alike, such as the rows of a grid, stay aligned.
 
 =item *
 

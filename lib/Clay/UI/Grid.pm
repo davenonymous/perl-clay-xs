@@ -18,6 +18,7 @@ use Clay::UI::Role::Layout::HasLayout;
 use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -41,7 +42,7 @@ my $_NEXT_GRID_ID = 1;
 
 sub _claim_grid_id {
 	return shift @_FREE_GRID_IDS if @_FREE_GRID_IDS;
-	die "Clay::UI::Grid: grid-id pool exhausted (max " . _GRID_ID_MAX . " live grids)"
+	croak_ui "Clay::UI::Grid: grid-id pool exhausted (max " . _GRID_ID_MAX . " live grids)"
 		if $_NEXT_GRID_ID > _GRID_ID_MAX;
 	return $_NEXT_GRID_ID++;
 }
@@ -52,9 +53,9 @@ sub _release_grid_id ($id) {
 }
 
 sub _pack_group_id ($grid_id, $local) {
-	die "Clay::UI::Grid: grid_id $grid_id out of range 1.." . _GRID_ID_MAX
+	croak_ui "Clay::UI::Grid: grid_id $grid_id out of range 1.." . _GRID_ID_MAX
 		unless $grid_id >= 1 && $grid_id <= _GRID_ID_MAX;
-	die "Clay::UI::Grid: local index $local out of range 1.." . _LOCAL_MAX
+	croak_ui "Clay::UI::Grid: local index $local out of range 1.." . _LOCAL_MAX
 		unless $local >= 1 && $local <= _LOCAL_MAX;
 	return ($grid_id << _LOCAL_BITS) | $local;
 }
@@ -210,7 +211,7 @@ role Clay::UI::Grid
 	}
 
 	sub _id_space_of ($grid) {
-		die "Clay::UI::Grid: share_columns_with must be a Clay::UI::Grid, got "
+		croak_ui "Clay::UI::Grid: share_columns_with must be a Clay::UI::Grid, got "
 			. (blessed $grid ? ref $grid : defined $grid ? "'$grid'" : 'undef')
 			unless blessed $grid && $grid->DOES('Clay::UI::Grid');
 		return $grid->_id_space;
@@ -254,7 +255,7 @@ role Clay::UI::Grid
 	}
 
 	method _validate_row ($row_cells) {
-		die "Clay::UI::Grid: row must be an arrayref" unless ref $row_cells eq 'ARRAY';
+		croak_ui "Clay::UI::Grid: row must be an arrayref" unless ref $row_cells eq 'ARRAY';
 		$self->_validate_cells(@$row_cells);
 		return;
 	}
@@ -357,14 +358,14 @@ role Clay::UI::Grid
 
 	method _check_row_index ($index) {
 		my $row_count = scalar @_cell_wrappers;
-		die "Clay::UI::Grid: row index " . ($index // 'undef') . " out of range 0.." . ($row_count - 1)
+		croak_ui "Clay::UI::Grid: row index " . ($index // 'undef') . " out of range 0.." . ($row_count - 1)
 			unless defined $index && $index =~ /\A[0-9]+\z/ && $index < $row_count;
 		return;
 	}
 
 	method _check_insert_index ($index) {
 		my $row_count = scalar @_cell_wrappers;
-		die "Clay::UI::Grid: insert index " . ($index // 'undef') . " out of range 0..$row_count"
+		croak_ui "Clay::UI::Grid: insert index " . ($index // 'undef') . " out of range 0..$row_count"
 			unless defined $index && $index =~ /\A[0-9]+\z/ && $index <= $row_count;
 		return;
 	}
@@ -441,10 +442,10 @@ role Clay::UI::Grid
 
 	method set_cell ($r, $c, $widget) {
 		$self->_check_row_index($r);
-		die "Clay::UI::Grid: row $r spans all columns; use replace_spanning_row or replace_row"
+		croak_ui "Clay::UI::Grid: row $r spans all columns; use replace_spanning_row or replace_row"
 			if $_row_spans[$r];
 		my $current_row_len = scalar @{ $_cell_wrappers[$r] };
-		die "Clay::UI::Grid: col index " . ($c // 'undef') . " out of range 0.." . $current_row_len
+		croak_ui "Clay::UI::Grid: col index " . ($c // 'undef') . " out of range 0.." . $current_row_len
 			unless defined $c && $c =~ /\A[0-9]+\z/ && $c <= $current_row_len;
 		$self->_validate_cells($widget);
 		my ($col_ids, $next_width_local) = $_ids->col_ids_for($c + 1);
@@ -667,12 +668,13 @@ column the same fixed width.
 
 =back
 
-B<Text in a grid column does not wrap by itself.> Every cell of a
-column keeps at least the widest I<unwrapped> width of the column, so a
-column holding long text makes the grid as wide as that text, wider
-than its parent if need be. Give such a column a maximum
-(C<sizing_fit(0, 200)>, C<sizing_grow(0, 200)>) or a fixed width in
-every row.
+Text in a grid column wraps when the grid is too narrow for its
+columns: the cells of a column share the column's widest unwrapped
+width and its largest minimum (the longest word), and Clay compresses
+them like any other children down to that minimum. Every row of a grid
+compresses alike, so the columns stay aligned. To wrap a column at a
+chosen width instead, give it a maximum (C<sizing_fit(0, 200)>,
+C<sizing_grow(0, 200)>) or a fixed width in every row.
 
 =head1 SPANNING ROWS
 

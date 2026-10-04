@@ -350,9 +350,8 @@ sub describe_list_scroll () {
 # pointer is a code ref, so positions come from the previous frame's
 # layout instead of being hard-coded.
 #
-# A new context starts with the pointer state PRESSED_THIS_FRAME (the
-# zero value of the enum), so the first frame parks the pointer outside
-# the window to settle it.
+# The first frame parks the pointer outside the window: nothing is
+# hovered until the script moves it.
 my @input_script = (
 	{ title => 'first frame, pointer outside the window',
 	  pointer => sub { { x => -1, y => -1 } } },
@@ -451,8 +450,8 @@ say "    $_" for map { describe_box($_) } qw(menu-button dropdown list help-icon
 # clips everything between them to the scissor box (the list's bounds).
 # Clay already emits the commands in drawing order, the floating dropdown
 # (zIndex 10) and tooltip (20) last, so a renderer draws them in array
-# order. Do not sort by zIndex: a floating element's BORDER and
-# SCISSOR_END commands carry zIndex 0 (see KNOWN-ISSUES.md, 9).
+# order; every command of a floating element carries its zIndex, so
+# sorting by zIndex works as well.
 sub command_detail ($cmd) {
 	my $data = $cmd->{renderData};
 	my $type = $cmd->{commandType};

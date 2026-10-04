@@ -30,6 +30,12 @@ class TestGroupMember :isa(TestButton) {
 	method accepts_focus :override () { return 0 }
 }
 
+# A pressable container, for buttons inside a clickable card.
+class TestCard
+	:does(Clay::UI::Role::Core::Container)
+	:does(Clay::UI::Role::Interaction::Pressable)
+{}
+
 sub make_ui (@children) {
 	my $root = Clay::UI::Test::Box->new(id => 'root');
 	$root->add_child(@children);
@@ -108,6 +114,28 @@ subtest 'a disabled widget is never armed or pressed' => sub {
 	is( [ $tracker->is_armed($button), $button->is_pressed ], [ 0, 0 ], 'disabling it disarms it at once' );
 	$tracker->update(over => [$button], down => 0);
 	is( \@log, ['OnPress'], 'so the release fires no OnRelease' );
+};
+
+subtest 'a disabled button absorbs the click on its pressable card' => sub {
+	my $card   = TestCard->new(id => 'card');
+	my $button = TestButton->new(id => 'button', disabled => 1);
+	$card->add_child($button);
+	my $ui = make_ui($card);
+	my @log;
+	$card->on($_, sub ($e) { push @log, $e->name; return }) foreach qw(OnPress OnRelease);
+	my $tracker = $ui->interaction;
+
+	$tracker->update(over => [$card, $button], down => 1);
+	is( [ $tracker->is_armed($card), $card->is_pressed, $card->is_hovered ], [ 0, 0, 1 ], 'the card is neither armed nor pressed' );
+	$tracker->update(over => [$card, $button], down => 0);
+	is( \@log, [], 'and gets no OnPress or OnRelease' );
+
+	$tracker->update(over => [$card], down => 1);
+	ok( $card->is_pressed, 'a press beside the button presses the card' );
+	$tracker->update(over => [$card, $button], down => 1);
+	ok( !$card->is_pressed, 'dragging onto the disabled button unpresses it' );
+	$tracker->update(over => [$card, $button], down => 0);
+	is( \@log, ['OnPress'], 'a release over the disabled button is no click' );
 };
 
 done_testing;

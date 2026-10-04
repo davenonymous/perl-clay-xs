@@ -112,12 +112,12 @@ matched. An id no child has is ignored. Returns the widget.
 
 =head2 remove_children_with
 
-	$widget->remove_children_with(sub { $_->can('id') && ($_->id // '') =~ /^tmp-/ });
+	$widget->remove_children_with(sub { ($_->id // '') =~ /^tmp-/ });
 	$widget->remove_children_with(sub ($child) { $child->isa('My::Row') });
 
 Removes and detaches every direct child for which
 C<< $predicate->($child) >> is true. C<$_> is set to the child as well.
-Text widgets are passed too and have no C<id> method; guard such calls.
+Text widgets are passed too; their C<id> is undef.
 Returns the widget.
 
 If a removal releases the focused or hovered widget and one of the

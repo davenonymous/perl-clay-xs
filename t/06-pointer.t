@@ -47,10 +47,16 @@ sub build_layout () {
     Clay__CloseElement();
 }
 
+is( Clay_GetPointerState()->{state}, CLAY_POINTER_DATA_RELEASED, 'a new context starts with a released pointer' );
+
 # ----- Frame 1: build geometry, no pointer interaction yet -------------------
 Clay_BeginLayout();
 build_layout();
 Clay_EndLayout(0);
+
+# The first press is a press "this frame", not a continued one.
+Clay_SetPointerState({ x => 30, y => 30 }, 1);
+is( Clay_GetPointerState()->{state}, CLAY_POINTER_DATA_PRESSED_THIS_FRAME, 'the first press reads as pressed this frame' );
 
 # ----- Frame 2: place pointer inside button, rebuild ------------------------
 Clay_SetPointerState({ x => 30, y => 30 }, 0);

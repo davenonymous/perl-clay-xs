@@ -19,6 +19,7 @@ use Clay::XS qw(CLAY_ATTACH_TO_NONE);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::_validate qw(is_finite_number);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -40,7 +41,7 @@ class Clay::UI::Interaction :strict(params) {
 	field $tree_order :param;
 
 	ADJUST {
-		die "Clay::UI::Interaction: 'tree_order' must be a coderef\n" unless ref $tree_order eq 'CODE';
+		croak_ui "Clay::UI::Interaction: 'tree_order' must be a coderef" unless ref $tree_order eq 'CODE';
 	}
 
 	# Widgets keyed by refaddr; the values are weak references, so a freed
@@ -76,7 +77,7 @@ class Clay::UI::Interaction :strict(params) {
 	# whether the button is down, where the pointer is and which scroll
 	# containers moved. Updates the state first, then fires the events.
 	method update (%args) {
-		die "Clay::UI::Interaction::update: called from one of its own listeners\n" if $_firing;
+		croak_ui "Clay::UI::Interaction::update: called from one of its own listeners" if $_firing;
 		_require_ui($ui, 'update');
 		my $input  = $self->_parse_update(%args);
 		my @events = $self->_apply($input);
@@ -141,7 +142,8 @@ class Clay::UI::Interaction :strict(params) {
 		$_down = $input->{down};
 
 		my %over            = map { refaddr($_) => $_ } grep { $_->DOES($HOVERABLE) } @{ $input->{over} };
-		my @over_pressables = grep { $_->DOES($PRESSABLE) && _is_enabled($_) } @{ $input->{over} };
+		my @over_pressables = _press_candidates(grep { $_->DOES($PRESSABLE) } @{ $input->{over} });
+		my %press_candidate = map { refaddr($_) => 1 } @over_pressables;
 
 		# Everything whose state may change: what is under the pointer now
 		# plus what was hovered, armed or pressed before.
@@ -175,7 +177,7 @@ class Clay::UI::Interaction :strict(params) {
 		%_pressed = ();
 		for my $widget (@pressables) {
 			_remember(\%_pressed, $widget)
-				if $input->{down} && $self->is_armed($widget) && exists $over{ refaddr $widget } && _is_enabled($widget);
+				if $input->{down} && $self->is_armed($widget) && $press_candidate{ refaddr $widget };
 		}
 		_prune(\%_hovered, \%_armed);
 
@@ -331,8 +333,8 @@ class Clay::UI::Interaction :strict(params) {
 	method set_focused_widget ($widget) {
 		_require_ui($ui, 'set_focused_widget');
 		return if !defined $_focused && !defined $widget;
-		return if defined $widget && $self->is_focused($widget);
 		$self->_check_focus_target($widget) if defined $widget;
+		return if defined $widget && $self->is_focused($widget);
 
 		# The focused widget changes before any listener runs; a dying
 		# OnBlur listener still lets OnFocus fire, and an OnBlur listener
@@ -380,7 +382,7 @@ class Clay::UI::Interaction :strict(params) {
 
 	method _check_focus_target ($widget) {
 		return if $self->can_take_focus($widget);
-		my $fail = sub ($message) { die "Clay::UI::Interaction::set_focused_widget: target $message\n" };
+		my $fail = sub ($message) { croak_ui "Clay::UI::Interaction::set_focused_widget: target $message" };
 		$fail->('must be a blessed widget') unless blessed $widget;
 		$fail->("must consume $FOCUSABLE") unless $widget->DOES($FOCUSABLE);
 		$fail->('does not belong to this Clay::UI') unless $self->_owns($widget);
@@ -413,7 +415,7 @@ class Clay::UI::Interaction :strict(params) {
 	# in that class.
 	method _validate_focus_order ($order, $widget) {
 		return undef unless defined $widget;
-		my $fail = sub ($message) { die "Clay::UI::Interaction: " . ref($order) . " returned $message\n" };
+		my $fail = sub ($message) { croak_ui "Clay::UI::Interaction: " . ref($order) . " returned $message\n" };
 		$fail->('a non-widget from its focus order') unless blessed $widget;
 		$fail->(ref($widget) . ", which is not $FOCUSABLE") unless $widget->DOES($FOCUSABLE);
 		$fail->(ref($widget) . ', which is not part of this Clay::UI') unless $self->_owns($widget);
@@ -443,11 +445,11 @@ class Clay::UI::Interaction :strict(params) {
 	# -----------------------------------------------------------------
 
 	sub _fail ($message) {
-		die "Clay::UI::Interaction::update: $message\n";
+		croak_ui "Clay::UI::Interaction::update: $message";
 	}
 
 	sub _require_ui ($ui, $method) {
-		die "Clay::UI::Interaction::$method: its Clay::UI no longer exists\n" unless defined $ui;
+		croak_ui "Clay::UI::Interaction::$method: its Clay::UI no longer exists" unless defined $ui;
 		return;
 	}
 
@@ -465,6 +467,17 @@ class Clay::UI::Interaction :strict(params) {
 
 	sub _is_enabled ($widget) {
 		return !$widget->DOES($DISABLEABLE) || $widget->is_enabled;
+	}
+
+	# The Pressables under the pointer that a press or release may reach:
+	# the enabled ones, unless the Pressable the click lands on (the
+	# origin among all of them) is disabled. A disabled widget absorbs the
+	# click, so a disabled button inside a pressable card does not click
+	# the card.
+	sub _press_candidates (@pressables) {
+		my $landing = _event_origin(@pressables);
+		return () unless defined $landing && _is_enabled($landing);
+		return grep { _is_enabled($_) } @pressables;
 	}
 
 	sub _holds ($state, $widget) {
@@ -782,11 +795,15 @@ L<Clay::UI::Role::Interaction::Pressable/is_pressed> asks this.
 Only enabled Pressables take part: a widget composing
 L<Clay::UI::Role::Interaction::Disableable> that is disabled is never
 armed or pressed, although it is still hovered. Below, I<candidates>
-are the enabled Pressables in C<over>, in C<over>'s order. So a press
-over a disabled Pressable goes to the nearest enabled Pressable under
-the pointer, for example a pressable card around a disabled button:
-the card gets C<OnPress> and C<OnRelease> (see F<KNOWN-ISSUES.md>,
-issue 16).
+are the enabled Pressables in C<over>, in C<over>'s order, unless the
+Pressable the pointer lands on (the origin, chosen by the rule below
+among all Pressables in C<over>, enabled or not) is disabled: then there
+are no candidates. A disabled widget absorbs the click, as a disabled
+button does in HTML. Pressing a disabled button inside a pressable card
+arms and presses nothing, and the card gets neither C<OnPress> nor
+C<OnRelease>; dragging a pressed card onto its disabled button unpresses
+the card. A disabled card around an enabled button does not stop the
+button.
 
 =over 4
 

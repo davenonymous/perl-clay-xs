@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::Revision qw(bump_revision);
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -19,7 +20,9 @@ role Clay::UI::Role::Style::HasStates {
 	field %_states;
 
 	sub _require_user_state ($name) {
-		die "Clay::UI: state '$name' is derived and cannot be set\n" if exists $DERIVED{$name};
+		croak_ui "Clay::UI: a state name must be a non-empty string"
+			unless defined $name && !ref $name && length $name;
+		croak_ui "Clay::UI: state '$name' is derived and cannot be set" if exists $DERIVED{$name};
 		return;
 	}
 
@@ -61,8 +64,11 @@ role Clay::UI::Role::Style::HasStates {
 		return $self;
 	}
 
+	# The user states, then the active derived states; in scalar context
+	# how many there are.
 	method states {
-		return keys(%_states), grep { $self->has_state($_) } sort keys %DERIVED;
+		my @active = (keys(%_states), grep { $self->has_state($_) } sort keys %DERIVED);
+		return @active;
 	}
 }
 
@@ -106,7 +112,7 @@ is doing right now. There are two kinds of states:
 
 Any name you choose, such as C<selected>, C<loading> or C<error>. You
 add and remove them; the set holds each name once and has no order.
-Names are not checked: pass plain, non-empty strings.
+A name is a plain, non-empty string; anything else dies.
 
 =item derived states
 
@@ -141,6 +147,8 @@ at all. Every change bumps the revision
 
 Adds a user state. Adding a state that is already set changes nothing,
 but still bumps the revision. Returns the widget. Dies with
+C<Clay::UI: a state name must be a non-empty string> for undef, a
+reference or the empty string, and with
 C<Clay::UI: state 'hovered' is derived and cannot be set> for a derived
 state.
 
@@ -180,8 +188,7 @@ following the widget. Bumps the revision and returns the widget.
 	my @active = $widget->states;
 
 Returns the names of all active states, user and derived, as a list in
-no particular order. Call it in list context: in scalar context it does
-not return the number of states.
+no particular order; in scalar context, how many there are.
 
 =head1 DERIVED STATES
 

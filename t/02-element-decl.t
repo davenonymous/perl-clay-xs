@@ -137,9 +137,9 @@ subtest 'out-of-range values croak with struct and field' => sub {
     like( configure_error({ border => { width => { top => 1.5 } } }),
         qr/border\.width\.top: expected an integer/, 'fractional border width' );
     like( configure_error({ backgroundColor => [ 'red', 0, 0, 255 ] }),
-        qr/backgroundColor\.r: expected a finite number, got 'red'/, 'non-numeric colour channel' );
+        qr/backgroundColor\.r: expected a number in 0\.\.255, got 'red'/, 'non-numeric colour channel' );
     like( configure_error({ cornerRadius => 9**9**9 }),
-        qr/cornerRadius: expected a finite number/, 'infinite corner radius' );
+        qr/cornerRadius: expected a number >= 0/, 'infinite corner radius' );
     Clay_BeginLayout();
     like( dies { Clay__OpenTextElement("x", { fontSize => -1 }) },
         qr/Clay_TextElementConfig\.fontSize: expected an integer in 0\.\.65535/, 'negative fontSize' );

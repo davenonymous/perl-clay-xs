@@ -128,6 +128,22 @@ void clay_perl_clay_default_counts(int32_t *element_count, int32_t *word_count)
     *word_count    = Clay__defaultMaxMeasureTextWordCacheCount;
 }
 
+void clay_perl_clay_release_pointer(void)
+{
+    Clay_GetCurrentContext()->pointerInfo.state = CLAY_POINTER_DATA_RELEASED;
+}
+
+void clay_perl_clay_cancel_scroll_momentum(uint32_t element_id)
+{
+    Clay_Context *context = Clay_GetCurrentContext();
+    for (int32_t i = 0; i < context->scrollContainerDatas.length; i++) {
+        Clay__ScrollContainerDataInternal *data = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
+        if (data->elementId != element_id) continue;
+        data->scrollMomentum = CLAY__INIT(Clay_Vector2) CLAY__DEFAULT_STRUCT;
+        return;
+    }
+}
+
 /* Clay_MinMemorySize() for explicit counts. Exact while every array fits
  * Clay's 32-bit size arithmetic, which holds for the small counts the
  * upper-bound computation below uses. */

@@ -884,10 +884,9 @@ C<Clay_EndLayout> (or C<render>) dies with that error.
 
 With C<CLAY_TEXT_WRAP_WORDS> (the default), a text element that does not
 fit into its parent's width breaks at spaces and at newline characters.
-With C<CLAY_TEXT_WRAP_NEWLINES>, it breaks only at newlines.
-C<CLAY_TEXT_WRAP_NONE> is meant to disable wrapping, but in Clay 0.14
-it behaves like C<CLAY_TEXT_WRAP_NEWLINES>: it still breaks at
-newline characters (see F<KNOWN-ISSUES.md>, issue 10).
+With C<CLAY_TEXT_WRAP_NEWLINES>, it breaks only at newlines. With
+C<CLAY_TEXT_WRAP_NONE>, it never breaks: the whole text, newlines
+included, is one line.
 
 Each line becomes its own C<TEXT> render command with its own bounding
 box, so a renderer simply draws every C<TEXT> command at its position.
@@ -1009,12 +1008,11 @@ your own.
 Clay leaves out the render commands of elements that are completely
 outside the viewport. This is called I<culling> and is on by default.
 Turn it off with C<Clay_SetCullingEnabled(0)> when you lay out a page
-larger than the viewport on purpose. A culled clip container emits no
-scissor commands either. Culling compares with the viewport, not with
-clip containers: children of a clip container that lie inside the
-viewport are still emitted, and the scissor region hides them. If the
-clip container itself is culled, such children are emitted without the
-scissor commands and are not clipped (see F<KNOWN-ISSUES.md>, issue 26).
+larger than the viewport on purpose. Culling compares with the
+viewport, not with clip containers: children of a clip container that
+lie inside the viewport are still emitted, and the scissor region hides
+them. A clip container emits its scissor commands even when it is
+culled itself, so such children stay clipped.
 
 =head1 ELEMENT IDS
 
@@ -1258,8 +1256,7 @@ L<Clay::UI::Role::Core::Container>:
 
     $panel->add_child($title, $body);         # returns $panel, so calls chain
     $panel->remove_child('body');             # by id
-    # text widgets have no id
-    $panel->remove_children_with(sub { $_->can('id') && ($_->id // '') =~ /^tmp-/ });
+    $panel->remove_children_with(sub { ($_->id // '') =~ /^tmp-/ });   # text widgets: id undef
     $panel->clear_children;
 
 A widget has at most one parent. Attaching a widget that still has a
@@ -1352,9 +1349,8 @@ done.
 The revision does not move while a transition runs; see
 L</REDRAWING ONLY WHEN SOMETHING CHANGED>.
 
-Without handlers nothing is animated, but a changed value appears one
-frame late (see F<KNOWN-ISSUES.md>, issue 1), so do not declare C<transition>
-without installing handlers.
+Without handlers nothing is animated: the C<transition> key does
+nothing, and a changed value shows at once.
 
 With Clay::UI, add the C<transition> key from a C<contribute_> method
 (see L</Writing your own widget class>), give the widget an C<id>, and

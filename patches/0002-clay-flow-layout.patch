@@ -30,7 +30,7 @@
  } Clay_LayoutConfig;
  
  CLAY__WRAPPER_STRUCT(Clay_LayoutConfig);
-@@ -1217,6 +1231,14 @@
+@@ -1219,6 +1233,14 @@
  
  CLAY__ARRAY_DEFINE(Clay__SizingGroupEntry, Clay__SizingGroupEntryArray)
  
@@ -45,7 +45,7 @@
  typedef struct {
      Clay_Dimensions dimensions;
      Clay_String line;
-@@ -1412,6 +1434,10 @@
+@@ -1417,6 +1439,10 @@
      // second pass must not equalize again (see Clay__ApplySizingGroups).
      uint32_t sizingGroupsGenerationX;
      uint32_t sizingGroupsGenerationY;
@@ -56,7 +56,7 @@
  };
  
  Clay_Context* Clay__Context_Allocate_Arena(Clay_Arena *arena) {
-@@ -1919,7 +1945,9 @@
+@@ -1924,7 +1950,9 @@
  
      // Attach children to the current open element
      openLayoutElement->children.elements = &context->layoutElementChildren.internalArray[context->layoutElementChildren.length];
@@ -67,7 +67,7 @@
          openLayoutElement->dimensions.width = leftRightPadding;
          openLayoutElement->minDimensions.width = leftRightPadding;
          for (int32_t i = 0; i < openLayoutElement->children.length; i++) {
-@@ -1929,7 +1957,9 @@
+@@ -1934,7 +1962,9 @@
              openLayoutElement->dimensions.height = CLAY__MAX(openLayoutElement->dimensions.height, child->dimensions.height + topBottomPadding);
              // Minimum size of child elements doesn't matter to clip containers as they can shrink and hide their contents
              if (!elementHasClipHorizontal) {
@@ -78,7 +78,7 @@
              }
              if (!elementHasClipVertical) {
                  openLayoutElement->minDimensions.height = CLAY__MAX(openLayoutElement->minDimensions.height, child->minDimensions.height + topBottomPadding);
-@@ -1938,7 +1968,7 @@
+@@ -1943,7 +1973,7 @@
          }
          float childGap = (float)(CLAY__MAX(openLayoutElement->children.length - 1, 0) * layoutConfig->childGap);
          openLayoutElement->dimensions.width += childGap;
@@ -87,15 +87,15 @@
              openLayoutElement->minDimensions.width += childGap;
          }
      }
-@@ -2282,6 +2312,7 @@
-     while (sizingGroupSlotCount < maxElementCount * 2) sizingGroupSlotCount *= 2;
+@@ -2288,6 +2318,7 @@
      context->sizingGroupSlots = Clay__int32_tArray_Allocate_Arena(sizingGroupSlotCount, arena);
      context->sizingGroupOfElement = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
+     context->sizingGroupSizeOfElement = Clay__DimensionsArray_Allocate_Arena(maxElementCount, arena);
 +    context->flowLines = Clay__FlowLineArray_Allocate_Arena(maxElementCount, arena);
  }
  
  void Clay__InitializePersistentMemory(Clay_Context* context) {
-@@ -2319,6 +2350,301 @@
+@@ -2325,6 +2356,301 @@
      }
  }
  
@@ -397,7 +397,7 @@
  // Writes out the location of text elements to layout elements buffer 1
  void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArray* textElementsOut, Clay__int32_tArray* aspectRatioElementsOut) {
      Clay_Context* context = Clay_GetCurrentContext();
-@@ -2441,6 +2767,15 @@
+@@ -2447,6 +2773,15 @@
                  }
              }
  
@@ -413,7 +413,7 @@
              if (sizingAlongAxis) {
                  float sizeToDistribute = parentSize - parentPadding - innerContentSize;
                  // The content is too large, compress the children as much as possible
-@@ -2494,42 +2829,7 @@
+@@ -2500,42 +2835,7 @@
                              Clay__int32_tArray_RemoveSwapback(&resizableContainerBuffer, childIndex--);
                          }
                      }
@@ -457,7 +457,7 @@
                  }
              // Sizing along the non layout axis ("off axis")
              } else {
-@@ -2600,6 +2900,47 @@
+@@ -2606,6 +2906,47 @@
      }
  }
  
@@ -505,7 +505,7 @@
  bool Clay__ElementIsOffscreen(Clay_BoundingBox *boundingBox) {
      Clay_Context* context = Clay_GetCurrentContext();
      if (context->disableCulling) {
-@@ -2711,6 +3052,38 @@
+@@ -2728,6 +3069,38 @@
      return changed;
  }
  
@@ -544,7 +544,7 @@
  // Re-aggregates the size and minimum size of every FIT or GROW container
  // on this axis from its children, exactly as Clay__CloseElement does, and
  // raises the container to the result (never lowers it). Walks elements in
-@@ -2729,36 +3102,14 @@
+@@ -2746,36 +3119,14 @@
          if (sizing.type == CLAY__SIZING_TYPE_FIXED || sizing.type == CLAY__SIZING_TYPE_PERCENT) continue;
          if (!xAxis && element->config.aspectRatio.aspectRatio != 0) continue;
  
@@ -586,7 +586,7 @@
          if (newDim > *dim) {
              *dim = newDim;
              changed = true;
-@@ -2943,6 +3294,12 @@
+@@ -2961,6 +3312,12 @@
              }
              contentHeight += (float)(CLAY__MAX(currentElement->children.length - 1, 0) * layoutConfig->childGap);
              currentElement->dimensions.height = CLAY__MIN(CLAY__MAX(contentHeight, layoutConfig->sizing.height.size.minMax.min), layoutConfig->sizing.height.size.minMax.max);
@@ -599,7 +599,7 @@
          }
      }
  
-@@ -3113,7 +3470,9 @@
+@@ -3131,7 +3488,9 @@
                              float halfGap = layoutConfig->childGap / 2;
                              float halfWidth = borderConfig->width.betweenChildren / 2;
                              Clay_Vector2 borderOffset = { (float)layoutConfig->padding.left - halfGap, (float)layoutConfig->padding.top - halfGap };
@@ -610,7 +610,7 @@
                                  for (int32_t i = 0; i < currentElement->children.length; ++i) {
                                      Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
                                      if (i > 0) {
-@@ -3356,6 +3715,7 @@
+@@ -3374,6 +3733,7 @@
  
              // On-axis alignment
              Clay_Dimensions contentSizeCurrent = {};
@@ -618,7 +618,7 @@
              if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT) {
                  for (int32_t i = 0; i < currentElement->children.length; ++i) {
                      Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
-@@ -3388,6 +3748,9 @@
+@@ -3406,6 +3766,9 @@
                  }
                  extraSpace = CLAY__MAX(0, extraSpace);
                  currentElementTreeNode->nextChildOffset.y += extraSpace;
@@ -628,7 +628,7 @@
              }
  
              if (scrollContainerData) {
-@@ -3400,7 +3763,9 @@
+@@ -3418,7 +3781,9 @@
                  Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
                  Clay_LayoutElementHashMapItem* childMapItem = Clay__GetHashMapItem(childElement->id);
                  // Alignment along non layout axis
@@ -639,7 +639,7 @@
                      currentElementTreeNode->nextChildOffset.y = currentElement->config.layout.padding.top;
                      float whiteSpaceAroundChild = currentElement->dimensions.height - (float)(layoutConfig->padding.top + layoutConfig->padding.bottom) - childElement->dimensions.height;
                      switch (layoutConfig->childAlignment.y) {
-@@ -3436,7 +3801,7 @@
+@@ -3454,7 +3819,7 @@
                  if (!childElement->exiting) {
                      if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT) {
                          currentElementTreeNode->nextChildOffset.x += childElement->dimensions.width + (float)layoutConfig->childGap;
@@ -648,7 +648,7 @@
                          currentElementTreeNode->nextChildOffset.y += childElement->dimensions.height + (float)layoutConfig->childGap;
                      }
                  }
-@@ -3907,7 +4272,7 @@
+@@ -3925,7 +4290,7 @@
                          // .layoutDirection
                          CLAY_TEXT(CLAY_STRING("Layout Direction"), infoTitleConfig);
                          Clay_LayoutConfig *layoutConfig = &selectedItem->layoutElement->config.layout;

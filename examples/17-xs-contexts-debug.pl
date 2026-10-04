@@ -395,8 +395,8 @@ printf "  badge with CLAY_CLIP_TO_ATTACHED_PARENT: %s\n", scissors_around_badge(
 #
 # CLAY_TEXT_WRAP_WORDS breaks at spaces and newlines to fit the width;
 # CLAY_TEXT_WRAP_NEWLINES only where the text has a "\n", even if a line
-# is wider than its parent. CLAY_TEXT_WRAP_NONE gives the same lines as
-# NEWLINES (see KNOWN-ISSUES.md, 10).
+# is wider than its parent. CLAY_TEXT_WRAP_NONE never breaks: the whole
+# text, "\n" included, is one line.
 
 heading('9. Breaking text at newlines only');
 my $poem = "roses are red\nviolets are blue";

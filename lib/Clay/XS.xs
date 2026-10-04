@@ -3,7 +3,8 @@
  *
  * Every public Clay v0.14 function (except
  * Clay_CreateArenaWithCapacityAndMemory: Clay_Initialize allocates and owns
- * the arena) and the internal Clay__ functions the C macros expand to are
+ * the arena; and Clay_RenderCommandArray_Get: Clay_EndLayout returns a Perl
+ * array) and the internal Clay__ functions the C macros expand to are
  * exposed under their exact C names. The
  * Perl-side module re-exports these and adds a handful of snake_case
  * helpers for macros that don't translate (CLAY_SIZING_FIT etc.) and for
@@ -44,6 +45,7 @@
 
 #include "src/clay_perl.h"
 
+#include <float.h>
 #include <string.h>
 
 /* ===========================================================================
@@ -151,9 +153,9 @@ typedef struct {
     W(Clay_SetDebugModeEnabled,                CURRENT,  1, 1, NONE,         AFTER)  \
     W(Clay_IsDebugModeEnabled,                 CURRENT,  0, 1, NONE,         AFTER)  \
     W(Clay_SetCullingEnabled,                  CURRENT,  1, 1, NONE,         AFTER)  \
-    W(Clay_GetMaxElementCount,                 CURRENT,  0, 0, NONE,         NEVER)  \
+    W(Clay_GetMaxElementCount,                 OPTIONAL, 0, 0, NONE,         NEVER)  \
     W(Clay_SetMaxElementCount,                 OPTIONAL, 1, 0, NONE,         NEVER)  \
-    W(Clay_GetMaxMeasureTextCacheWordCount,    CURRENT,  0, 0, NONE,         NEVER)  \
+    W(Clay_GetMaxMeasureTextCacheWordCount,    OPTIONAL, 0, 0, NONE,         NEVER)  \
     W(Clay_SetMaxMeasureTextCacheWordCount,    OPTIONAL, 1, 0, NONE,         NEVER)  \
     W(Clay_EaseOut,                            NONE,     0, 0, NONE,         NEVER)  \
     W(Clay_SetTransitionHandlers,              CURRENT,  1, 1, NONE,         AFTER)  \
@@ -583,6 +585,9 @@ xs_Clay_Initialize(capacity_sv, dimensions_sv, error_handler_sv = &PL_sv_undef, 
              * text measured without a Perl function is always reported. */
             Clay_SetMeasureTextFunction(clay_perl_measure_text_trampoline, ctx);
             Clay_SetQueryScrollOffsetFunction(clay_perl_query_scroll_offset_trampoline, ctx);
+            /* Clay zeroes the pointer state, which reads as "pressed this
+             * frame" and makes the first real press read as "pressed". */
+            clay_perl_clay_release_pointer();
             clay_perl_current_ctx = ctx;
             failure = clay_perl_take_held_error(aTHX_ ctx, NULL);
         }
@@ -1078,6 +1083,9 @@ xs_set_scroll_position(id_sv, position_sv)
                   "(declare it with clip enabled and complete a frame first)", (unsigned) id.id);
         }
         *data.scrollPosition = position;
+        /* Momentum left over from a drag would carry the container away
+         * from the position again in the next frames. */
+        clay_perl_clay_cancel_scroll_momentum(id.id);
         scroll_position_writes++;
         wrapper_leave(aTHX_ &GUARD_set_scroll_position, ctx);
 
@@ -1128,9 +1136,13 @@ xs_Clay_SetCullingEnabled(enabled)
 
 IV
 xs_Clay_GetMaxElementCount()
+    PREINIT:
+        int32_t element_count;
+        int32_t word_count;
     CODE:
         (void) wrapper_enter(aTHX_ &GUARD_Clay_GetMaxElementCount);
-        RETVAL = (IV) Clay_GetMaxElementCount();
+        configured_counts(&element_count, &word_count);
+        RETVAL = (IV) element_count;
     OUTPUT:
         RETVAL
 
@@ -1157,9 +1169,13 @@ xs_Clay_SetMaxElementCount(count_sv)
 
 IV
 xs_Clay_GetMaxMeasureTextCacheWordCount()
+    PREINIT:
+        int32_t element_count;
+        int32_t word_count;
     CODE:
         (void) wrapper_enter(aTHX_ &GUARD_Clay_GetMaxMeasureTextCacheWordCount);
-        RETVAL = (IV) Clay_GetMaxMeasureTextCacheWordCount();
+        configured_counts(&element_count, &word_count);
+        RETVAL = (IV) word_count;
     OUTPUT:
         RETVAL
 
@@ -1322,7 +1338,7 @@ xs_sizing_percent(percent_sv)
     CODE:
         memset(&axis, 0, sizeof(axis));
         axis.type = CLAY__SIZING_TYPE_PERCENT;
-        axis.size.percent = (float) clay_perl_parse_float(aTHX_ percent_sv, "sizing_percent: percent");
+        axis.size.percent = (float) clay_perl_parse_float_in(aTHX_ percent_sv, "sizing_percent: percent", 0, 1);
         RETVAL = clay_sizing_axis_to_sv(aTHX_ axis);
     OUTPUT:
         RETVAL
@@ -1371,7 +1387,7 @@ xs_corner_radius_all(radius_sv)
         Clay_CornerRadius r;
     CODE:
         r.topLeft = r.topRight = r.bottomLeft = r.bottomRight =
-            (float) clay_perl_parse_float(aTHX_ radius_sv, "corner_radius_all: radius");
+            (float) clay_perl_parse_float_in(aTHX_ radius_sv, "corner_radius_all: radius", 0, FLT_MAX);
         RETVAL = clay_corner_radius_to_sv(aTHX_ r);
     OUTPUT:
         RETVAL

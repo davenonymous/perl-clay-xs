@@ -242,4 +242,79 @@ subtest 'the state the handler writes is drawn' => sub {
     Clay_SetTransitionHandlers();
 };
 
+subtest 'without handlers a transition key changes nothing: the new value shows at once' => sub {
+    my $colour_of = sub ($bg) {
+        Clay_BeginLayout();
+        build_frame($bg);
+        my ($rect) = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout(0.016) };
+        return $rect->{renderData}{backgroundColor};
+    };
+    $colour_of->([255, 0, 0, 255]);
+    is( $colour_of->([0, 0, 255, 255]), { r => 0, g => 0, b => 255, a => 255 }, 'the frame after a change shows the new colour' );
+
+    # Handlers removed while a transition runs: the element shows what it
+    # declares, not a stale mid-transition value.
+    Clay_SetTransitionHandlers(sub ($args, $userdata) { $args->{current}{backgroundColor} = { r => 9, g => 9, b => 9, a => 255 }; return 0 });
+    $colour_of->([255, 0, 0, 255]);
+    is( $colour_of->([0, 255, 0, 255]), { r => 9, g => 9, b => 9, a => 255 }, 'with a handler, its state is drawn' );
+    Clay_SetTransitionHandlers();
+    is( $colour_of->([0, 0, 255, 255]), { r => 0, g => 0, b => 255, a => 255 }, 'without it, the declared colour is drawn again' );
+};
+
+# -----------------------------------------------------------------------------
+# Two upstream transition bugs fixed by patches/0004-clay-upstream-fixes.patch.
+# -----------------------------------------------------------------------------
+
+sub chip ($name, $transition) {
+    Clay__OpenElementWithId( Clay_GetElementId($name) );
+    Clay__ConfigureOpenElement({
+        layout          => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } },
+        backgroundColor => [9, 9, 9, 255],
+        transition      => { properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, %$transition },
+    });
+    Clay__CloseElement();
+}
+
+sub chips_frame (@chips) {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("root") );
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(100) } } });
+        chip(@$_) for @chips;
+    Clay__CloseElement();
+    Clay_EndLayout(0.1);
+}
+
+subtest 'a completing exit does not skip another running transition' => sub {
+    my @calls;    # handler calls per frame
+    Clay_SetTransitionHandlers(sub ($args, $userdata) { $calls[-1]++; return $args->{elapsedTime} >= $args->{duration} },
+        undef, sub ($initial, $properties, $userdata) { return $initial });
+    my $exiting  = [ A => { duration => 0.25, exit => { hasSetFinal => 1 } } ];
+    my $entering = [ B => { duration => 1, enter => { hasSetInitial => 1 } } ];
+    push @calls, 0; chips_frame($exiting);
+    push @calls, 0; chips_frame($exiting);
+    for (1 .. 6) { push @calls, 0; chips_frame($entering) }
+    is( [ @calls[3 .. 7] ], [ 2, 2, 2, 1, 1 ], 'B is handled in the frame A\'s exit completes' );
+    Clay_SetTransitionHandlers();
+};
+
+subtest 'an exit right after the enter transition starts from the current look' => sub {
+    my @exit_initial_alpha;
+    Clay_SetTransitionHandlers(
+        sub ($args, $userdata) {
+            push @exit_initial_alpha, $args->{initial}{backgroundColor}{a} if $args->{transitionState} == CLAY_TRANSITION_STATE_EXITING;
+            my $eased = Clay_EaseOut($args);
+            $args->{current} = $eased->{current};
+            return $eased->{complete};
+        },
+        sub ($target,  $properties, $userdata) { return { backgroundColor => [0, 0, 0, 0] } },
+        sub ($initial, $properties, $userdata) { return { backgroundColor => [0, 0, 0, 0] } },
+    );
+    my $fading = [ C => { duration => 0.2, enter => { hasSetInitial => 1 }, exit => { hasSetFinal => 1 } } ];
+    chips_frame();
+    chips_frame($fading) for 1 .. 4;    # the enter runs 0.2 s and completes
+    chips_frame() for 1 .. 2;           # removed right after
+    is( $exit_initial_alpha[0], 255, 'the exit fades out from opaque, not from the transparent enter state' );
+    Clay_SetTransitionHandlers();
+};
+
 done_testing;

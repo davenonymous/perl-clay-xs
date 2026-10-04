@@ -105,7 +105,7 @@ and C<request_prepare> (L<Clay::UI::Role::Core::Preparable>).
 
 A running transition (L<Clay::XS::Structs/transition>) does not bump
 the revision: its render commands change from frame to frame while the
-revision stays the same (see F<KNOWN-ISSUES.md>, issue 27). While an
+revision stays the same (see F<KNOWN-ISSUES.md>, issue 3). While an
 element with a C<transition> may animate, draw every frame.
 
 Reading an attribute never bumps the revision; neither does writing

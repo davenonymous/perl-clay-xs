@@ -10,6 +10,7 @@ use Object::Pad 0.800;
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Role::Style::HasStates;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -29,7 +30,7 @@ role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasPar
 	# but a widget that can no longer take focus loses it at once.
 	method can_focus (@new) {
 		if (@new) {
-			die "Clay::UI: 'can_focus' takes one value\n" unless @new == 1;
+			croak_ui "Clay::UI: 'can_focus' takes one value" unless @new == 1;
 			$wants_focus = _focus_flag($new[0]);
 			my $ui = $self->ui;
 			$ui->interaction->release_ineligible($self) if defined $ui;
@@ -46,7 +47,7 @@ role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasPar
 	}
 
 	sub _focus_flag ($value) {
-		die "Clay::UI: 'can_focus' must be a plain boolean value\n" if ref $value;
+		croak_ui "Clay::UI: 'can_focus' must be a plain boolean value" if ref $value;
 		return $value ? 1 : 0;
 	}
 

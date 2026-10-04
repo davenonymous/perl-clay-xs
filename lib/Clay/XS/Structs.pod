@@ -155,10 +155,10 @@ The field descriptions below use these types:
 =item float
 
 Any number that is finite as a C C<float> (absolute value up to about
-3.4e38). NaN, infinities and non-numeric strings croak. Signs are not
-checked: Clay accepts negative values and computes with them. The one
-exception is the C<max> of a sizing axis, which may also be C<+Inf> (see
-L</sizing>).
+3.4e38). NaN, infinities and non-numeric strings croak. Unless a key's
+entry gives a range, signs are not checked: Clay accepts negative values
+and computes with them. The one exception to finiteness is the C<max> of
+a sizing axis, which may also be C<+Inf> (see L</sizing>).
 
 =item U16
 
@@ -167,9 +167,10 @@ non-integers (C<1.5>) croak; C<1.0> is accepted. Padding, C<childGap>,
 C<lineGap>, border widths, C<fontId>, C<fontSize>, C<letterSpacing> and
 C<lineHeight> are U16 and range-checked this way.
 
-Colour channels, corner radii and C<percent> are floats, not U16: they
-are not range-checked, so C<< { r => 300 } >>, a negative radius or a
-C<percent> of 2 pass unchanged.
+Colour channels, corner radii and C<percent> are floats with a range:
+channels lie in C<0 .. 255>, radii are not negative and C<percent> lies
+in C<0 .. 1>, so C<< { r => 300 } >>, a negative radius or a C<percent>
+of 2 croak (C<expected a number in 0..255>, C<< expected a number >= 0 >>).
 
 =item U32
 
@@ -493,8 +494,8 @@ no maximum as well: C<sizing_fit(0, 9**9**9)>.
 
 =item percent
 
-A float, default 0. Used only by PERCENT. Not range-checked (see PERCENT
-below).
+A float in C<0 .. 1>, default 0. Used only by PERCENT; other values
+croak (see PERCENT below).
 
 =back
 
@@ -551,10 +552,10 @@ C<childGap>s between its children. C<percent> is a fraction: 0.5 is
 50 %. Two C<sizing_percent(0.5)> children of a 200 px wide parent with 10
 px padding on each side and a C<childGap> of 20 are 80 px wide each.
 
-C<percent> is not range-checked by Clay::XS. A value above 1 is still
-used (the element is larger than its parent), and Clay reports
-C<CLAY_ERROR_TYPE_PERCENTAGE_OVER_1> to the error handler. A negative
-value gives a negative size.
+C<percent> must lie in C<0 .. 1>: other values croak
+(C<sizing_percent(1.5)> croaks
+C<sizing_percent: percent: expected a number in 0..1, got '1.5'>), so
+Clay's C<CLAY_ERROR_TYPE_PERCENTAGE_OVER_1> is never reached from Perl.
 
 =head3 padding
 
@@ -764,9 +765,8 @@ C<imageData>, the C<backgroundColor> (the renderer decides whether to use
 it as a tint; C<[0, 0, 0, 0]> should mean "untinted") and the
 C<cornerRadius>. With C<imageData> 0 there is no C<IMAGE> command. Clay
 does not know the image's size: give the element a size, and an
-C<aspectRatio> to keep its proportions. A C<backgroundColor> with an
-alpha above 0 adds a C<RECTANGLE> drawn over the image (see
-L</backgroundColor>).
+C<aspectRatio> to keep its proportions. The C<backgroundColor> travels
+only in the C<IMAGE> command: an image element emits no C<RECTANGLE>.
 
     # imageData 1 is a key into your renderer's own image table,
     # for example: my %images = (1 => $logo_image);
@@ -1036,11 +1036,10 @@ C<width> is a C<Clay_BorderWidth> (see L</Clay_BorderWidth>),
 C<< { left, right, top, bottom, betweenChildren } >>, each a U16 in
 pixels, default 0: values outside C<0 .. 65535> or non-integers croak.
 
-When any of the five is above 0, the element produces a C<BORDER>
-render command after its children, with its bounding box and
-C<< renderData => { color, cornerRadius, width } >>; the renderer draws
-the four sides inset into the box. The command is produced even when
-C<color> has alpha 0.
+When any of the five is above 0 and C<color> has an alpha above 0, the
+element produces a C<BORDER> render command after its children, with
+its bounding box and C<< renderData => { color, cornerRadius, width } >>;
+the renderer draws the four sides inset into the box.
 
 C<betweenChildren> draws a line in the C<childGap> between neighbouring
 children: vertical lines for C<CLAY_LEFT_TO_RIGHT>, horizontal lines for
@@ -1064,9 +1063,8 @@ element's position, size and colours between frames, and its appearing
 (enter) and disappearing (exit). The element needs the same id in every
 frame. The animation itself is computed by the per-context handlers
 installed with C<Clay_SetTransitionHandlers> (see L<Clay::XS/CALLBACKS>).
-Install a handler whenever you use this key: without one, a change
-appears one frame late (the element shows its old value for one more
-frame, then jumps to the new one; see L<Clay::XS/FUNCTIONS: TRANSITIONS>).
+Without handlers the key has no effect: the element changes at once, as
+in C with a NULL handler (see L<Clay::XS/FUNCTIONS: TRANSITIONS>).
 
     transition => {
         duration   => 0.25,
@@ -1076,8 +1074,9 @@ frame, then jumps to the new one; see L<Clay::XS/FUNCTIONS: TRANSITIONS>).
     }
 
 Any C<transition> hash, even C<{}>, makes Clay track the element for
-transitions (Clay::XS always installs its handler); without the key the
-element has no transitions. Clay::UI: no attribute, but a
+transitions while the context has transition handlers (Clay::XS installs
+its C handler only then); without the key the element has no
+transitions. Clay::UI: no attribute, but a
 C<contribute_> method can add the key; install the handlers with
 C<Clay_SetTransitionHandlers> right after C<< Clay::UI->new >> (see
 L</Keys Clay::UI has no attribute for>).
@@ -1300,8 +1299,9 @@ C<lineHeight> is a U16 (values outside C<0 .. 65535> or non-integers
 croak), default 0: the height in pixels of each line. With 0, a line is
 as tall as the measure function says. Above 0, every line is
 C<lineHeight> tall, so the element is C<lines * lineHeight> tall; the
-C<TEXT> render command of each line is C<lineHeight> tall and moved down
-by half the difference between C<lineHeight> and the measured height.
+C<TEXT> render command of each line is C<lineHeight> tall and the lines
+stack from the element's top, so the boxes stay inside the element and
+the renderer centres the glyphs in them.
 The C<lineHeight> in C<renderData> is the configured value (0 when
 unset).
 
@@ -1325,8 +1325,9 @@ line.
 
 =item C<CLAY_TEXT_WRAP_NONE> (2)
 
-Clay's documentation says "never"; in this Clay version it behaves
-exactly like C<CLAY_TEXT_WRAP_NEWLINES> (newlines still break lines).
+Never wraps: the whole text is one line and one C<TEXT> command,
+newline characters included (the measure function sees them as ordinary
+characters of one string).
 
 =back
 
@@ -1352,9 +1353,9 @@ arguments. Each can be checked with C<check_struct> under its name.
 =head2 Clay_Color
 
 C<Clay_Color> is C<< { r => $float, g => $float, b => $float, a => $float } >>
-or C<[r, g, b, a]>; every channel defaults to 0. By convention the
-channels run from 0 to 255, but Clay only passes them to the renderer,
-except that an alpha (C<a>) of 0 (or less) suppresses the
+or C<[r, g, b, a]>; every channel defaults to 0. The channels run from 0
+to 255 (other values croak); Clay only passes them to the renderer,
+except that an alpha (C<a>) of 0 suppresses the
 C<backgroundColor> rectangle, the C<overlayColor> commands and the
 C<betweenChildren> lines.
 
@@ -1382,8 +1383,8 @@ convention 255 is opaque.
 
 =back
 
-The channels are floats, not U16: values outside C<0 .. 255> are not
-range-checked and reach the renderer unchanged.
+The channels are floats in C<0 .. 255>; other values croak
+C<expected a number in 0..255>.
 
 =head2 Clay_Vector2
 
@@ -1435,8 +1436,8 @@ The radius of the bottom right corner, a float, default 0.
 
 =back
 
-Radii are floats: they are not range-checked (a negative radius passes
-unchanged). Clay::UI spells them C<top_left>, C<top_right>,
+Radii are floats of at least 0 (a negative radius croaks
+C<< expected a number >= 0 >>). Clay::UI spells them C<top_left>, C<top_right>,
 C<bottom_left>, C<bottom_right>.
 
 =head2 Clay_Padding
@@ -1563,8 +1564,9 @@ C<Clay_TransitionElementConfig> is the L</transition> key of a declaration:
 C<< { duration, properties, interactionHandling, enter => { trigger,
 hasSetInitial }, exit => { trigger, siblingOrdering, hasSetFinal } } >>.
 C's function pointer fields (C<handler>, C<setInitialState>,
-C<setFinalState>) are not keys: the handler is always installed, and the
-two booleans stand for the state functions.
+C<setFinalState>) are not keys: the handler is installed while the
+context has Perl transition handlers, and the two booleans stand for the
+state functions.
 
 =head2 Clay_ElementDeclaration
 

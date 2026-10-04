@@ -1,0 +1,190 @@
+--- a/src/clay/clay.h
++++ b/src/clay/clay.h
+@@ -1682,6 +1682,11 @@
+     hash += (hash << 10);
+     hash ^= (hash >> 6);
+ 
++    // CLAY_TEXT_WRAP_NONE measures newlines as ordinary characters, so its words differ.
++    hash += config->wrapMode == CLAY_TEXT_WRAP_NONE;
++    hash += (hash << 10);
++    hash ^= (hash >> 6);
++
+     hash += (hash << 3);
+     hash ^= (hash >> 11);
+     hash += (hash << 15);
+@@ -1795,7 +1800,7 @@
+             return &Clay__MeasureTextCacheItem_DEFAULT;
+         }
+         char current = text->chars[end];
+-        if (current == ' ' || current == '\n') {
++        if (current == ' ' || (current == '\n' && config->wrapMode != CLAY_TEXT_WRAP_NONE)) {
+             int32_t length = end - start;
+             Clay_Dimensions dimensions = CLAY__DEFAULT_STRUCT;
+             if (length > 0) {
+@@ -2963,7 +2968,7 @@
+ // between neighbours on a line, and a horizontal bar centered in every lineGap, spanning the
+ // container. A vertical bar spans its line's band, which reaches halfway into the lineGaps around
+ // the line and to the container's edge above the first line and below the last one.
+-void Clay__AddFlowBetweenChildrenBorders(Clay_LayoutElement *parent, Clay_BoundingBox boundingBox, Clay_Vector2 scrollOffset) {
++void Clay__AddFlowBetweenChildrenBorders(Clay_LayoutElement *parent, Clay_BoundingBox boundingBox, Clay_Vector2 scrollOffset, int16_t zIndex) {
+     Clay_Context* context = Clay_GetCurrentContext();
+     Clay_LayoutConfig *layoutConfig = &parent->config.layout;
+     Clay_BorderElementConfig *borderConfig = &parent->config.border;
+@@ -2995,6 +3000,7 @@
+             .renderData = { .rectangle = { .backgroundColor = borderConfig->color } },
+             .userData = parent->config.userData,
+             .id = Clay__HashNumber(parent->id, parent->children.length + 1 + i).id,
++            .zIndex = zIndex,
+             .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
+         });
+     }
+@@ -3257,7 +3263,8 @@
+         float lineHeight = containerElement->textConfig.lineHeight > 0 ? (float)containerElement->textConfig.lineHeight : textElementData->preferredDimensions.height;
+         int32_t lineLengthChars = 0;
+         int32_t lineStartOffset = 0;
+-        if (!measureTextCacheItem->containsNewlines && textElementData->preferredDimensions.width <= containerElement->dimensions.width) {
++        // CLAY_TEXT_WRAP_NONE never wraps: the whole text is one line (the measurement treats its newlines as ordinary characters).
++        if (containerElement->textConfig.wrapMode == CLAY_TEXT_WRAP_NONE || (!measureTextCacheItem->containsNewlines && textElementData->preferredDimensions.width <= containerElement->dimensions.width)) {
+             Clay__WrappedTextLineArray_Add(&context->wrappedTextLines, CLAY__INIT(Clay__WrappedTextLine) { containerElement->dimensions,  textElementData->text });
+             textElementData->wrappedLines.length++;
+             continue;
+@@ -3493,6 +3500,7 @@
+                     continue;
+                 }
+                 Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
++                bool isClipElement = currentElement->config.clip.horizontal || currentElement->config.clip.vertical;
+                 if (generateRenderCommands && !Clay__ElementIsOffscreen(&currentElementData->boundingBox)) {
+                     // DFS is returning upwards backwards
+                     bool closeClipElement = false;
+@@ -3510,7 +3518,7 @@
+                         }
+                     }
+ 
+-                    if (Clay__BorderHasAnyWidth(&currentElement->config.border)) {
++                    if (Clay__BorderHasAnyWidth(&currentElement->config.border) && currentElement->config.border.color.a > 0) {
+                         Clay_BoundingBox currentElementBoundingBox = currentElementData->boundingBox;
+                         Clay_BorderElementConfig *borderConfig = &currentElement->config.border;
+                         Clay_RenderCommand renderCommand = {
+@@ -3522,15 +3530,16 @@
+                             }},
+                             .userData = currentElement->config.userData,
+                             .id = Clay__HashNumber(currentElement->id, currentElement->children.length).id,
++                            .zIndex = root->zIndex,
+                             .commandType = CLAY_RENDER_COMMAND_TYPE_BORDER,
+                         };
+                         Clay__AddRenderCommand(renderCommand);
+-                        if (borderConfig->width.betweenChildren > 0 && borderConfig->color.a > 0) {
++                        if (borderConfig->width.betweenChildren > 0) {
+                             float halfGap = layoutConfig->childGap / 2;
+                             float halfWidth = borderConfig->width.betweenChildren / 2;
+                             Clay_Vector2 borderOffset = { (float)layoutConfig->padding.left - halfGap, (float)layoutConfig->padding.top - halfGap };
+                             if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT_WRAP) {
+-                                Clay__AddFlowBetweenChildrenBorders(currentElement, currentElementBoundingBox, scrollOffset);
++                                Clay__AddFlowBetweenChildrenBorders(currentElement, currentElementBoundingBox, scrollOffset, root->zIndex);
+                             } else if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT) {
+                                 for (int32_t i = 0; i < currentElement->children.length; ++i) {
+                                     Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
+@@ -3542,6 +3551,7 @@
+                                                 } },
+                                                 .userData = currentElement->config.userData,
+                                                 .id = Clay__HashNumber(currentElement->id, currentElement->children.length + 1 + i).id,
++                                                .zIndex = root->zIndex,
+                                                 .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
+                                         });
+                                     }
+@@ -3558,6 +3568,7 @@
+                                                 } },
+                                                 .userData = currentElement->config.userData,
+                                                 .id = Clay__HashNumber(currentElement->id, currentElement->children.length + 1 + i).id,
++                                                .zIndex = root->zIndex,
+                                                 .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
+                                         });
+                                     }
+@@ -3579,9 +3590,17 @@
+                     if (closeClipElement) {
+                         Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) {
+                                 .id = Clay__HashNumber(currentElement->id, rootElement->children.length + 11).id,
++                                .zIndex = root->zIndex,
+                                 .commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END,
+                         });
+                     }
++                } else if (generateRenderCommands && isClipElement) {
++                    // Ends the scissor a culled clip container opened for its children (see below).
++                    Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) {
++                            .id = Clay__HashNumber(currentElement->id, rootElement->children.length + 11).id,
++                            .zIndex = root->zIndex,
++                            .commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END,
++                    });
+                 }
+ 
+                 dfsBuffer.length--;
+@@ -3649,8 +3668,9 @@
+                     Clay_TextElementConfig *textElementConfig = &currentElement->textConfig;
+                     float naturalLineHeight = currentElement->textElementData.preferredDimensions.height;
+                     float finalLineHeight = textElementConfig->lineHeight > 0 ? (float)textElementConfig->lineHeight : naturalLineHeight;
+-                    float lineHeightOffset = (finalLineHeight - naturalLineHeight) / 2;
+-                    float yPosition = lineHeightOffset;
++                    // Each line's box is finalLineHeight tall and the boxes stack from the element's top, so they stay
++                    // inside it; the renderer centres the glyphs in the box.
++                    float yPosition = 0;
+                     for (int32_t lineIndex = 0; lineIndex < currentElement->textElementData.wrappedLines.length; ++lineIndex) {
+                         Clay__WrappedTextLine *wrappedLine = Clay__WrappedTextLineArraySlice_Get(&currentElement->textElementData.wrappedLines, lineIndex);
+                         if (wrappedLine->line.length == 0) {
+@@ -3748,7 +3768,8 @@
+                         };
+                         Clay__AddRenderCommand(renderCommand);
+                     }
+-                    if (currentElement->config.backgroundColor.a > 0) {
++                    // An image or custom element carries its backgroundColor in its own command; a rectangle would cover it.
++                    if (currentElement->config.backgroundColor.a > 0 && !currentElement->config.image.imageData && !currentElement->config.custom.customData) {
+                         Clay_RenderCommand renderCommand = {
+                             .boundingBox = currentElementBoundingBox,
+                             .renderData = { .rectangle = {
+@@ -3763,6 +3784,21 @@
+                         Clay__AddRenderCommand(renderCommand);
+                     }
+                 }
++            } else if (generateRenderCommands && !currentElement->isTextElement && (currentElement->config.clip.horizontal || currentElement->config.clip.vertical)) {
++                // A culled clip container still has children that may reach into the viewport; they must stay clipped.
++                Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) {
++                    .boundingBox = currentElementBoundingBox,
++                    .renderData = {
++                        .clip = {
++                            .horizontal = currentElement->config.clip.horizontal,
++                            .vertical = currentElement->config.clip.vertical,
++                        }
++                    },
++                    .userData = currentElement->config.userData,
++                    .id = currentElement->id,
++                    .zIndex = root->zIndex,
++                    .commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START,
++                });
+             }
+ 
+             Clay_LayoutElementHashMapItem *hashMapItem = Clay__GetHashMapItem(currentElement->id);
+@@ -3874,7 +3910,7 @@
+         if (root->clipElementId) {
+             Clay_LayoutElementHashMapItem *clipHashMapItem = Clay__GetHashMapItem(root->clipElementId);
+             if (clipHashMapItem && !Clay__ElementIsOffscreen(&clipHashMapItem->boundingBox)) {
+-                Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) { .id = Clay__HashNumber(rootElement->id, rootElement->children.length + 11).id, .commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END });
++                Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) { .id = Clay__HashNumber(rootElement->id, rootElement->children.length + 11).id, .zIndex = root->zIndex, .commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END });
+             }
+         }
+     }
+@@ -5187,6 +5223,8 @@
+                         data->state = CLAY_TRANSITION_STATE_EXITING;
+                         data->activeProperties = config->properties;
+                         data->elapsedTime = 0;
++                        // The exit starts from the element's current look, not from where its last transition started.
++                        data->initialState = data->currentState;
+                         data->targetState = config->exit.setFinalState(data->targetState, config->properties);
+                     }
+ 
+@@ -5426,6 +5464,7 @@
+                                 transitionData->activeProperties = CLAY_TRANSITION_PROPERTY_NONE;
+                             } else if (transitionData->state == CLAY_TRANSITION_STATE_EXITING) {
+                                 Clay__TransitionDataInternalArray_RemoveSwapback(&context->transitionDatas, i);
++                                i--; // the swapped-in transition gets its turn this frame too
+                             }
+                         }
+                     }

@@ -90,7 +90,11 @@ subtest 'an error in prepare_layout leaves render after the layout pass' => sub 
 	my $list = Clay::UI::Test::List->new(id => 'failing', on_prepare => sub { die "broken\n" });
 	my $ui   = ui_with($list);
 	$list->request_prepare;
+	my $other = Clay::UI::Test::List->new(id => 'other');
+	$ui->root->add_child($other);
+	$other->request_prepare;
 	like( dies { $ui->render }, qr/\Abroken/, 'render dies with the error' );
+	is( [ $other->prepared, $other->is_prepare_pending ], [ 1, 0 ], 'the other widget of the round was still prepared' );
 	ok( lives { $ui->render }, 'the next render works' );
 };
 

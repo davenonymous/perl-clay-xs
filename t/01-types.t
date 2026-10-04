@@ -61,8 +61,13 @@ subtest 'helpers validate their arguments' => sub {
     like( dies { border_all(1.5) },    qr/border_all: width: expected an integer/, 'fractional border' );
     like( dies { border_outside('x') }, qr/border_outside: width: expected an integer/, 'non-numeric border' );
     like( dies { sizing_fixed('abc') }, qr/sizing_fixed: size: expected a finite number/, 'non-numeric size' );
-    like( dies { corner_radius_all(9**9**9) }, qr/corner_radius_all: radius: expected a finite number/,
+    like( dies { corner_radius_all(9**9**9) }, qr/corner_radius_all: radius: expected a number >= 0/,
         'infinite radius' );
+    like( dies { corner_radius_all(-1) }, qr/corner_radius_all: radius: expected a number >= 0, got '-1'/,
+        'negative radius' );
+    like( dies { sizing_percent(1.5) }, qr/sizing_percent: percent: expected a number in 0\.\.1, got '1.5'/,
+        'percent above 1' );
+    like( dies { sizing_percent(-0.5) }, qr/sizing_percent: percent: expected a number in 0\.\.1/, 'negative percent' );
     like( dies { sizing_fit(0, -9**9**9) }, qr/sizing_fit: max: expected a finite number or \+Inf/,
         '-Inf max' );
 

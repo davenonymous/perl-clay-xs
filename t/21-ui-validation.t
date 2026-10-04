@@ -105,11 +105,11 @@ my @invalid = (
 	[ 'Clay::UI::Test::Box',  background_color => 'red',                       qr/'background_color' expected a hash or array reference, got 'red'/ ],
 	[ 'Clay::UI::Test::Box',  background_color => [1, 2, 3],                   qr/'background_color' expected an array of 4 numbers, got an array of 3 elements/ ],
 	[ 'Clay::UI::Test::Box',  background_color => { red => 1 },                qr/'background_color' has unknown key 'red' \(known keys: r, g, b, a\)/ ],
-	[ 'Clay::UI::Test::Box',  border_color     => [1, 2, 'x', 4],              qr/'border_color\.b' expected a finite number, got 'x'/ ],
+	[ 'Clay::UI::Test::Box',  border_color     => [1, 2, 'x', 4],              qr/'border_color\.b' expected a number in 0\.\.255, got 'x'/ ],
 	[ 'Clay::UI::Test::Box',  border_width     => { lft => 1 },                qr/'border_width' has unknown key 'lft'/ ],
 	[ 'Clay::UI::Test::Box',  border_width     => -1,                          qr/'border_width' expected an integer in 0\.\.65535, got '-1'/ ],
-	[ 'Clay::UI::Test::Box',  corner_radius    => 'round',                     qr/'corner_radius' expected a finite number, got 'round'/ ],
-	[ 'Clay::UI::Test::Box',  layout           => [],                          qr/'layout' expected a hash reference, got a ARRAY reference/ ],
+	[ 'Clay::UI::Test::Box',  corner_radius    => 'round',                     qr/'corner_radius' expected a number >= 0, got 'round'/ ],
+	[ 'Clay::UI::Test::Box',  layout           => [],                          qr/'layout' expected a hash reference, got an ARRAY reference/ ],
 	[ 'Clay::UI::Test::Box',  layout           => { padding => 8 },            qr/'layout\.padding' expected a hash reference, got '8' \(padding_all\(N\) builds one\)/ ],
 	[ 'Clay::UI::Test::Box',  layout           => { padding => { left => -5 } }, qr/'layout\.padding\.left' expected an integer in 0\.\.65535, got '-5'/ ],
 	[ 'Clay::UI::Test::Box',  layout           => { child_gap => 70000 },      qr/'layout\.child_gap' expected an integer in 0\.\.65535, got '70000'/ ],
@@ -123,7 +123,7 @@ my @invalid = (
 	[ 'Clay::UI::Test::Box',  id               => '',                          qr/'id' must be a non-empty string/ ],
 	[ 'Clay::UI::Test::Box',  id               => 'anon:0:/0',                 qr/'id' must not start with 'anon:'/ ],
 	[ 'ScrollPanel',          child_offset     => 5,                           qr/'child_offset' expected a hash or array reference, got '5'/ ],
-	[ 'ScrollPanel',          vertical         => [],                          qr/'vertical' expected a plain boolean value, got a ARRAY reference/ ],
+	[ 'ScrollPanel',          vertical         => [],                          qr/'vertical' expected a plain boolean value, got an ARRAY reference/ ],
 	[ 'Clay::UI::Test::Text', text             => undef,                       qr/'text' must be a defined string/ ],
 	[ 'Clay::UI::Test::Text', font_size        => 'big',                       qr/'font_size' expected an integer in 0\.\.65535, got 'big'/ ],
 	[ 'Clay::UI::Test::Text', font_size        => 70000,                       qr/'font_size' expected an integer in 0\.\.65535, got '70000'/ ],
@@ -171,6 +171,14 @@ subtest 'hover roles cannot be composed onto a text node' => sub {
 	};
 	ok( $ok, 'the class compiles' ) or diag $@;
 	like( dies { HoverText->new }, qr/wrap the text in an Element/, 'constructing it dies' );
+};
+
+subtest 'errors point at the caller' => sub {
+	my $box = Clay::UI::Test::Box->new;
+	like( dies { $box->background_color([300, 0, 0, 255]) }, qr/^Clay::UI: 'background_color\.r' expected a number in 0\.\.255, got '300' at \Q$0\E line \d+\.\n\z/,
+		'a validation error names this file' );
+	like( dies { $box->add_child('nope') }, qr/^Clay::UI: child is not a widget \(got non-ref\) at \Q$0\E line \d+\.\n\z/,
+		'so does a structural error' );
 };
 
 done_testing;

@@ -76,11 +76,16 @@ static void append_label(pTHX_ AV *path, const marshal_label *label)
     av_push(path, newSVpv(label->name, 0));
 }
 
-/* "undef", "a HASH reference" or "'value'": how a croak shows a value. */
+/* "undef", "a HASH reference", "an ARRAY reference" or "'value'": how a
+ * croak shows a value. */
 static SV *describe_value(pTHX_ SV *sv)
 {
     if (!SvOK(sv)) return newSVpvs("undef");
-    if (SvROK(sv)) return newSVpvf("a %s reference", sv_reftype(SvRV(sv), 0));
+    if (SvROK(sv)) {
+        const char *type = sv_reftype(SvRV(sv), 0);
+        const char *article = strchr("AEIOU", type[0]) && type[0] ? "an" : "a";
+        return newSVpvf("%s %s reference", article, type);
+    }
     return newSVpvf("'%" SVf "'", SVfARG(sv));
 }
 
@@ -231,6 +236,19 @@ double clay_perl_parse_float(pTHX_ SV *sv, const char *what)
     return value;
 }
 
+double clay_perl_parse_float_in(pTHX_ SV *sv, const char *what, double min, double max)
+{
+    SvGETMAGIC(sv);
+    float value;
+    if (read_finite(aTHX_ sv, &value) && value >= min && value <= max) return value;
+    if (max >= FLT_MAX) {
+        SV *expected = sv_2mortal(newSVpvf("a number >= %g", min));
+        croak_bad_argument(aTHX_ what, SvPV_nolen(expected), sv);
+    }
+    SV *expected = sv_2mortal(newSVpvf("a number in %g..%g", min, max));
+    croak_bad_argument(aTHX_ what, SvPV_nolen(expected), sv);
+}
+
 double clay_perl_parse_max_float(pTHX_ SV *sv, const char *what)
 {
     SvGETMAGIC(sv);
@@ -306,6 +324,17 @@ static float field_float(pTHX_ SV *sv, const marshal_label *what, const char *fi
     float value;
     if (!read_finite(aTHX_ sv, &value)) croak_bad_value(aTHX_ what, field, "a finite number", sv);
     return value;
+}
+
+/* A finite number in min..max; a max of FLT_MAX means "no upper bound". */
+static float field_float_in(pTHX_ SV *sv, const marshal_label *what, const char *field, NV min, NV max)
+{
+    float value;
+    if (read_finite(aTHX_ sv, &value) && value >= min && value <= max) return value;
+    SV *expected = max >= FLT_MAX
+        ? newSVpvf("a number >= %g", (double) min)
+        : newSVpvf("a number in %g..%g", (double) min, (double) max);
+    croak_struct_error(aTHX_ what, field, expected, describe_value(aTHX_ sv), NULL);
 }
 
 static float field_maximum(pTHX_ SV *sv, const marshal_label *what, const char *field)
@@ -400,6 +429,7 @@ SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length)
 
 typedef enum {
     FIELD_FLOAT,
+    FIELD_FLOAT_IN,     /* a float within min..max */
     FIELD_INTEGER,
     FIELD_BOOL,
     FIELD_POINTER,
@@ -445,6 +475,9 @@ struct struct_schema {
 
 #define F_FLOAT(type, member) \
     { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT, 0, 0, NULL, NULL }
+#define F_FLOAT_IN(type, member, lo, hi) \
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT_IN, (lo), (hi), NULL, NULL }
+#define F_NON_NEGATIVE(type, member) F_FLOAT_IN(type, member, 0, FLT_MAX)
 #define F_INT(type, member, lo, hi) \
     { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_INTEGER, (lo), (hi), NULL, NULL }
 #define F_U16(type, member)       F_INT(type, member, 0, UINT16_MAX)
@@ -494,6 +527,15 @@ static void store_integer(pTHX_ const schema_field *field, void *slot, NV value)
     croak("marshal.c: field '%s' has unsupported integer size %d", field->name, (int) field->size);
 }
 
+/* A FIELD_FLOAT or FIELD_FLOAT_IN value; name is NULL when the whole
+ * struct was given as one number. */
+static float read_float_field(pTHX_ const schema_field *field, SV *sv, const marshal_label *what, const char *name)
+{
+    return field->kind == FIELD_FLOAT_IN
+        ? field_float_in(aTHX_ sv, what, name, field->min, field->max)
+        : field_float(aTHX_ sv, what, name);
+}
+
 /* Reads a defined value (get-magic has run) into the field's member. */
 static void read_field(pTHX_ const schema_field *field, SV *sv, char *base,
                        const marshal_label *what, bool strict)
@@ -501,7 +543,8 @@ static void read_field(pTHX_ const schema_field *field, SV *sv, char *base,
     void *slot = base + field->offset;
     switch (field->kind) {
     case FIELD_FLOAT:
-        *(float *) slot = field_float(aTHX_ sv, what, field->name);
+    case FIELD_FLOAT_IN:
+        *(float *) slot = read_float_field(aTHX_ field, sv, what, field->name);
         return;
     case FIELD_INTEGER:
         store_integer(aTHX_ field, slot, field_integer(aTHX_ sv, what, field->name, field->min, field->max));
@@ -599,10 +642,10 @@ static void read_positional(pTHX_ const struct_schema *schema, AV *av, void *out
     }
 }
 
-/* One number for every field. */
+/* One number for every field, within the range of the first one. */
 static void read_number(pTHX_ const struct_schema *schema, SV *sv, void *out, const marshal_label *what)
 {
-    float value = field_float(aTHX_ sv, what, NULL);
+    float value = read_float_field(aTHX_ &schema->fields[0], sv, what, NULL);
     for (size_t i = 0; i < schema->field_count; i++) {
         *(float *) ((char *) out + schema->fields[i].offset) = value;
     }
@@ -686,11 +729,16 @@ static void read_has_set_final(pTHX_ SV *sv, void *slot, const marshal_label *wh
         = clay_perl_transition_set_final_trampoline;
 }
 
-/* The handler is always installed: Clay requires one to run the
- * transition at all. */
+/* Clay runs an element's transitions only while it has a C handler. The
+ * trampoline goes in when the current context has a Perl handler
+ * (Clay_SetTransitionHandlers); without one the element changes at once,
+ * as in C with a NULL handler, instead of lagging a frame behind the
+ * trampoline's "complete" answer. */
 static void finish_transition_config(void *out)
 {
-    ((Clay_TransitionElementConfig *) out)->handler = clay_perl_transition_handler_trampoline;
+    const clay_perl_context *ctx = clay_perl_current_ctx;
+    bool has_handler = ctx && ctx->callbacks[CLAY_PERL_DISPATCH_TRANSITION_HANDLER].code;
+    ((Clay_TransitionElementConfig *) out)->handler = has_handler ? clay_perl_transition_handler_trampoline : NULL;
 }
 
 /* ===========================================================================
@@ -698,7 +746,8 @@ static void finish_transition_config(void *out)
  * ======================================================================== */
 
 static const schema_field color_fields[] = {
-    F_FLOAT(Clay_Color, r), F_FLOAT(Clay_Color, g), F_FLOAT(Clay_Color, b), F_FLOAT(Clay_Color, a),
+    F_FLOAT_IN(Clay_Color, r, 0, 255), F_FLOAT_IN(Clay_Color, g, 0, 255),
+    F_FLOAT_IN(Clay_Color, b, 0, 255), F_FLOAT_IN(Clay_Color, a, 0, 255),
 };
 static const struct_schema color_schema =
     SCHEMA("Clay_Color", Clay_Color, color_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL);
@@ -725,8 +774,8 @@ static const struct_schema bounding_box_schema =
 /* Also accepts a number (applied to all four corners), like the C
  * CLAY_CORNER_RADIUS(r) macro. */
 static const schema_field corner_radius_fields[] = {
-    F_FLOAT(Clay_CornerRadius, topLeft),    F_FLOAT(Clay_CornerRadius, topRight),
-    F_FLOAT(Clay_CornerRadius, bottomLeft), F_FLOAT(Clay_CornerRadius, bottomRight),
+    F_NON_NEGATIVE(Clay_CornerRadius, topLeft),    F_NON_NEGATIVE(Clay_CornerRadius, topRight),
+    F_NON_NEGATIVE(Clay_CornerRadius, bottomLeft), F_NON_NEGATIVE(Clay_CornerRadius, bottomRight),
 };
 static const struct_schema corner_radius_schema =
     SCHEMA("Clay_CornerRadius", Clay_CornerRadius, corner_radius_fields, SHAPE_HASH | SHAPE_NUMBER, NULL, NULL, NULL);
@@ -762,7 +811,7 @@ static const schema_field sizing_axis_fields[] = {
     { "min",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL },
     { "max",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL },
     F_ENUM(Clay_SizingAxis, type, CLAY__SIZING_TYPE_FIXED),
-    { "percent", 0, 0, FIELD_FLOAT, 0, 0, NULL, NULL },
+    { "percent", 0, 0, FIELD_FLOAT_IN, 0, 1, NULL, NULL },
 };
 
 static const char sizing_axis_hint[] = "sizing_fit, sizing_grow, sizing_fixed or sizing_percent build one";
@@ -780,7 +829,7 @@ static void read_sizing_axis(pTHX_ HV *hv, void *out, const marshal_label *what,
     if (axis->type == CLAY__SIZING_TYPE_PERCENT) {
         if (strict) reject_unknown_keys(aTHX_ hv, sizing_axis_fields + 2, 2, what, sizing_axis_hint);
         SV *percent = fetch_defined(aTHX_ hv, "percent");
-        axis->size.percent = percent ? field_float(aTHX_ percent, what, "percent") : 0.0f;
+        axis->size.percent = percent ? field_float_in(aTHX_ percent, what, "percent", 0, 1) : 0.0f;
         return;
     }
     if (strict) reject_unknown_keys(aTHX_ hv, sizing_axis_fields, 3, what, sizing_axis_hint);

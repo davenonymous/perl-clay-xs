@@ -174,7 +174,7 @@ sub focused_id () {
 }
 
 sub child_names ($parent) {
-	return join ', ', map { $_->can('id') ? $_->id : '"' . $_->text . '"' } @{ $parent->children };
+	return join ', ', map { $_->id // '"' . $_->text . '"' } @{ $parent->children };
 }
 
 sub first_line_of_error ($code) {
@@ -267,14 +267,13 @@ printf "  add_state('hovered'): %s\n", first_line_of_error(sub { $task{3}->add_s
 # ---- 4. Finding and removing children ----
 #
 # get_children_with and remove_children_with call a predicate for every
-# direct child, text widgets included. Text widgets have no id method, so
-# a predicate that asks for ids must check first.
+# direct child, text widgets included. A text widget's id is undef, so a
+# predicate that asks for ids defaults it.
 
 heading('4. Finding and removing children');
 say '  children of list: ', child_names($list);
-printf "  predicate without a guard: %s\n", first_line_of_error(sub { $list->get_children_with(sub { $_->id =~ /^task-/ }) });
-my @tasks = $list->get_children_with(sub { $_->can('id') && $_->id =~ /^task-/ });
-printf "  with \$_->can('id') first: %d tasks\n", scalar @tasks;
+my @tasks = $list->get_children_with(sub { ($_->id // '') =~ /^task-/ });
+printf "  tasks by id: %d\n", scalar @tasks;
 my @done = $list->get_children_with(sub { $_->can('has_state') && $_->has_state('done') });
 printf "  done: %s\n", join ', ', map { $_->id } @done;
 $list->remove_children_with(sub { $_->can('has_state') && $_->has_state('done') });

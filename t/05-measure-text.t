@@ -126,4 +126,29 @@ close $child;
 like( $fresh, qr/text measured but no measure_text function is installed for this context/,
     'a fresh process without a measurer croaks' );
 
+# CLAY_TEXT_WRAP_NONE never breaks a line, lineHeight boxes stack from the
+# top (patches/0004-clay-upstream-fixes.patch).
+Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
+    return { width => 5 * length($text), height => $config->{fontSize} };
+});
+
+subtest 'CLAY_TEXT_WRAP_NONE keeps newlines on one line' => sub {
+    my $cmd = text_frame("hi\nworld foo bar", { fontSize => 10, wrapMode => CLAY_TEXT_WRAP_NONE });
+    is( $cmd->{renderData}{stringContents}, "hi\nworld foo bar", 'one TEXT command with the whole text' );
+    is( $cmd->{boundingBox}{width}, 80, 'measured as one string' );
+    is( text_frame("hi\nworld foo bar", { fontSize => 10, wrapMode => CLAY_TEXT_WRAP_NEWLINES })->{renderData}{stringContents}, 'hi',
+        'NEWLINES still breaks there' );
+};
+
+subtest 'lineHeight boxes stay inside the element' => sub {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("root") );
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(200), height => sizing_fit() } } });
+        Clay__OpenTextElement("one\ntwo", { fontSize => 10, lineHeight => 30, wrapMode => CLAY_TEXT_WRAP_NEWLINES });
+    Clay__CloseElement();
+    my @lines = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ Clay_EndLayout(0) };
+    is( Clay_GetElementData( Clay_GetElementId("root") )->{boundingBox}{height}, 60, 'two lines of 30' );
+    is( [ map { [ $_->{boundingBox}{y}, $_->{boundingBox}{height} ] } @lines ], [ [0, 30], [30, 30] ], 'boxes at 0 and 30, each 30 tall' );
+};
+
 done_testing;

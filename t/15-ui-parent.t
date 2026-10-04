@@ -49,6 +49,8 @@ subtest 'TextNode children are parent-stamped too' => sub {
 	$box->add_child($text);
 	same($text->parent, $box, 'text node parent set');
 	same($text->root,   $box, 'text node root resolves');
+	is( $text->id, undef, 'a text node answers id with undef' );
+	is( [ $box->get_children_with(sub { ($_->id // '') eq 'none' }) ], [], 'so predicates may read it unguarded' );
 };
 
 # -----------------------------------------------------------------------------

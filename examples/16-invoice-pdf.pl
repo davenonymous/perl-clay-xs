@@ -846,9 +846,9 @@ sub bottom_of ($box) {
 #   1. The column pass finds the column widths. The numeric columns fit
 #      their widest cell (the totals share the columns, so their labels
 #      count too); the description column gets what is left of the table
-#      width. (A wrapping column cannot simply be sizing_grow here: a
-#      grid's column groups never shrink a cell below its unwrapped text
-#      width, so the table would run off the page.)
+#      width. (A sizing_grow description column would wrap too, but the
+#      pagination below needs the widths as numbers, so they are measured
+#      once and fixed.)
 #   2. The row pass lays the same page out again with those widths fixed
 #      (sizing_fixed) and reads every row's height. The real pages use
 #      the same fixed widths, so each row wraps exactly as it was

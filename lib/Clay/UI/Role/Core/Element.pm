@@ -16,6 +16,7 @@ use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasSizingGroup;
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -46,16 +47,16 @@ sub _validate_attachment ($anchor, @kids) {
 	my %ancestor = map { refaddr($_) => 1 } _self_and_ancestors($anchor);
 	my %seen;
 	for my $kid (@kids) {
-		die "Clay::UI: child is not a widget (got " . (ref($kid) || 'non-ref') . ")"
+		croak_ui "Clay::UI: child is not a widget (got " . (ref($kid) || 'non-ref') . ")"
 			unless _is_widget($kid);
 		my $addr = refaddr($kid);
-		die "Clay::UI: the same widget (" . ref($kid) . ") is attached twice in one call"
+		croak_ui "Clay::UI: the same widget (" . ref($kid) . ") is attached twice in one call"
 			if $seen{$addr}++;
-		die "Clay::UI: cannot attach a widget to itself or to one of its descendants (" . ref($kid) . ")"
+		croak_ui "Clay::UI: cannot attach a widget to itself or to one of its descendants (" . ref($kid) . ")"
 			if $ancestor{$addr};
-		die "Clay::UI: widget " . ref($kid) . " is the root of a Clay::UI and cannot become a child"
+		croak_ui "Clay::UI: widget " . ref($kid) . " is the root of a Clay::UI and cannot become a child"
 			if defined $kid->_local_ui_controller;
-		die "Clay::UI: widget " . ref($kid) . " is still attached to a parent; remove it first"
+		croak_ui "Clay::UI: widget " . ref($kid) . " is still attached to a parent; remove it first"
 			if defined $kid->parent;
 	}
 	return;
@@ -115,6 +116,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	# a popup) that children and the Container mutators never show or
 	# touch. They are validated and parent-stamped like children.
 	method add_internal_children (@kids) {
+		return $self unless @kids;
 		_validate_attachment($self, @kids);
 		push @_internal_children, @kids;
 		$_->_set_parent($self) for @kids;
@@ -166,11 +168,12 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	}
 
 	method _splice_children ($offset, $length, @kids) {
-		die "Clay::UI: child offset $offset out of range 0.." . scalar(@_children)
+		croak_ui "Clay::UI: child offset $offset out of range 0.." . scalar(@_children)
 			unless $offset >= 0 && $offset <= @_children;
-		die "Clay::UI: cannot remove $length children at offset $offset of " . scalar(@_children)
+		croak_ui "Clay::UI: cannot remove $length children at offset $offset of " . scalar(@_children)
 			unless $length >= 0 && $offset + $length <= @_children;
 		_validate_attachment($self, @kids);
+		return () if !@kids && !$length;    # nothing changes, so no revision bump
 
 		my @removed = splice @_children, $offset, $length, @kids;
 		$_->_set_parent($self) for @kids;
@@ -184,7 +187,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	# index exactly once.
 	method _reorder_children ($order) {
 		my $count = scalar @_children;
-		die "Clay::UI: a new child order must be an array reference of the indices 0.." . ($count - 1) . " in any order"
+		croak_ui "Clay::UI: a new child order must be an array reference of the indices 0.." . ($count - 1) . " in any order"
 			unless _is_permutation($order, $count);
 		@_children = @_children[@$order];
 		bump_revision();
@@ -375,15 +378,14 @@ L</add_internal_children>) are not included.
 
 =head2 get_children_with
 
-	my @foos = $root->get_children_with(sub { $_->can('id') && ($_->id // '') =~ /^foo_/ });
+	my @foos = $root->get_children_with(sub { ($_->id // '') =~ /^foo_/ });
 	my @bars = $root->get_children_with(sub ($child) { $child->isa('My::Bar') });
 
 Returns the direct children for which C<< $predicate->($child) >> is
 true, as a list (in scalar context: how many). C<$_> is set to the
 child as well, so both calling styles work. Does not look at
-grandchildren or internal children. Text widgets have no C<id> method;
-a predicate that calls C<< $_->id >> must skip them or guard the call,
-as C<< $_->can('id') >> does in the first example.
+grandchildren or internal children. Text widgets are passed too; their
+C<id> is undef.
 
 =head2 internal_children
 

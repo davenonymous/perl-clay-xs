@@ -7,6 +7,7 @@ no warnings 'experimental::signatures';
 
 use Scalar::Util qw(blessed reftype);
 use Exporter 'import';
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION   = '0.01';
 our @EXPORT_OK = qw(camelize_keys camelize_string snake_string);
@@ -54,10 +55,10 @@ sub camelize_keys ($node) {
 		for my $key (keys %$node) {
 			my $new_key = $camelized{$key} // camelize_string($key);
 			if ($new_key ne $key && exists $node->{$new_key}) {
-				die "Clay::UI: key '$key' camelizes to '$new_key', which is already present in the same hash";
+				croak_ui "Clay::UI: key '$key' camelizes to '$new_key', which is already present in the same hash";
 			}
 			if (exists $out{$new_key}) {
-				die "Clay::UI: key '$key' collides with another key that camelized to '$new_key'";
+				croak_ui "Clay::UI: key '$key' collides with another key that camelized to '$new_key'";
 			}
 			my $value = $node->{$key};
 			$out{$new_key} = ref $value ? camelize_keys($value) : $value;

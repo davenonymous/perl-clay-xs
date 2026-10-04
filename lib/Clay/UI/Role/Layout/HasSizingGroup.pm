@@ -159,12 +159,14 @@ reported as the Clay error C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE>.
 
 =item *
 
-Text inside a member does not wrap. Every member keeps at least the
-largest I<unwrapped> width of the group, so Clay cannot make it
-narrower to wrap its text, and a group with long text can become wider
-than its parent. Give such members a maximum (C<sizing_fit(0, 200)>,
-C<sizing_grow(0, 200)>) or a fixed width; text then wraps within that
-width.
+Members share the group's largest I<minimum> as well (for text, its
+longest word), so a parent that is too small compresses them like any
+other children, down to that minimum, and text inside them wraps.
+Members stay aligned as long as their parents compress alike (the rows
+of a grid do); members in differently sized parents may end up with
+different widths. Give members a maximum (C<sizing_fit(0, 200)>,
+C<sizing_grow(0, 200)>) or a fixed width to wrap text at a chosen
+width instead.
 
 =back
 

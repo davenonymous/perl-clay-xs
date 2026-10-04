@@ -301,8 +301,8 @@ $ui->render(%drag) for 1 .. 2;
 show_scroll();
 
 # Clay shrinks the momentum by 5% per frame (not per second) and drops it
-# below 0.1 units. A scroll_to while it is still running would be carried
-# on by it, so the script lets it run out first.
+# below 0.1 units. The script lets it run out to show how long a glide
+# lasts; a scroll_to would stop it at once.
 step('6. Let the momentum run out');
 my $frames = 0;
 $log_scrolls = 0;

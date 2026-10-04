@@ -12,13 +12,14 @@ use Clay::UI::Enum::Bubble;
 use Clay::UI::Enum::Result;
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
 role Clay::UI::Role::Events::Emitter :does(Clay::UI::Role::Layout::HasParent)
                                      :does(Clay::UI::Role::Events::Listener) {
 	method fire_event ($event) {
-		die "Clay::UI::Role::Events::Emitter: fire_event needs a Clay::UI::Events::Event instance"
+		croak_ui "Clay::UI::Role::Events::Emitter: fire_event needs a Clay::UI::Events::Event instance"
 			unless blessed($event) && $event->isa('Clay::UI::Events::Event');
 
 		$event->_set_target($self);  # dies on re-fire

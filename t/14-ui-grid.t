@@ -698,4 +698,29 @@ subtest 'a Grid consumer can define DESTROY' => sub {
 	is( \@log, ['consumer DESTROY ran'], 'the consumer DESTROY runs' );
 };
 
+# -----------------------------------------------------------------------------
+# Sizing groups share the largest minimum, not the largest size, so a column
+# of wrapping text compresses and wraps instead of widening the grid.
+# -----------------------------------------------------------------------------
+
+subtest 'a column with wrapping text shrinks to fit the grid' => sub {
+	@errors = ();
+	my $grid = Clay::UI::Test::Grid->new(id => 'grid', cell_gap => 0, row_gap => 0, layout => { sizing => { width => sizing_grow() } });
+	my $cell = Clay::UI::Grid::Cell->new(layout => { sizing => { width => sizing_grow(), height => sizing_fit() } });
+	$cell->add_child(Clay::UI::Test::Text->new(text => join(' ', ('word') x 40), wrap_mode => CLAY_TEXT_WRAP_WORDS));
+	$grid->append_row([ $cell, text_cell('1,234.00') ]);
+	$grid->append_row([ text_cell('Description'), text_cell('Amount') ]);
+	my $box = Clay::UI::Test::Box->new(id => 'box', layout => { sizing => { width => sizing_fixed(300), height => sizing_fit() } });
+	$box->add_child($grid);
+	my $ui = make_ui($box);
+	$ui->render;
+	is( $ui->bounding_box($grid)->{width}, 300, 'the grid stays as wide as its parent' );
+	my $text_column = $ui->bounding_box($cell);
+	is( $text_column->{width}, within(300 - 8 * $GLYPH_W, 0.1), 'the text column takes what the amount column leaves' );
+	ok( $text_column->{height} > $LINE_H, "the text wrapped onto several lines ($text_column->{height})" );
+	my @amounts = map { $_->[1] } @{ $grid->cell_wrappers };
+	is( [ map { $ui->bounding_box($_)->{x} } @amounts ], [ ($text_column->{width}) x 2 ], 'both rows keep the amount column aligned' );
+	is( \@errors, [], 'no layout errors' );
+};
+
 done_testing;

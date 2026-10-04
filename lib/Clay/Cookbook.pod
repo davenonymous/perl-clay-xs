@@ -241,9 +241,9 @@ parent whose width is FIT grows with the text instead, so limit it:
     );
 
 Each line becomes a separate C<TEXT> render command. Use
-C<CLAY_TEXT_WRAP_NEWLINES> (or C<CLAY_TEXT_WRAP_NONE>, which behaves
-the same in Clay 0.14) to break only at C<"\n">. To keep text on one
-line, remove the newlines from the string.
+C<CLAY_TEXT_WRAP_NEWLINES> to break only at C<"\n">, and
+C<CLAY_TEXT_WRAP_NONE> to keep the text on one line whatever it
+contains.
 
 =head2 Shrink a headline until it fits
 
@@ -431,8 +431,7 @@ Clay::UI stores a reference in each command's C<userData>:
 
     for my $command (@$commands) {
     	my $widget = $ui->widget_for($command->{userData}) or next;
-    	# text widgets have no id
-    	my $name = $widget->can('id') ? $widget->id // '(no id)' : '(text)';
+    	my $name = $widget->id // '(no id)';   # text widgets have no id
     	say ref($widget), ' ', $name;
     }
 
@@ -685,9 +684,8 @@ Clay::UI has no keyboard events. Route keys yourself:
 
 Compose L<Clay::UI::Role::Interaction::Disableable>. A disabled widget
 cannot be pressed or focused; disabling a focused widget blurs it. A
-press over a disabled button goes to the nearest enabled Pressable under
-the pointer instead, for example a pressable card around it (see
-F<KNOWN-ISSUES.md>, issue 16):
+press over a disabled button is absorbed, as in HTML: a pressable card
+around it gets no C<OnPress> either.
 
     use Clay::UI::Role::Interaction::Disableable;
     class My::SafeButton :strict(params) :does(Clay::UI::Box)

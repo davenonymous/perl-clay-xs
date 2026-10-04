@@ -6,6 +6,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -13,9 +14,9 @@ role Clay::UI::Role::Events::Listener {
 	field %_handlers;
 
 	method on ($event_name, $handler) {
-		die "Clay::UI::Role::Events::Listener: event name must be a non-empty string"
+		croak_ui "Clay::UI::Role::Events::Listener: event name must be a non-empty string"
 			unless defined $event_name && length $event_name;
-		die "Clay::UI::Role::Events::Listener: handler must be a coderef"
+		croak_ui "Clay::UI::Role::Events::Listener: handler must be a coderef"
 			unless ref $handler eq 'CODE';
 		push @{ $_handlers{$event_name} }, $handler;
 		return $self;

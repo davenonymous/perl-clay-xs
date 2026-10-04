@@ -31,6 +31,15 @@ void clay_perl_clay_visit_exiting_buffers(clay_perl_buffer_visitor visit, void *
  * Clay_Initialize when no context is current. */
 void clay_perl_clay_default_counts(int32_t *element_count, int32_t *word_count);
 
+/* Sets the current context's pointer state to CLAY_POINTER_DATA_RELEASED.
+ * Clay zeroes it, and zero is CLAY_POINTER_DATA_PRESSED_THIS_FRAME. */
+void clay_perl_clay_release_pointer(void);
+
+/* Drops the drag-scroll momentum of the current context's scroll
+ * container with that element id (nothing happens for other ids), so a
+ * position written from outside stays put. */
+void clay_perl_clay_cancel_scroll_momentum(uint32_t element_id);
+
 /* Upper bound of the arena bytes Clay needs for the given counts, computed
  * in 64 bits. Clay's own size arithmetic is 32-bit and wraps silently, so
  * callers keep this bound below 4 GiB. */
