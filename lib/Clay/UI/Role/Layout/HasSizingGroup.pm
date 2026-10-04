@@ -80,89 +80,153 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Layout::HasSizingGroup - cross-tree sizing constraint mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasSizingGroup - give unrelated widgets a common width or height
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
-	use Clay::XS qw(sizing_fit);
+	use Clay::XS qw(padding_all CLAY_TOP_TO_BOTTOM);
+	use Clay::UI;
 	use Clay::UI::Box;
+	use Clay::UI::Text;
 
-	# Implicit: composed into Clay::UI::Role::Core::Element, so every widget
-	# already accepts width_group / height_group.
-	class My::Box :strict(params) :does(Clay::UI::Box) {}
+	class My::Box   :strict(params) :does(Clay::UI::Box) {}
+	class My::Label :strict(params) :does(Clay::UI::Text) {}
 
-	My::Box->new(
-		layout       => { sizing => { width => sizing_fit() } },
-		width_group  => 17,
-	);
+	# Form labels in different rows, all as wide as the widest one.
+	my $form = My::Box->new(id => 'form', layout => { layout_direction => CLAY_TOP_TO_BOTTOM });
+	for my $caption ('Name', 'E-mail address', 'Phone') {
+		my $row   = My::Box->new;
+		my $label = My::Box->new(width_group => 1, layout => { padding => padding_all(4) });
+		$label->add_child(My::Label->new(text => $caption));
+		$row->add_child($label, My::Label->new(text => '...'));
+		$form->add_child($row);
+	}
 
-	# Two unrelated widgets aligned to a common width.
-	my $a = My::Box->new( ..., width_group => 17 );
-	my $b = My::Box->new( ..., width_group => 17 );
+	my $ui = Clay::UI->new(width => 800, height => 600, root => $form);
+	my $commands = $ui->render;
 
 =head1 DESCRIPTION
 
-Mixin role composed automatically into every Clay::UI widget (via
-L<Clay::UI::Role::Core::Element>) that exposes two integer constraint-group
-ids. After Clay's per-axis fit-sizing pass, all elements sharing a
-non-zero group id on the same axis are equalized to the per-group max
-fit-size before grow distribution. The Clay-side machinery is provided
-by a vendored patch (C<patches/0001-clay-sizing-groups.patch>).
+C<Clay::UI::Role::Layout::HasSizingGroup> gives a widget the
+C<width_group> and C<height_group> attributes. Every element widget has
+them: L<Clay::UI::Role::Core::Element> composes this role.
 
-The high-level L<Clay::UI::Grid> widget assigns group ids automatically
-to its cells. Direct use of this role is for cross-tree alignment cases
-that don't fit a grid (form-label widths, equal-height button rows,
-etc.).
+Elements with the same non-zero C<width_group> get the same width,
+wherever they are in the tree: the width of the widest member. The same
+holds for C<height_group> and heights. Clay first sizes each element to
+its content, then raises every member of a group to the largest size in
+the group, before it hands out space to GROW elements. The width and
+height ids are separate: width group 1 and height group 1 have nothing
+to do with each other.
 
-=head1 FIELDS
+Typical uses are form labels of a common width and buttons of a common
+height in different containers. L<Clay::UI::Grid> sizes its columns and
+rows with sizing groups and assigns the ids itself; use this role
+directly for alignment a grid does not cover.
 
-=head2 width_group (default 0)
+Sizing groups are a feature of the C<clay.h> shipped with this
+distribution (a patch to upstream Clay); see
+L<Clay::XS::Structs/sizingGroup>.
 
-Width-axis group id: an integer in C<0 .. 2**20 - 1>; C<0> means "no
-group". Non-zero ids cause this element's fit-width to be equalized with
-every other element declaring the same C<width_group>. Larger ids are
-reserved for the ids L<Clay::UI::Grid> assigns; other values die.
-
-Read/write accessor: C<< $widget->width_group >> reads,
-C<< $widget->width_group($id) >> writes. Writing back the value just read
-is always allowed, even for a cell whose id Grid assigned (nothing
-changes). An id a Grid assigned is in effect while that Grid exists; a
-cell kept after its Grid is freed reads 0 there and is sized alone.
-
-=head2 height_group (default 0)
-
-Height-axis group id, mirror of C<width_group>.
-
-=head1 INTERACTION WITH OTHER SIZING TYPES
+=head2 How sizing types take part
 
 =over 4
 
 =item *
 
-C<FIT> and C<GROW> elements participate in group equalization. For
-C<GROW>, the equalized max becomes the effective floor before grow
-distribution runs.
+FIT and GROW members are equalized. For GROW members, the group size
+is computed from their content (FIT) size, before GROW space is shared
+out.
 
 =item *
 
-C<FIXED> and C<PERCENT> elements are ignored by equalization: their
-size is independent of content, so including them in the group max
-would be meaningless.
+FIXED and PERCENT members are ignored: their size does not depend on
+their content, so they neither raise the group size nor are raised.
 
 =item *
 
-A member never exceeds its own sizing C<max>
-(C<< sizing_fit(0, 50) >> stays at most 50 wide even if another member
-is wider).
+A member never exceeds its own maximum: with C<sizing_fit(0, 50)> it
+stays at most 50 wide even if another member is wider.
 
 =item *
 
-Groups may nest: a member can contain members of other groups (a grid
-inside a grid cell). Equalization repeats until the sizes settle.
-Cyclic nesting on one axis is reported as a Clay error
-(C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE>).
+Groups may nest: a member may contain members of other groups (a grid
+inside a grid cell). Clay repeats the equalization until the sizes
+settle. Groups that contain each other on the same axis are a cycle,
+reported as the Clay error C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE>.
+
+=item *
+
+Text inside a member does not wrap. Every member keeps at least the
+largest I<unwrapped> width of the group, so Clay cannot make it
+narrower to wrap its text, and a group with long text can become wider
+than its parent. Give such members a maximum (C<sizing_fit(0, 200)>,
+C<sizing_grow(0, 200)>) or a fixed width; text then wraps within that
+width.
 
 =back
+
+=head1 ATTRIBUTES
+
+=head2 width_group
+
+	my $group = $widget->width_group;    # 0: no group
+	$widget->width_group(17);
+
+The width group of the widget: an integer from 0 to 2**20 - 1
+(1048575). C<0>, the default, means no group. A constructor parameter
+and a read/write accessor; a write bumps the revision
+(L<Clay::UI::Revision>), takes effect at the next C<render> and returns
+the group in effect.
+
+Dies with
+C<Clay::UI: 'width_group' must be an integer in 0..1048575 (larger ids are reserved for Clay::UI::Grid)>
+for anything else.
+
+
+Ids above that range belong to L<Clay::UI::Grid>, which writes them on
+the cells it lays out (see L<Clay::UI::Grid/GROUP IDS>). On such a
+cell:
+
+=over 4
+
+=item *
+
+reading returns the grid's id; writing that same value back is allowed
+and changes nothing, writing another id above the range dies;
+
+=item *
+
+the grid's id is in effect while the grid (or a grid sharing its
+columns) exists; on a cell kept after every such grid is freed it reads
+C<0> and the cell is sized alone;
+
+=item *
+
+a cell removed from its grid drops the grid's ids (they become C<0>);
+an id you set yourself stays.
+
+=back
+
+=head2 height_group
+
+	$widget->height_group(3);
+
+The height group of the widget; the same rules as L</width_group>.
+
+=head1 METHODS
+
+=head2 contribute_sizing_group
+
+Adds the C<sizing_group> part (C<< { width => ..., height => ... } >>)
+to the widget's declaration while at least one of the two groups in
+effect is non-zero (see
+L<Clay::UI::Role::Core::Element/EXTENDING THE DECLARATION>).
+
+=head1 SEE ALSO
+
+L<Clay::UI::Grid>, L<Clay::XS::Structs/sizingGroup>, L<Clay::Manual>.
 
 =cut

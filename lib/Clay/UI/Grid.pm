@@ -489,304 +489,663 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Grid - auto-sized grid/table widget for Clay::UI
+Clay::UI::Grid - table widget role for Clay::UI with automatically sized columns and rows
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
+	use Clay::XS qw(CLAY_ALIGN_X_RIGHT);
+	use Clay::UI;
 	use Clay::UI::Grid;
+	use Clay::UI::Grid::Cell;
 	use Clay::UI::Text;
 
-	class My::Grid :strict(params) :does(Clay::UI::Grid) {}
-	class My::Text :strict(params) :does(Clay::UI::Text) {}
+	class My::Grid  :strict(params) :does(Clay::UI::Grid) {}
+	class My::Label :strict(params) :does(Clay::UI::Text) {}
 
-	my $grid = My::Grid->new(
-		id       => 'data',
-		cell_gap => 8,
-		row_gap  => 4,
-	);
+	sub label ($text) { return My::Label->new(text => $text) }
 
-	$grid->append_row([
-		My::Text->new(text => 'Name'),
-		My::Text->new(text => 'Email'),
-		My::Text->new(text => 'Role'),
-	]);
-	$grid->append_row([
-		My::Text->new(text => 'Alice'),
-		My::Text->new(text => 'alice@example.com'),
-		My::Text->new(text => 'Admin'),
-	]);
+	# A cell with its content aligned to the right, for numbers.
+	sub amount ($text) {
+		my $cell = Clay::UI::Grid::Cell->new(
+			layout => { child_alignment => { x => CLAY_ALIGN_X_RIGHT } },
+		);
+		$cell->add_child(label($text));
+		return $cell;
+	}
 
-	# A row that spans all columns, for example a group heading:
-	$grid->insert_spanning_row(1, My::Text->new(text => 'Administrators'));
+	my $grid = My::Grid->new(id => 'people', cell_gap => 8, row_gap => 4);
+	$grid->append_row([ label('Name'),  label('E-mail'),            label('Amount') ]);
+	$grid->append_row([ label('Alice'), label('alice@example.com'), amount('1234') ]);
+	$grid->append_spanning_row(label('Guests'));    # one cell across all columns
+	$grid->append_row([ label('Bob'),   label('bob@example.com'),   amount('7') ]);
 
-	# Mutate further:
-	$grid->set_cell(0, 2, My::Text->new(text => 'Title'));
-	$grid->reorder_rows([ 0, 2, 1 ]);
-	$grid->remove_row(1);
+	# Change it later; the next render shows the change.
+	$grid->set_cell(0, 2, label('Total'));
+	$grid->reorder_rows([ 0, 3, 2, 1 ]);
+	$grid->remove_row(2);
 
-	# A second grid whose columns line up with the first one, for example
-	# a scrolling body below a fixed header:
-	my $body = My::Grid->new(id => 'body', share_columns_with => $grid);
+	my $ui = Clay::UI->new(width => 800, height => 600, root => $grid);
+	my $commands = $ui->render;
 
 =head1 DESCRIPTION
 
-Builds a row-major grid where each column is sized to its widest cell
-and each row is sized to its tallest cell, all in a single layout pass.
-The auto-sizing is implemented via Clay's sizing-group feature (vendored
-patch C<patches/0001-clay-sizing-groups.patch>): the Grid assigns each
-cell a per-column C<width_group> and per-row C<height_group> so Clay's
-layout pass equalizes column widths and row heights across siblings
-that would otherwise be unaware of each other. Grids nest: a cell may
-hold another grid.
+C<Clay::UI::Grid> lays out widgets in rows and columns, like a table:
+every column is as wide as its widest cell and every row as tall as its
+tallest cell. You add rows of widgets; the grid works out the sizes in
+the same layout pass as the rest of the UI.
 
-The Grid composes L<Clay::UI::Role::Core::Element> (not
-L<Clay::UI::Role::Core::Container>): its children are its rows, and only
-the row methods below change them. Each row is a C<LEFT_TO_RIGHT>
-L<Clay::UI::Grid::Row>; the rows are stacked C<TOP_TO_BOTTOM>. Pass
-C<cell_gap> to control the horizontal gap between cells in a row; pass
-C<row_gap> for the vertical gap between rows.
+Like every widget in Clay::UI it is a role: compose it in a class of
+your own (as C<My::Grid> above) to get a widget you can construct. A
+grid can be the root of a L<Clay::UI> or a child of any container, and
+a cell may hold another grid.
 
-Every row is as wide as the grid (its width is C<sizing_grow>). In a
-grid that fits its content this changes nothing, because all rows are
-as wide as the widest one anyway; in a grid that is wider than its
-columns (a C<layout> with a C<sizing_grow> or C<sizing_fixed> width),
-cells whose own width is C<sizing_grow> share the space left over.
-Since every column starts from the same equalized width in every row,
-those columns stay aligned.
+This module is a guide as well as a reference. The sections up to
+L</CONSTRUCTOR PARAMETERS> explain how to build grids; the reference
+follows; L</GROUP IDS> at the end explains the ids the grid uses
+internally.
 
-The Grid also composes L<Clay::UI::Role::Layout::HasLayout>,
-L<Clay::UI::Role::Style::HasBackground>,
-L<Clay::UI::Role::Style::HasBorder> and
-L<Clay::UI::Role::Style::HasCornerRadius>. A C<layout> you pass is merged
-over the Grid's default outer layout key by key (shallow): for example
-C<< layout => { padding => padding_all(8) } >> keeps the rows stacked
-C<TOP_TO_BOTTOM> with C<row_gap> between them, while
-C<< layout => { child_gap => 10 } >> replaces C<row_gap>.
+=head2 How it works
 
-=head1 CONSTRUCTOR PARAMETERS
+A grid is a column of rows. Each row is a L<Clay::UI::Grid::Row>, a
+left-to-right container; the grid stacks the rows top to bottom. Each
+widget you pass becomes one cell of a row.
 
-=head2 cell_gap (default 0)
+Clay lays out every row on its own, so cells in different rows know
+nothing of each other. The grid connects them with sizing groups (see
+L<Clay::UI::Role::Layout::HasSizingGroup>): it gives every cell of a
+column the same C<width_group> and every cell of a row the same
+C<height_group>, and Clay raises all members of a group to the size of
+the largest one.
 
-Pixel gap between cells within a row. Forwarded to the row container's
-C<child_gap>. Read/write accessor: C<< $grid->cell_gap >> reads,
-C<< $grid->cell_gap($px) >> writes. Because the gap is baked into each
-row when the row is built, a write updates every existing row so the
-change is visible on the next C<render>.
+The grid's children are its rows. C<children> returns the
+L<Clay::UI::Grid::Row> objects; use L</cell_wrappers> to get at the
+cells. The grid composes L<Clay::UI::Role::Core::Element> but not
+L<Clay::UI::Role::Core::Container>: there is no C<add_child>, only the
+row methods below change it.
 
-=head2 row_gap (default 0)
+=head1 BUILDING A GRID
 
-Pixel gap between rows. Used as the outer container's C<child_gap>
-unless the Grid's C<layout> sets C<child_gap> itself.
-Read/write accessor: C<< $grid->row_gap >> reads,
-C<< $grid->row_gap($px) >> writes. It is re-read on every C<render>, so a
-write takes effect immediately.
+Create the grid empty, then add rows:
 
-=head2 share_columns_with (default undef)
-
-Another Grid (any widget composing C<Clay::UI::Grid>) whose columns this
-grid shares: column N of both grids is one column for Clay, as wide as
-the widest cell of column N in either grid. The grids may be anywhere
-in the tree, for example a header grid above a scroll container that
-holds the body grid, so the body scrolls while the header stays and the
-columns stay aligned. Any number of grids may share the columns of one
-grid; they all draw their group ids from the same id space (see
-L</ID NAMESPACING>), so their rows never share a height. The grids
-themselves get a common C<width_group> as well (unless one was given
-to them), so they are as wide as the widest of them: a grid whose rows
-all span the columns (see L</append_spanning_row>), or that has no
-rows, is still as wide as the columns of the others. Give the
-grids the same C<cell_gap>, or the columns drift apart by the
-difference. Anything but a Grid dies. The grid does not keep a
-reference to the other grid; the shared id space lives as long as any
-of the grids does.
-
-=head1 METHODS
-
-=head2 row_count
-
-The number of rows.
-
-=head2 cell_wrappers
-
-Returns a new C<[row][col]> array of the cells the Grid lays out (your
-cells composing L<Clay::UI::Role::Layout::GridCell>, such as
-L<Clay::UI::Grid::Cell>, or the unstyled Cells it wrapped other widgets
-in). A spanning row has one cell. Changing the returned arrays does not
-change the Grid.
-
-=head2 is_spanning_row ($index)
-
-True when the row at C<$index> spans all columns (see
-L</append_spanning_row>). Dies for an index out of range.
-
-=head1 STYLING CELLS
-
-Pass widgets composing L<Clay::UI::Role::Layout::GridCell> - instances
-of L<Clay::UI::Grid::Cell>, or of a cell class of your own - to
-L</append_row> / L</insert_row> / L</set_cell> to control each cell's
-appearance. The Grid recognises them and uses them as the per-cell
-wrapper, so their background / border / padding / corner radius render
-exactly at the equalized column-width x row-height. Their C<layout> is
-kept: a C<sizing_grow()> width makes the column take a share of the
-space left in a wide grid, a C<sizing_fit($min, $max)> width limits the
-column (text in it wraps).
-
-Any other widget (Text, Box, etc.) is wrapped in an unstyled Cell
-automatically; the wrapper still gets the sizing-group ids, but has no
-visible styling. Use this when you only care about layout, not
-appearance.
-
-=head1 MUTATION
-
-A Grid is constructed empty and populated via the mutators below. All
-mutators preserve column/row equalization: cells in the same column
-continue to share a C<width_group>, cells in the same row a
-C<height_group>. Each mutator validates all of its input (see
-L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>) and allocates its
-ids before it changes anything, so a call that dies on invalid input
-leaves the Grid as it was. The one exception is an C<OnBlur> listener
-that dies when a removed cell held the focus: the change is complete
-(the cell is detached and blurred) and the call then dies with the
-listener's error.
-
-Row indices count from 0; an index out of range dies.
-
-=head2 set_cell ($row, $col, $widget)
-
-Replace the cell at C<($row, $col)>. Wrap-or-use rule: a widget
-composing L<Clay::UI::Role::Layout::GridCell> is used directly,
-anything else is wrapped unstyled. C<$col> may equal the current row
-length to extend the row; C<$row> must reference an existing row that
-does not span the columns. The replaced cell is detached.
-
-=head2 append_row (\@cells)
-
-Add a new row at the bottom. Allocates one C<height_group> (reusing one
-released by C<remove_row> when available); widens the column-id cache if
-the new row is longer than any previous row.
-
-=head2 insert_row ($index, \@cells)
-
-Insert a new row at C<$index> (C<0..row_count> inclusive at the upper
-end). Same id-allocation as C<append_row>.
-
-=head2 append_spanning_row ($widget)
-
-Add a row at the bottom that holds one cell as wide as the whole grid,
-for example a heading for the rows below it. The cell belongs to no
-column: it does not widen any column, and the columns do not size it.
-Anything that is not a cell (see L</STYLING CELLS>) is wrapped in an
-unstyled cell with a C<sizing_percent(1)> width: it is as wide as the
-grid, and Clay does not count it when it fits the grid to its rows, so
-a long heading wraps instead of widening the grid. A widget composing
-L<Clay::UI::Role::Layout::GridCell> is used as the cell as it is; give
-it a C<sizing_percent(1)> width for the same effect (a
-C<sizing_grow()> width fills the row too, but its content widens a grid
-that fits its rows). A spanning row is sized to its own content height
-and gets a C<height_group> like any row.
-
-=head2 insert_spanning_row ($index, $widget)
-
-Insert a spanning row at C<$index> (C<0..row_count>).
-
-=head2 remove_row ($index)
-
-Remove the row at C<$index> and detach it. Its C<height_group> id goes
-back to the free list for the next new row.
-
-=head2 clear_rows
-
-Remove all rows, as C<remove_row> would one by one.
-
-=head2 replace_row ($index, \@cells)
-
-Replace the cells of the row at C<$index>, keeping the row's
-C<height_group> id. Widens the column-id cache if the new row is longer.
-A spanning row becomes a normal row. The replaced cells are detached.
-
-=head2 replace_spanning_row ($index, $widget)
-
-Replace the row at C<$index> with a spanning row holding C<$widget>,
-keeping the row's C<height_group> id. The replaced cells are detached.
-
-=head2 reorder_rows (\@order)
-
-Put the rows in a new order: row C<$k> becomes the row that was at
-C<< $order->[$k] >>. C<\@order> must hold every row index exactly once;
-anything else dies and changes nothing. No row is detached, so the
-cells keep their parents and the focus and hover stay where they were,
-which is what sorting a table needs. Returns the grid.
-
-=head2 Reusing widgets
-
-Per L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>, a
-widget can be attached whenever it has no parent. All mutators above die
-for a widget that is still attached somewhere, including in this same
-grid. Widgets removed via C<remove_row>, C<clear_rows>, C<replace_row>,
-C<replace_spanning_row> or C<set_cell> can be attached again, to this
-grid or anywhere else; a cell leaving the grid also drops the column
-and row group ids the grid gave it. A cell of a removed row, and a
-widget the grid wrapped in a Cell of its own, stay children of that row
-or wrapper until it is freed, which happens as soon as the grid lets go
-of it unless you keep a reference to it (from C<children> or
-C<cell_wrappers>).
-
-=head1 ID NAMESPACING
-
-Each Grid claims one 12-bit grid-id from a process-global pool on
-construction; grids made with C<share_columns_with> use the grid-id of
-the grid they share with instead. Cell C<width_group> and
-C<height_group> values are packed as C<< (grid_id << 20) | local_index >>,
-where C<local_index> is allocated lazily per axis from a counter that
-grids sharing a grid-id share as well. This guarantees:
+	my $grid = My::Grid->new(cell_gap => 8, row_gap => 4);
+	$grid->append_row([ $name_label, $size_label ]);
+	$grid->insert_row(0, [ $header_name, $header_size ]);
 
 =over 4
 
 =item *
 
-Different Grids never collide, including nested grids, unless they
-share columns on purpose; even then their rows never share a height. A
-Cell that still carries a grid's ids (one you kept after the grid was
-freed, for example) holds that grid id until it is freed or put into
-another grid, so no new Grid can share its ids; and once every grid
-using those ids is freed, they size nothing (the cell's C<width_group>
-and C<height_group> read 0 there), so cells kept from one grid are not
-equalized with each other.
+A row is an arrayref of widgets (element widgets or text widgets).
+Each widget must be free: not attached anywhere else and not in this
+grid already.
 
 =item *
 
-The grid never needs to renumber its cells when it grows: a new column
-or row claims the next local index in its axis, or a row index released
-by C<remove_row>.
+Rows may have different lengths. Column N is made of the Nth cells of
+all rows; a short row has no cells in the last columns. An empty row
+(C<[]>) is allowed.
+
+=item *
+
+Row and column indices count from 0.
+
+=item *
+
+Every method that changes the grid checks all of its input before it
+changes anything, so a call that dies leaves the grid as it was (see
+L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>). Every change
+bumps the revision (L<Clay::UI::Revision>) and shows at the next
+C<render>.
+
+=item *
+
+The methods return the grid, so calls chain.
 
 =back
 
-The pool supports up to 4095 concurrent grid-ids. The grid-id is held
-by a small internal object that returns it to the pool when every Grid
-using it and every Cell still carrying its ids are garbage-collected,
-so long-running programs that churn grids do not exhaust the namespace,
-and classes consuming the Grid role remain free to define their own
-C<DESTROY>. If the pool is genuinely full when a new Grid is
-constructed, the constructor dies with a clear message.
+=head1 CELLS AND WRAPPED WIDGETS
 
-Group ids are process-local and not stable across runs. This is fine for
-layout (Clay only inspects group equality within a single frame) but
-means group ids should not be serialized.
+The grid treats the widgets you give it in one of two ways:
 
-=head1 OVERRIDING GROUP IDS
+=over 4
 
-If a cell already has a non-zero C<width_group> or C<height_group> when
-the Grid receives it (set via the C<HasSizingGroup> field, exposed on
-every widget), the Grid leaves that axis's id alone. This allows
-participation in cross-grid alignment groups: place a cell in your
-grid and also assign it a global C<width_group> shared with another
-widget elsewhere in the UI. For grids that should share all their
-columns, use L</share_columns_with> instead.
+=item a cell
 
-Grid-assigned ids occupy values C<E<gt>= 2**20>. User-supplied ids are
-restricted to C<0 .. 2**20 - 1> (the C<width_group> / C<height_group>
-accessors die otherwise), so they never collide with an id a Grid
-picks.
+A widget composing L<Clay::UI::Role::Layout::GridCell> - an instance
+of L<Clay::UI::Grid::Cell> or of a cell class of your own - B<is> the
+cell. The grid writes the column and row group ids on it, so its box,
+background, border and padding cover exactly the column width and the
+row height. Use a cell to style it or to align its content:
+
+	my $cell = Clay::UI::Grid::Cell->new(
+		background_color => [55, 90, 140, 255],
+		layout           => {
+			padding         => padding_all(6),
+			child_alignment => { x => CLAY_ALIGN_X_RIGHT },
+		},
+	);
+	$cell->add_child(My::Label->new(text => '1,234.00'));
+
+=item any other widget
+
+A text widget, a L<Clay::UI::Box> or anything else is put into a new,
+unstyled L<Clay::UI::Grid::Cell> (FIT on both axes) that the grid
+creates, and that cell gets the group ids. The widget's own box keeps
+its own size inside the cell, at the left and top. This is enough when
+only the layout matters.
+
+=back
+
+L</cell_wrappers> returns the cells the grid lays out: your cells, and
+the cells it created around other widgets.
+
+The grid keeps a cell's C<layout>. Its width sizing changes the
+column:
+
+=over 4
+
+=item *
+
+C<sizing_grow()>: the column takes a share of the space left in a
+grid that is wider than its columns (see L</WIDE GRIDS AND GROW
+COLUMNS>);
+
+=item *
+
+C<sizing_fit($min, $max)> or C<sizing_grow($min, $max)>: the maximum
+limits that cell only, and text in it wraps at that width. The other
+cells of the column still widen the column, so give every cell of the
+column the same maximum, or the column does not line up;
+
+=item *
+
+C<sizing_fixed($n)>: the cell does not take part in the column sizing
+(FIXED members are ignored by sizing groups); give every cell of the
+column the same fixed width.
+
+=back
+
+B<Text in a grid column does not wrap by itself.> Every cell of a
+column keeps at least the widest I<unwrapped> width of the column, so a
+column holding long text makes the grid as wide as that text, wider
+than its parent if need be. Give such a column a maximum
+(C<sizing_fit(0, 200)>, C<sizing_grow(0, 200)>) or a fixed width in
+every row.
+
+=head1 SPANNING ROWS
+
+A spanning row holds a single cell as wide as the whole grid, for
+example a heading for the rows below it:
+
+	$grid->append_spanning_row(My::Label->new(text => 'Guests'));
+	$grid->insert_spanning_row(0, $title);
+
+A cell cannot span some of the columns, only all of them: the only way
+to span is a whole spanning row.
+
+The cell of a spanning row belongs to no column: it does not widen any
+column, and the columns do not size it. It gets a row C<height_group>
+like any row.
+
+A widget that is not a cell is put into an unstyled cell with a
+C<sizing_percent(1)> width. That cell is as wide as the grid, and Clay
+does not count it when it fits the grid to its rows: a long heading
+wraps instead of widening the grid. A cell of your own keeps its
+layout; give it a C<sizing_percent(1)> width for the same effect. (A
+C<sizing_grow()> width fills the row too, but its content then widens a
+grid that fits its content.)
+
+L</is_spanning_row> tells the two kinds of rows apart. L</set_cell>
+dies on a spanning row; L</replace_row> turns a spanning row into a
+normal one and L</replace_spanning_row> the other way round.
+
+=head1 WIDE GRIDS AND GROW COLUMNS
+
+By default a grid is exactly as wide as its columns (FIT). Give it a
+wider C<layout> width, for example C<sizing_grow()> or
+C<sizing_fixed(600)>, and it gets space left over. Every row is as
+wide as the grid, so cells with a C<sizing_grow()> width share that
+space:
+
+	my $grid = My::Grid->new(layout => { sizing => { width => sizing_grow() } });
+	for my $file (@files) {
+		my $name = Clay::UI::Grid::Cell->new(
+			layout => { sizing => { width => sizing_grow() } },
+		);
+		$name->add_child(My::Label->new(text => $file->{name}));
+		$grid->append_row([ $name, My::Label->new(text => $file->{size}) ]);
+	}
+
+Give the cells of a growing column a C<sizing_grow()> width in
+B<every> row. Clay hands out the space row by row; a column that grows
+in some rows only does not stay aligned.
+
+=head1 STYLING A ROW
+
+A row (L<Clay::UI::Grid::Row>) has no style of its own: it takes no
+C<background_color>, C<border_color> or C<corner_radius>. To colour a
+row, such as a header row, either colour each of its cells (use
+L<Clay::UI::Grid::Cell> objects with a C<background_color>), with a
+C<cell_gap> of 0 and C<padding> in the cells so no gap shows between
+them, or give the grid itself a C<background_color>.
+
+	my $grid = My::Grid->new(id => 'files', cell_gap => 0);
+	$grid->append_row([
+		map {
+			my $cell = Clay::UI::Grid::Cell->new(
+				background_color => [55, 90, 140, 255],
+				layout           => { padding => padding_all(4) },
+			);
+			$cell->add_child(My::Label->new(text => $_));
+			$cell;
+		} 'Name', 'Size'
+	]);
+
+=head1 SHARING COLUMNS BETWEEN GRIDS
+
+Two grids can share their columns: column N of both is sized as one
+column, as wide as the widest cell of column N in either grid. The
+typical case is a header that stays put above a body that scrolls:
+
+	my $header = My::Grid->new(id => 'header', cell_gap => 8);
+	my $body   = My::Grid->new(id => 'body',   cell_gap => 8, share_columns_with => $header);
+	my $scroll = My::ScrollBox->new(
+		id     => 'body-scroll',
+		layout => { sizing => { height => sizing_fixed(300) } },
+	);
+
+	$header->append_row([ map { My::Label->new(text => $_) } 'Name', 'Size' ]);
+	$body->append_row([
+		My::Label->new(text => $_->{name}),
+		My::Label->new(text => $_->{size}),
+	]) for @files;
+
+	$scroll->add_child($body);
+	$page->add_child($header, $scroll);
+
+(C<My::ScrollBox> is a class composing L<Clay::UI::Box> and
+L<Clay::UI::Role::Layout::HasScroll>.)
+
+=over 4
+
+=item *
+
+The grids can be anywhere in the tree.
+
+=item *
+
+Any number of grids can share the columns of one grid. Their rows never
+share a height.
+
+=item *
+
+The grids also get a common C<width_group> (unless you gave one to a
+grid), so they are as wide as the widest of them. A grid whose rows
+all span, or that has no rows yet, is still as wide as the columns.
+
+=item *
+
+Give the grids the same C<cell_gap>, or the columns drift apart by the
+difference.
+
+=item *
+
+C<share_columns_with> is a constructor parameter only: grids cannot
+start or stop sharing later.
+
+=back
+
+=head1 NESTED GRIDS
+
+A cell may hold another grid; a grid is a widget like any other. The
+inner grid sizes its own columns and rows, independently of the outer
+grid, and the outer column is as wide as the inner grid:
+
+	my $inner = My::Grid->new(id => 'details');
+	$inner->append_row([ My::Label->new(text => 'CPU'), My::Label->new(text => '4 cores') ]);
+	$inner->append_row([ My::Label->new(text => 'RAM'), My::Label->new(text => '16 GB') ]);
+
+	$outer->append_row([ My::Label->new(text => 'server-1'), $inner ]);
+
+Every grid uses its own group ids (see L</GROUP IDS>), so nested grids
+never get in each other's way.
+
+=head1 THE GRID'S OWN LAYOUT AND STYLE
+
+The grid composes L<Clay::UI::Role::Layout::HasLayout>,
+L<Clay::UI::Role::Style::HasBackground>,
+L<Clay::UI::Role::Style::HasBorder> and
+L<Clay::UI::Role::Style::HasCornerRadius>, so it takes C<layout>,
+C<background_color>, C<border_color>, C<border_width> and
+C<corner_radius> like a L<Clay::UI::Box>. It has no C<floating> and no
+C<fire_event>; it has C<on> (L<Clay::UI::Role::Events::Listener>).
+
+The grid's own layout defaults to:
+
+	{
+		sizing           => { width => sizing_fit(), height => sizing_fit() },
+		layout_direction => CLAY_TOP_TO_BOTTOM,
+		child_gap        => $row_gap,
+	}
+
+A C<layout> you give is merged over these defaults one top-level key at
+a time. C<< layout => { padding => padding_all(8) } >> keeps the rows
+stacked top to bottom with C<row_gap> between them; C<< layout => {
+child_gap => 10 } >> replaces C<row_gap>; a C<sizing> replaces the
+whole default C<sizing>. Do not change C<layout_direction>: the rows
+must stay stacked top to bottom.
+
+=head1 CONSTRUCTOR PARAMETERS
+
+=head2 share_columns_with
+
+	my $body = My::Grid->new(share_columns_with => $header);
+
+Another grid (any object composing C<Clay::UI::Grid>) whose columns
+this grid shares; see L</SHARING COLUMNS BETWEEN GRIDS>. Default undef
+(no sharing). The grid keeps no reference to the other grid. Dies with
+C<Clay::UI::Grid: share_columns_with must be a Clay::UI::Grid, got ...>
+for anything else.
+
+The parameters below come from the composed roles. Each is also a
+read/write accessor, as documented in the role.
+
+=head2 id
+
+See L<Clay::UI::Role::Core::Element/id>.
+
+=head2 layout
+
+See L<Clay::UI::Role::Layout::HasLayout/layout>; merged with the
+grid's defaults (see L</THE GRID'S OWN LAYOUT AND STYLE>).
+
+=head2 background_color
+
+See L<Clay::UI::Role::Style::HasBackground/background_color>.
+
+=head2 border_color
+
+See L<Clay::UI::Role::Style::HasBorder/border_color>.
+
+=head2 border_width
+
+See L<Clay::UI::Role::Style::HasBorder/border_width>.
+
+=head2 corner_radius
+
+See L<Clay::UI::Role::Style::HasCornerRadius/corner_radius>.
+
+=head2 width_group
+
+See L<Clay::UI::Role::Layout::HasSizingGroup/width_group>. A grid
+sharing columns with another one gets a common width group unless you
+give it one (see L</SHARING COLUMNS BETWEEN GRIDS>).
+
+=head2 height_group
+
+See L<Clay::UI::Role::Layout::HasSizingGroup/height_group>.
+
+=head1 ATTRIBUTES
+
+Both attributes are constructor parameters and read/write accessors.
+A write bumps the revision (L<Clay::UI::Revision>), takes effect at the
+next C<render> and returns the new value.
+
+=head2 cell_gap
+
+	$grid->cell_gap(8);
+
+The space between the cells of a row, an integer from 0 to 65535.
+Default C<0>. A write updates every existing row as well. Dies with
+C<Clay::UI: 'cell_gap' expected an integer in 0..65535, got ...> for
+anything else.
+
+=head2 row_gap
+
+	$grid->row_gap(4);
+
+The space between rows, an integer from 0 to 65535. Default C<0>. It
+is the C<child_gap> of the grid's layout, unless the grid's C<layout>
+sets C<child_gap> itself. Errors as for L</cell_gap>.
+
+=head1 METHODS
+
+=head2 row_count
+
+	my $rows = $grid->row_count;
+
+Returns the number of rows, spanning rows included.
+
+=head2 is_spanning_row
+
+	if ($grid->is_spanning_row(2)) { ... }
+
+Returns 1 when the row at the index is a spanning row, 0 otherwise.
+Dies with C<Clay::UI::Grid: row index 9 out of range 0..3> for an index
+that is not an existing row.
+
+=head2 cell_wrappers
+
+	my $cells = $grid->cell_wrappers;    # [ [ $cell, $cell, ... ], ... ]
+	my $cell  = $cells->[$row][$col];
+
+Returns the cells the grid lays out, as a new array of rows, each a new
+array of cells: your cells (widgets composing
+L<Clay::UI::Role::Layout::GridCell>) and the L<Clay::UI::Grid::Cell>
+objects the grid created around other widgets. A spanning row holds
+one cell. Changing the arrays does not change the grid; the cells are
+the live objects.
+
+=head2 append_row
+
+	$grid->append_row([ $widget, $widget, ... ]);
+
+Adds a row at the bottom. Dies with
+C<Clay::UI::Grid: row must be an arrayref> when the argument is not an
+array reference, and for the widgets that cannot be attached (see
+L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>), changing nothing.
+Returns the grid.
+
+
+=head2 insert_row
+
+	$grid->insert_row($index, [ $widget, ... ]);
+
+Inserts a row so that it gets index C<$index>; the rows from there on
+move down. C<$index> may be C<0> to C<row_count> (the latter appends).
+Dies with C<Clay::UI::Grid: insert index 9 out of range 0..3> for
+another index, and like L</append_row>. Returns the grid.
+
+=head2 append_spanning_row
+
+	$grid->append_spanning_row($widget);
+
+Adds a spanning row (see L</SPANNING ROWS>) at the bottom. Dies like
+L</append_row> for a widget that cannot be attached. Returns the grid.
+
+=head2 insert_spanning_row
+
+	$grid->insert_spanning_row($index, $widget);
+
+Inserts a spanning row at C<$index> (C<0> to C<row_count>). Dies like
+L</insert_row>. Returns the grid.
+
+=head2 set_cell
+
+	$grid->set_cell($row, $col, $widget);
+
+Puts C<$widget> into the cell at C<$row>, C<$col>, following the rules
+of L</CELLS AND WRAPPED WIDGETS>. The cell that was there is detached.
+C<$col> may also be the current length of the row, which appends a
+cell to the row. Returns the grid.
+
+Dies, changing nothing:
+
+=over 4
+
+=item *
+
+C<Clay::UI::Grid: row index ... out of range ...> for a row that does
+not exist;
+
+=item *
+
+C<Clay::UI::Grid: row 1 spans all columns; use replace_spanning_row or replace_row>
+for a spanning row;
+
+
+=item *
+
+C<Clay::UI::Grid: col index 5 out of range 0..2> for a column beyond
+the row's length;
+
+=item *
+
+for a widget that cannot be attached, including one that is already in
+this grid.
+
+=back
+
+=head2 replace_row
+
+	$grid->replace_row($index, [ $widget, ... ]);
+
+Replaces all cells of the row at C<$index> with new ones; the old cells
+are detached. A spanning row becomes a normal row. The row keeps its
+place and its height group. Dies like L</append_row> and for an index
+that is not an existing row. Returns the grid.
+
+=head2 replace_spanning_row
+
+	$grid->replace_spanning_row($index, $widget);
+
+Replaces the row at C<$index> with a spanning row holding C<$widget>;
+the old cells are detached. Dies like L</replace_row>. Returns the
+grid.
+
+=head2 remove_row
+
+	$grid->remove_row($index);
+
+Removes the row at C<$index> and detaches its cells; the rows below
+move up. Dies with C<Clay::UI::Grid: row index ... out of range ...>
+for an index that is not an existing row. Returns the grid.
+
+=head2 clear_rows
+
+	$grid->clear_rows;
+
+Removes all rows, as C<remove_row> would one by one. Returns the grid.
+
+=head2 reorder_rows
+
+	# Sort a table by its second column, keeping the header row first.
+	my @order = (0, sort { $names[$a] cmp $names[$b] } 1 .. $grid->row_count - 1);
+	$grid->reorder_rows(\@order);
+
+Puts the rows in a new order: row C<$k> becomes the row that was at
+C<< $order->[$k] >>. The order must hold every row index exactly once.
+No row is detached, so the cells keep their parents and hover and focus
+stay where they were, which is what sorting a table needs. Dies,
+changing nothing, with
+C<Clay::UI: a new child order must be an array reference of the indices 0..3 in any order>
+for anything else. Returns the grid.
+
+
+=head2 contribute_grid_defaults
+
+Adds the grid's default C<layout> (see
+L</THE GRID'S OWN LAYOUT AND STYLE>) to its declaration, under any
+C<layout> keys already there (see
+L<Clay::UI::Role::Core::Element/EXTENDING THE DECLARATION>).
+
+=head1 REUSING WIDGETS
+
+A widget can be attached whenever it has no parent (see
+L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>). All row
+and cell methods die for a widget that is still attached somewhere,
+including in this grid.
+
+Widgets removed by C<remove_row>, C<clear_rows>, C<replace_row>,
+C<replace_spanning_row> or C<set_cell> can be attached again, to this
+grid or anywhere else. A cell leaving the grid drops the column and row
+group ids the grid gave it; ids you set yourself stay.
+
+One detail: a widget the grid put into a cell of its own stays the
+child of that cell, and the cells of a removed row stay children of the
+row, until the grid lets go of them. That happens at once unless you
+keep a reference to the cell or the row (from C<cell_wrappers> or
+C<children>); while you do, the widget is not free to be attached
+elsewhere.
+
+=head1 GROUP IDS
+
+The grid sizes its columns and rows with C<width_group> and
+C<height_group> ids it chooses itself. You rarely need to know how;
+this section is for alignment across grids and for reading the ids.
+
+=head2 Overriding group ids
+
+If a cell already has a non-zero C<width_group> or C<height_group>
+when the grid receives it, the grid leaves that axis alone. That lets a
+cell take part in an alignment group of your own, shared with a widget
+elsewhere in the UI, instead of the grid's column or row. To align all
+columns of two grids, use L</share_columns_with> instead.
+
+User group ids are 0 to 2**20 - 1; the grid's ids are 2**20 and above,
+so the two never collide (see
+L<Clay::UI::Role::Layout::HasSizingGroup/width_group>).
+
+=head2 How the grid numbers its groups
+
+Each grid takes a grid number from a pool of 4095 for the whole
+process; a grid made with C<share_columns_with> uses the number of the
+grid it shares with. A group id is C<< (grid_number << 20) | index >>,
+where the index counts columns (for width ids) and rows (for height
+ids) of that grid. This means:
+
+=over 4
+
+=item *
+
+Different grids never share an id, nested grids included, unless they
+share columns on purpose; even then their rows never share a height.
+
+=item *
+
+The grid never renumbers its cells when it grows: a new column or row
+takes the next index, or the index of a removed row.
+
+=item *
+
+A cell that still carries a grid's ids (one you kept after the grid
+was freed) keeps that grid number taken until the cell is freed or put
+into another grid, so no new grid gets the same ids. Once every grid
+using a number is freed, its ids size nothing: the kept cells'
+C<width_group> and C<height_group> read 0.
+
+=item *
+
+The number goes back to the pool when every grid using it and every
+cell carrying its ids are freed, so programs that create and drop many
+grids do not run out. More than 4095 grid numbers taken at once makes
+the grid constructor die with C<Clay::UI::Grid: grid-id pool exhausted (max 4095 live grids)>.
+
+=item *
+
+Group ids differ between runs of the program; do not store them.
+
+=back
+
+The number is held by a small internal object, not by the grid, so a
+class composing C<Clay::UI::Grid> may define its own C<DESTROY>.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Grid::Cell>, L<Clay::UI::Role::Layout::GridCell>,
+L<Clay::UI::Grid::Row>, L<Clay::UI::Role::Layout::HasSizingGroup>,
+L<Clay::UI>, L<Clay::Manual>, L<Clay::Cookbook>.
 
 =cut

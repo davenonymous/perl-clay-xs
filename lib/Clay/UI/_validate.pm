@@ -161,8 +161,9 @@ example C<Clay_LayoutConfig>), C<clay_field($type, $field)> one for a
 single field of it (for example C<fontSize> of
 C<Clay_TextElementConfig>). Keys may be snake_case or camelCase; errors
 name the attribute and the snake_case path inside it, e.g.
-C<Clay::UI: 'layout.padding.left' expected an integer in 0..65535, got
-'-5'>, and list the known keys for an unknown one.
+C<Clay::UI: 'layout.padding.left' expected an integer in 0..65535, got '-5'>,
+and list the known keys for an unknown one.
+
 
 The other validators hold Clay::UI's own rules: element ids must not
 start with C<anon:>, user sizing-group ids must stay below C<2**20> (the

@@ -29,70 +29,115 @@ sub current_revision () {
 1;
 
 __END__
-
 =head1 NAME
 
-Clay::UI::Revision - process-wide "something changed" counter for Clay::UI
+Clay::UI::Revision - process-wide counter that grows whenever a Clay::UI frame would look different
 
 =head1 SYNOPSIS
 
+	use v5.22;
+	use warnings;
+
+	use Object::Pad;
+	use Clay::UI;
+	use Clay::UI::Box;
 	use Clay::UI::Revision qw(current_revision);
 
-	my $drawn_revision = -1;
-	while ($running) {
-		# render runs every frame: it turns the input into events and
-		# scrolling, which may change what the frame shows.
-		my $commands = $ui->render(%{ next_input() });
-		next if current_revision() == $drawn_revision;
-		$drawn_revision = current_revision();
-		draw($commands);
+	class My::Panel :strict(params) :does(Clay::UI::Box) {}
+
+	my $root = My::Panel->new(id => 'root', background_color => [40, 50, 60, 255]);
+	my $ui   = Clay::UI->new(width => 800, height => 600, root => $root);
+
+	my $drawn;    # the revision of the frame on screen
+	for my $frame (1 .. 3) {
+		# render runs every frame: input reaches the widgets only through it.
+		my $commands = $ui->render(pointer_state => { x => 10, y => 10, down => 0 });
+		next if defined $drawn && $drawn == $ui->laid_out_revision;
+		$drawn = $ui->laid_out_revision;
+		say "frame $frame: drawing ", scalar @$commands, ' commands';
 	}
+	$root->background_color([0, 0, 0, 255]);      # a change ...
+	say 'stale' if current_revision() != $drawn;   # ... makes the drawn frame stale
 
 =head1 DESCRIPTION
 
-A non-negative integer that grows whenever something that a frame lays
-out or draws has changed. A renderer remembers the value it saw when it
-drew its last frame and skips drawing the next frame while the value is
-still the same. It still calls C<render> every frame: pointer and
-scroll input reach the widgets only through C<render>, and the changes
-they cause (hover states, scrolling) bump the counter there.
+The I<revision> is a non-negative integer that grows whenever something
+that a frame lays out or draws has changed. A renderer remembers the
+revision of the frame it drew and skips drawing while the revision is
+still the same. It still calls L<Clay::UI/render> every frame: pointer
+and scroll input reach the widgets only through C<render>, and the
+changes they cause (hover states, scrolling) bump the revision there.
+L<Clay::UI/laid_out_revision> tells which revision a frame shows.
 
-Every Clay::UI setter that changes a frame bumps it: widget attributes
-(C<layout>, C<background_color>, C<text>, ...), the children of a
-widget, user states (C<add_state> and friends), the viewport size and
-measure-text callback of a L<Clay::UI>, and the hovered, armed, pressed
-and focused widgets of its L<Clay::UI::Interaction>, which drive the
-derived C<hovered> / C<pressed> / C<focused> states. So does a scroll
-container moving inside C<render> (wheel input, drag scrolling or
-momentum), and L<Clay::XS/set_scroll_position>, whose new position shows
-only in the next frame. Reading an
-attribute never bumps it. Widget classes that keep state of their own
-call C<< $widget->mark_changed >> (see
-L<Clay::UI::Role::Core::Element/mark_changed>) from their setters.
+These bump the revision:
 
-There is one counter for the whole process, shared by every Clay::UI.
-A change in any of them makes every renderer draw again; a program with
-several UIs that wants to skip more frames compares more than this
-value.
+=over 4
 
-Only the value's equality is meaningful: it starts at 0 and only grows,
-but how far it grows per change is unspecified (one write may bump it
-more than once).
+=item *
+
+every widget setter that changes what a frame lays out or draws:
+attributes (C<layout>, C<background_color>, C<text>, ...), the children
+of a widget, user states (C<add_state> and friends), C<disabled>;
+
+=item *
+
+the C<width>, C<height> and C<measure_text> writers of a L<Clay::UI>;
+
+=item *
+
+a change of the hovered, armed, pressed or focused widgets in a
+L<Clay::UI::Interaction>, because they drive the derived C<hovered>,
+C<pressed> and C<focused> states;
+
+=item *
+
+a scroll container moving inside C<render> (wheel input, drag
+scrolling or the momentum after drag scrolling), L<Clay::UI/scroll_to> and
+L<Clay::XS/set_scroll_position>;
+
+=item *
+
+C<mark_changed> (L<Clay::UI::Role::Core::Element/mark_changed>), which
+widget classes that keep state of their own call from their setters,
+and C<request_prepare> (L<Clay::UI::Role::Core::Preparable>).
+
+=back
+
+A running transition (L<Clay::XS::Structs/transition>) does not bump
+the revision: its render commands change from frame to frame while the
+revision stays the same (see F<KNOWN-ISSUES.md>, issue 27). While an
+element with a C<transition> may animate, draw every frame.
+
+Reading an attribute never bumps the revision; neither does writing
+C<can_focus>, which changes nothing drawn (unless it takes the focus
+away).
+
+There is one revision for the whole process, shared by every
+Clay::UI: a change in any of them makes every renderer draw again. Only
+equality is meaningful. The value starts at 0 and only grows, but how
+far it grows per change is unspecified (one write may bump it more than
+once).
 
 =head1 FUNCTIONS
 
-Nothing is exported by default.
-
-=head2 bump_revision
-
-	my $revision = bump_revision();
-
-Increments the counter and returns the new value.
+Nothing is exported by default; import the functions by name.
 
 =head2 current_revision
 
 	my $revision = current_revision();
 
-Returns the counter's current value.
+Returns the current revision.
+
+=head2 bump_revision
+
+	my $revision = bump_revision();
+
+Increments the revision and returns the new value. Widget code calls it
+from setters that change what a frame shows; most widget classes call
+C<< $widget->mark_changed >> instead, which does the same.
+
+=head1 SEE ALSO
+
+L<Clay::UI/laid_out_revision>, L<Clay::UI>, L<Clay::Manual>.
 
 =cut

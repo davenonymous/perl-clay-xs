@@ -72,87 +72,150 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Style::HasStates - free-form state-set mixin for Clay::UI widgets
+Clay::UI::Role::Style::HasStates - named states such as selected or loading on a Clay::UI widget
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
-	use Clay::UI::Role::Core::Element;
+	use Clay::UI::Role::Core::Container;
 	use Clay::UI::Role::Style::HasStates;
 
-	class My::Button :strict(params)
-		:does(Clay::UI::Role::Core::Element)
+	class My::Item :strict(params)
+		:does(Clay::UI::Role::Core::Container)
 		:does(Clay::UI::Role::Style::HasStates)
 	{}
 
-	my $btn = My::Button->new(id => 'go');
-	$btn->add_state('loading');
-	$btn->has_state('loading');    # 1
-	$btn->remove_state('loading');
-	$btn->toggle_state('selected');
-	my @active = $btn->states;     # list of active state names
+	my $item = My::Item->new(id => 'item-1');
+	$item->add_state('loading');
+	$item->has_state('loading');       # 1
+	$item->remove_state('loading');
+	$item->toggle_state('selected');   # on
+	my @active = $item->states;        # ('selected')
+	$item->clear_states;
 
 =head1 DESCRIPTION
 
-Mixin role that gives a widget a free-form set of state names. State
-names are arbitrary strings; the set is unordered and de-duplicated.
-Intended for tracking interactive and visual states such as
-C<selected> or C<loading>, next to the derived states, so
-themes and consumers have a single place to read "what is this widget
-currently doing?".
-
-=head1 DERIVED STATES
-
-C<hovered>, C<pressed>, C<focused> and C<disabled> are derived states:
-they are never stored, but answered live by the widget's C<is_hovered>,
-C<is_pressed> and C<is_focused> readers, which ask the UI's interaction
-tracker (L<Clay::UI::Interaction>), and by the C<disabled> reader of
-L<Clay::UI::Role::Interaction::Disableable>. A widget without the
-matching role never has the state. Derived states appear
-in C<has_state> and C<states>, but cannot be written: C<add_state>,
-C<remove_state> and C<toggle_state> die for them, and C<clear_states>
-leaves them alone.
-
-L<Clay::UI::Role::Interaction::Hoverable>,
-L<Clay::UI::Role::Interaction::Pressable>, and
-L<Clay::UI::Role::Interaction::Focusable> each compose HasStates, so
-there is no need to compose it explicitly when an interaction role is
-already on the widget; compose it directly only when a widget needs
-user states without any interaction wiring.
-
-=head1 METHODS
+C<Clay::UI::Role::Style::HasStates> gives a widget a set of state
+names, so that a theme or renderer has one place to ask what the widget
+is doing right now. There are two kinds of states:
 
 =over 4
 
-=item C<add_state($name)>
+=item user states
 
-Mark C<$name> as active. Idempotent. Returns C<$self>. Dies for a
-derived state.
+Any name you choose, such as C<selected>, C<loading> or C<error>. You
+add and remove them; the set holds each name once and has no order.
+Names are not checked: pass plain, non-empty strings.
 
-=item C<remove_state($name)>
+=item derived states
 
-Clear C<$name> from the set. Idempotent. Returns C<$self>. Dies for a
-derived state.
-
-=item C<has_state($name)>
-
-True if C<$name> is currently active.
-
-=item C<toggle_state($name)>
-
-Flip C<$name>: add it if absent, remove it if present. Returns
-C<$self>. Dies for a derived state.
-
-=item C<clear_states>
-
-Drop all user states; derived states keep following interaction.
-Returns C<$self>.
-
-=item C<states>
-
-Returns the active state names, user and derived, as a list. Order is unspecified; use
-list context only.
+C<hovered>, C<pressed>, C<focused> and C<disabled>. They are never
+stored: C<has_state> and C<states> ask the widget each time (see
+L</DERIVED STATES>), and they cannot be added, removed or toggled.
 
 =back
+
+The interaction roles L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Pressable>,
+L<Clay::UI::Role::Interaction::Focusable> and
+L<Clay::UI::Role::Interaction::Disableable> compose this role already;
+compose it yourself only for a widget that needs user states without
+any of them.
+
+States do not change the declaration: Clay never sees them. A
+contribute method of your own (see
+L<Clay::UI::Role::Core::Element/EXTENDING THE DECLARATION>) can turn
+them into colours, for example. Such a method must not set a value
+that another method of the class also sets: a widget that picks its
+C<background_color> by state must leave the C<background_color>
+attribute unset, or not compose L<Clay::UI::Role::Style::HasBackground>
+at all. Every change bumps the revision
+(L<Clay::UI::Revision>).
+
+=head1 METHODS
+
+=head2 add_state
+
+	$widget->add_state('selected');
+
+Adds a user state. Adding a state that is already set changes nothing,
+but still bumps the revision. Returns the widget. Dies with
+C<Clay::UI: state 'hovered' is derived and cannot be set> for a derived
+state.
+
+=head2 remove_state
+
+	$widget->remove_state('selected');
+
+Removes a user state; removing one that is not set changes nothing.
+Bumps the revision and returns the widget. Dies for a derived state,
+like L</add_state>.
+
+=head2 toggle_state
+
+	$widget->toggle_state('selected');
+
+Adds the user state if it is not set, removes it if it is. Bumps the
+revision and returns the widget. Dies for a derived state.
+
+=head2 has_state
+
+	if ($widget->has_state('selected')) { ... }
+	if ($widget->has_state('hovered'))  { ... }
+
+Returns true if the state is active: a user state that is set, or a
+derived state that currently applies. A name that is neither is
+false.
+
+=head2 clear_states
+
+	$widget->clear_states;
+
+Removes every user state. Derived states are not affected; they keep
+following the widget. Bumps the revision and returns the widget.
+
+=head2 states
+
+	my @active = $widget->states;
+
+Returns the names of all active states, user and derived, as a list in
+no particular order. Call it in list context: in scalar context it does
+not return the number of states.
+
+=head1 DERIVED STATES
+
+Each derived state is answered by a reader of the widget. A widget
+without that reader (it does not compose the matching role) never has
+the state.
+
+=over 4
+
+=item C<hovered>
+
+C<is_hovered> of L<Clay::UI::Role::Interaction::Hoverable>: the pointer
+is over the widget.
+
+=item C<pressed>
+
+C<is_pressed> of L<Clay::UI::Role::Interaction::Pressable>.
+
+=item C<focused>
+
+C<is_focused> of L<Clay::UI::Role::Interaction::Focusable>.
+
+=item C<disabled>
+
+C<disabled> of L<Clay::UI::Role::Interaction::Disableable>.
+
+=back
+
+C<is_hovered>, C<is_pressed> and C<is_focused> ask the UI's
+L<Clay::UI::Interaction>, which updates them during C<render>.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Interaction>, L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Disableable>.
 
 =cut

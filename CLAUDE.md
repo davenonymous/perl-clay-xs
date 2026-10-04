@@ -158,8 +158,8 @@ through Clay::UI and replaces `userData` with widget class and id.
   before the layout pass; nothing may change the tree after that point.
   Renderers remember `laid_out_revision` as the revision they drew, so
   changes made by listeners and preparations need no second frame.
-- `Clay::UI::Role::Layout::GridCell` is a marker role (no fields, no
-  methods): Grid stamps its column and row group ids on such a widget
+- `Clay::UI::Role::Layout::GridCell` is a marker role (no fields; it
+  implements no methods and requires Element's sizing-group methods): Grid stamps its column and row group ids on such a widget
   directly and wraps any other widget in a `Clay::UI::Grid::Cell`
   (which composes the marker). Grids made with `share_columns_with`
   share one `Clay::UI::Grid::_IdSpace` (grid id and id counters) and a
@@ -200,6 +200,20 @@ through Clay::UI and replaces `userData` with widget class and id.
   `Clay_Initialize` read the current context's counts, and setting them
   on another UI's context or with none current would disable that context
   or change Clay's process-wide defaults.
+
+## Documentation
+
+- `lib/Clay/Manual.pod` (user guide, feature index), `lib/Clay/Cookbook.pod`
+  (task recipes), `lib/Clay/XS/Structs.pod` (every struct key) and the
+  module POD are the docs; `README.md` is a short entry point.
+  `KNOWN-ISSUES.md` tracks bugs found but not fixed yet.
+- Every public function, method, parameter, event, constant group and
+  struct key gets its own heading spelled as in code, so one grep finds
+  it. Code samples in the POD must run (test them).
+- Each example starts with the header block (`Shows:`, `Features:`,
+  `Requires:`, `Run with:`); `Features:` lists the exact identifiers
+  used. New examples go into the README table and the Manual's
+  FEATURE INDEX.
 
 ## Conventions
 

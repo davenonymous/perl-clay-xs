@@ -1,53 +1,72 @@
 #!/usr/bin/env perl
 
-# 06-png-render.pl - Render Clay's command list as a PNG image via Imager.
+# 06-png-render.pl - Draw Clay's render commands as a PNG image with Imager.
 #
-# Builds the same kind of showcase layout as the SVG demo, then walks the
-# render commands and rasterises them with Imager (https://metacpan.org/pod/Imager).
-# Text uses JetBrains Mono - point CLAY_FONT_PATH at the TTF if it lives
-# somewhere other than the defaults probed below.
+# Builds a header and three cards with Clay::UI, measures text with a real
+# font and rasterises the render commands with Imager. Each card wraps the
+# same paragraph with a different text alignment. Rectangles and borders
+# are antialiased and honour their corner radii. Writes the PNG to the
+# path given as argument (out.png in the current directory by default).
 #
-# Requires Imager with PNG output (Imager::File::PNG) and a FreeType-capable
-# font driver (Imager::Font::FT2).
+# Shows:
+#   - a raster renderer for RECTANGLE, BORDER and TEXT commands
+#   - rounded corners drawn through an antialiased polygon mask
+#   - measuring text with the same font the renderer draws with
+#   - word wrapping and left, centred and right text alignment
+#   - building the tree from Clay::UI widgets instead of Clay::XS calls
+#
+# Features: Clay::UI, Clay::UI::Box, Clay::UI::Text, render, measure_text, error_handler, text_alignment, CLAY_TEXT_ALIGN_LEFT, CLAY_TEXT_ALIGN_CENTER, CLAY_TEXT_ALIGN_RIGHT, corner_radius, border_color, border_width, cornerRadius, CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_BORDER, CLAY_RENDER_COMMAND_TYPE_TEXT
+#
+# Requires: Imager with PNG support (Imager::File::PNG) and FreeType
+#   (Imager::Font::FT2), and the DejaVu Sans Mono font (DejaVuSansMono.ttf).
+#   Set CLAY_FONT_PATH to the directory that holds it if it is not in one
+#   of the places probed below.
 #
 # Run with:
 #
-#     perl -Ilib -Iblib/lib -Iblib/arch examples/06-png-render.pl out.png
+#     perl -Ilib -Iblib/lib -Iblib/arch examples/06-png-render.pl [out.png]
 
 use v5.22;
 use warnings;
 use feature 'signatures';
 no warnings 'experimental::signatures';
 
-use lib "examples/lib";
-
 use Imager;
+use List::Util qw(min max);
+use POSIX qw(floor ceil);
+use Object::Pad 0.800;
+
 use Clay::XS qw(:all);
 use Clay::UI;
-use Clay::UI::Demo::Box;
-use Clay::UI::Demo::Text;
+use Clay::UI::Box;
+use Clay::UI::Text;
+
+# Clay::UI ships roles, not classes: each widget class is one line that
+# composes the role it needs (see Clay::Manual, GETTING STARTED).
+class My::Box  :strict(params) :does(Clay::UI::Box)  {}
+class My::Text :strict(params) :does(Clay::UI::Text) {}
 
 # ---------------------------------------------------------------------------
 # Font resolution
 # ---------------------------------------------------------------------------
 
-sub locate_font () {
-	return $ENV{CLAY_FONT_PATH} if $ENV{CLAY_FONT_PATH} && -r $ENV{CLAY_FONT_PATH};
-
-	my @candidates = (
-		'/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf',
-		'/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf',
-		'/usr/local/share/fonts/JetBrainsMono-Regular.ttf',
-		'/tmp/jbmono/fonts/ttf/JetBrainsMono-Regular.ttf',
-		"$ENV{HOME}/.local/share/fonts/JetBrainsMono-Regular.ttf",
+sub locate_font ($file_name) {
+	my @directories = (
+		($ENV{CLAY_FONT_PATH} // ()),
+		'/usr/share/fonts/truetype/dejavu',
+		'/usr/share/fonts/TTF',
+		'/usr/share/fonts/dejavu',
+		'/usr/local/share/fonts',
+		"$ENV{HOME}/.local/share/fonts",
 	);
-	for my $path (@candidates) {
-		return $path if -r $path;
+	for my $directory (@directories) {
+		return "$directory/$file_name" if -r "$directory/$file_name";
 	}
-	die "Could not find JetBrainsMono-Regular.ttf. Set CLAY_FONT_PATH to the TTF file.\n";
+	die "Could not find $file_name in @directories.\n"
+		. "Set CLAY_FONT_PATH to the directory that holds it.\n";
 }
 
-my $FONT_PATH = locate_font();
+my $FONT_PATH = locate_font('DejaVuSansMono.ttf');
 my $FONT      = Imager::Font->new(file => $FONT_PATH)
 	or die "Imager font load failed ($FONT_PATH): " . Imager->errstr . "\n";
 
@@ -59,50 +78,101 @@ sub imager_color ($c) {
 	return Imager::Color->new($c->{r}, $c->{g}, $c->{b}, $c->{a});
 }
 
-# Clay reports four independent corner radii. Imager's box() takes a single
-# radius, so we pick the largest non-zero one and accept slight rounding
-# differences between rectangles whose corners disagree.
-sub corner_radius ($cr) {
-	return 0 unless $cr;
-	my $max = 0;
-	for my $r ($cr->{topLeft}, $cr->{topRight}, $cr->{bottomLeft}, $cr->{bottomRight}) {
-		$max = $r if $r > $max;
+use constant PI => 4 * atan2(1, 1);
+
+# Clay reports four corner radii; they are clamped (as CSS does) so that
+# neighbouring corners never overlap.
+sub corner_radii ($radius, $width, $height) {
+	my @radii = map { max(0, $radius->{$_} // 0) } qw(topLeft topRight bottomRight bottomLeft);
+	my ($tl, $tr, $br, $bl) = @radii;
+	my $scale = min(1,
+		map { $_->[0] > 0 ? $_->[1] / $_->[0] : 1 }
+			[$tl + $tr, $width], [$bl + $br, $width], [$tl + $bl, $height], [$tr + $br, $height]);
+	return map { $_ * $scale } @radii;
+}
+
+# The outline of a rounded rectangle as [ \@x, \@y ], clockwise, for
+# Imager's polypolygon. Each corner is a quarter circle made of short
+# straight segments; corners with radius 0 stay square.
+sub rounded_rect_outline ($x, $y, $width, $height, @radii) {
+	my ($tl, $tr, $br, $bl) = @radii;
+	my @corners = (
+		[$x + $tl,          $y + $tl,           $tl, 180],
+		[$x + $width - $tr, $y + $tr,           $tr, 270],
+		[$x + $width - $br, $y + $height - $br, $br, 0],
+		[$x + $bl,          $y + $height - $bl, $bl, 90],
+	);
+	my (@xs, @ys);
+	for my $corner (@corners) {
+		my ($cx, $cy, $r, $start) = @$corner;
+		my $steps = $r > 0 ? max(4, ceil($r / 2)) : 0;
+		for my $step (0 .. $steps) {
+			my $angle = ($start + 90 * $step / max(1, $steps)) * PI / 180;
+			push @xs, $cx + $r * cos $angle;
+			push @ys, $cy + $r * sin $angle;
+		}
 	}
-	return $max;
+	return [\@xs, \@ys];
+}
+
+# Imager's box() has no rounded corners, and its polypolygon does not
+# blend translucent colours. So the outlines become an antialiased
+# coverage mask, through which a block of the colour is composed onto the
+# image. With 'evenodd' filling, an outline inside another cuts a hole.
+sub fill_outlines ($img, $color, @outlines) {
+	my @xs = map { @{ $_->[0] } } @outlines;
+	my @ys = map { @{ $_->[1] } } @outlines;
+	my ($left, $top) = (floor(min @xs), floor(min @ys));
+	my ($width, $height) = (ceil(max @xs) - $left, ceil(max @ys) - $top);
+	return if $width < 1 || $height < 1;
+
+	my $mask = Imager->new(xsize => $width, ysize => $height, channels => 1);
+	$mask->polypolygon(
+		points => [ map { [ [map { $_ - $left } @{ $_->[0] }], [map { $_ - $top } @{ $_->[1] }] ] } @outlines ],
+		filled => 1,
+		mode   => 'evenodd',
+		color  => Imager::Color->new(255, 255, 255),
+	);
+	my $paint = Imager->new(xsize => $width, ysize => $height, channels => 4);
+	$paint->box(filled => 1, color => imager_color($color));
+	$img->compose(src => $paint, mask => $mask, tx => $left, ty => $top);
+	return;
 }
 
 sub draw_rectangle ($img, $cmd) {
 	my $b = $cmd->{boundingBox};
 	my $d = $cmd->{renderData};
-	$img->box(
-		color  => imager_color($d->{backgroundColor}),
-		xmin   => $b->{x},
-		ymin   => $b->{y},
-		xmax   => $b->{x} + $b->{width}  - 1,
-		ymax   => $b->{y} + $b->{height} - 1,
-		filled => 1,
-		r      => corner_radius($d->{cornerRadius}),
-	);
+	my @radii = corner_radii($d->{cornerRadius}, $b->{width}, $b->{height});
+	fill_outlines($img, $d->{backgroundColor},
+		rounded_rect_outline($b->{x}, $b->{y}, $b->{width}, $b->{height}, @radii));
+	return;
 }
 
-# Borders may have different per-edge widths. Imager has no native uneven
-# border, so each edge is filled as its own rectangle along the bounding box.
+# A border lies inside the bounding box: a left border 2 wide covers the
+# box's two leftmost columns. It is the ring between the box's outline and
+# an inner outline inset by each edge's width (whose corners are rounded
+# less by that width).
 sub draw_border ($img, $cmd) {
-	my $b   = $cmd->{boundingBox};
-	my $d   = $cmd->{renderData};
-	my $w   = $d->{width};
-	my $col = imager_color($d->{color});
-	my ($x, $y, $bw, $bh) = ($b->{x}, $b->{y}, $b->{width}, $b->{height});
+	my $b = $cmd->{boundingBox};
+	my $d = $cmd->{renderData};
+	my $w = $d->{width};
+	my ($tl, $tr, $br, $bl) = corner_radii($d->{cornerRadius}, $b->{width}, $b->{height});
+	my $inner_width  = $b->{width}  - $w->{left} - $w->{right};
+	my $inner_height = $b->{height} - $w->{top}  - $w->{bottom};
+	my $outer = rounded_rect_outline($b->{x}, $b->{y}, $b->{width}, $b->{height}, $tl, $tr, $br, $bl);
+	return fill_outlines($img, $d->{color}, $outer)
+		if $inner_width <= 0 || $inner_height <= 0;
 
-	my $edge = sub ($xmin, $ymin, $xmax, $ymax) {
-		return if $xmax < $xmin || $ymax < $ymin;
-		$img->box(color => $col, xmin => $xmin, ymin => $ymin,
-				  xmax => $xmax, ymax => $ymax, filled => 1);
-	};
-	$edge->($x, $y, $x + $bw - 1, $y + $w->{top} - 1)                if $w->{top};
-	$edge->($x, $y + $bh - $w->{bottom}, $x + $bw - 1, $y + $bh - 1) if $w->{bottom};
-	$edge->($x, $y, $x + $w->{left} - 1, $y + $bh - 1)               if $w->{left};
-	$edge->($x + $bw - $w->{right}, $y, $x + $bw - 1, $y + $bh - 1)  if $w->{right};
+	my @inner_radii = (
+		max(0, $tl - max($w->{left},  $w->{top})),
+		max(0, $tr - max($w->{right}, $w->{top})),
+		max(0, $br - max($w->{right}, $w->{bottom})),
+		max(0, $bl - max($w->{left},  $w->{bottom})),
+	);
+	my $inner = rounded_rect_outline($b->{x} + $w->{left}, $b->{y} + $w->{top},
+		$inner_width, $inner_height, @inner_radii);
+	fill_outlines($img, $d->{color}, $outer, $inner);
+	return;
 }
 
 # Clay's text bounding box is already laid out for the configured fontSize.
@@ -127,8 +197,9 @@ sub render_to_png ($commands, $width, $height, $path) {
 	my $img = Imager->new(xsize => $width, ysize => $height, channels => 4);
 	$img->box(color => Imager::Color->new(0, 0, 0, 0), filled => 1);
 
-	my @sorted = sort { ($a->{zIndex} // 0) <=> ($b->{zIndex} // 0) } @$commands;
-	for my $cmd (@sorted) {
+	# Draw in array order; Clay has already sorted the commands (see
+	# Clay::Manual, Writing a renderer).
+	for my $cmd (@$commands) {
 		my $type = $cmd->{commandType};
 		if    ($type == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) { draw_rectangle($img, $cmd) }
 		elsif ($type == CLAY_RENDER_COMMAND_TYPE_BORDER)    { draw_border($img, $cmd) }
@@ -160,7 +231,7 @@ my @ALIGN_DEMO = (
 );
 
 sub label ($text, $font_size = 16) {
-	return Clay::UI::Demo::Text->new(
+	return My::Text->new(
 		text       => $text,
 		font_size  => $font_size,
 		text_color => $WHITE,
@@ -171,7 +242,7 @@ sub build_tree () {
 	my @cards;
 	for my $i (0 .. 2) {
 		my ($name, $align) = @{ $ALIGN_DEMO[$i] };
-		my $card = Clay::UI::Demo::Box->new(
+		my $card = My::Box->new(
 			id => "card-$i",
 			layout => {
 				sizing           => { width => sizing_grow(), height => sizing_grow() },
@@ -184,7 +255,7 @@ sub build_tree () {
 		);
 		$card->add_child(
 			label("card $i ($name)"),
-			Clay::UI::Demo::Text->new(
+			My::Text->new(
 				text           => $LOREM,
 				font_size      => 14,
 				text_color     => $WHITE,
@@ -194,7 +265,7 @@ sub build_tree () {
 		push @cards, $card;
 	}
 
-	my $header = Clay::UI::Demo::Box->new(
+	my $header = My::Box->new(
 		id => 'header',
 		layout => {
 			sizing          => { width => sizing_grow(), height => sizing_fixed(48) },
@@ -206,7 +277,7 @@ sub build_tree () {
 	);
 	$header->add_child(label("Clay -> PNG demo", 20));
 
-	my $body = Clay::UI::Demo::Box->new(
+	my $body = My::Box->new(
 		id => 'body',
 		layout => {
 			sizing    => { width => sizing_grow(), height => sizing_grow() },
@@ -220,7 +291,7 @@ sub build_tree () {
 	);
 	$body->add_child(@cards);
 
-	my $root = Clay::UI::Demo::Box->new(
+	my $root = My::Box->new(
 		id => 'root',
 		layout => {
 			sizing           => { width => sizing_grow(), height => sizing_grow() },

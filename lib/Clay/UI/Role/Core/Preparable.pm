@@ -65,75 +65,120 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Core::Preparable - let a widget update its subtree right before the layout
+Clay::UI::Role::Core::Preparable - let a widget rebuild its subtree right before the layout pass
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
+	use Clay::UI;
 	use Clay::UI::Box;
+	use Clay::UI::Text;
 	use Clay::UI::Role::Core::Preparable;
 
-	class My::List :strict(params) :does(Clay::UI::Box) :does(Clay::UI::Role::Core::Preparable) {
+	class My::Label :strict(params) :does(Clay::UI::Text) {}
+
+	class My::List :strict(params)
+		:does(Clay::UI::Box)
+		:does(Clay::UI::Role::Core::Preparable)
+	{
 		field @items;
 
 		method add_item ($item) {
 			push @items, $item;
-			$self->request_prepare;    # cheap: the children are built once per frame
+			$self->request_prepare;    # cheap: the children are rebuilt once per frame
 			return $self;
 		}
 
 		method prepare_layout () {
 			$self->clear_children;
-			$self->add_child( map { My::Label->new(text => $_) } @items );
+			$self->add_child(map { My::Label->new(text => $_) } @items);
 			return;
 		}
 	}
+
+	my $list = My::List->new(id => 'list');
+	my $ui   = Clay::UI->new(width => 400, height => 300, root => $list);
+	$list->add_item($_) for qw(apples pears plums);
+	my $commands = $ui->render;    # prepare_layout ran once, then the layout pass
 
 =head1 DESCRIPTION
 
 A widget whose children follow from state of its own (a list of items,
 the rows of a table) would have to rebuild them on every change of that
-state. With this role it asks to be prepared instead, and rebuilds them
-once, right before the next frame is laid out, however many changes came
-before.
+state. With C<Clay::UI::Role::Core::Preparable> it asks to be prepared
+instead and rebuilds them once, right before the next frame is laid
+out, however many changes came before.
 
-C<request_prepare> queues the widget; L<Clay::UI/render> calls its
-C<prepare_layout> after the frame's pointer events and before the layout
-pass, so the changes the listeners of those events made are included.
-Only widgets that belong to the rendering UI are prepared; a widget that
-is not part of a UI yet stays queued until it is. A preparation may
-change anything (no Clay element is open), and may request another
-preparation, of itself or of other widgets; C<render> keeps preparing
-until no request is left, and dies after 100 rounds.
+C<request_prepare> puts the widget in a queue. L<Clay::UI/render> calls
+the C<prepare_layout> method of every queued widget after the frame's
+pointer events and before the layout pass (the part of C<render> that
+declares the tree to Clay), so changes the event listeners made are
+included.
 
-The queue holds widgets weakly: a widget freed while it is queued is
-simply forgotten.
+=over 4
+
+=item *
+
+Only widgets that belong to the rendering UI are prepared (their
+C<ui> is that UI). A widget that is not part of a UI yet stays queued
+until a UI it belongs to renders.
+
+=item *
+
+A preparation may change anything (no Clay element is open while it
+runs) and may request another preparation, of itself or of other
+widgets. C<render> keeps preparing until no request is left, and dies
+after 100 rounds with
+C<Clay::UI: widgets kept requesting preparation; 100 rounds of prepare_layout did not settle>.
+
+
+=item *
+
+The queue is shared by all UIs of the process and holds widgets
+weakly: a widget freed while it is queued is forgotten.
+
+=back
+
+Compose this role together with a widget role
+(L<Clay::UI::Role::Core::Element>, L<Clay::UI::Box>, ...); it uses the
+widget's C<ui> method.
 
 =head1 METHODS
 
 =head2 prepare_layout
 
-Required. Brings the widget (usually its children) up to date. Called
-by C<render> with no arguments; the return value is ignored. An
-exception from it makes C<render> die with it, after the layout pass
-has run (like an exception from an event listener); the widget is no
-longer queued.
+	method prepare_layout () { ... }
+
+Required: the widget class implements it. It brings the widget (usually
+its children) up to date. C<render> calls it with no arguments and
+ignores the return value. By the time it runs the widget is no longer
+queued, so a C<request_prepare> inside it queues it again.
+
+If C<prepare_layout> dies, C<render> stops preparing: the other
+widgets that were due in the same round are taken off the queue without
+being prepared, and stay out of date until something calls their
+C<request_prepare> again. C<render> still runs the layout pass and then
+dies with the error (or with an earlier listener error of the same
+frame).
 
 =head2 request_prepare
 
 	$widget->request_prepare;
 
 Queues the widget for C<prepare_layout> before the next layout pass of
-its UI (queuing it twice queues it once) and bumps the revision
-(L<Clay::UI::Revision>), so a renderer that skips unchanged frames draws
-the next one. Returns the widget.
+its UI. Queuing a queued widget again changes nothing. Always bumps the
+revision (L<Clay::UI::Revision>), so a renderer that skips unchanged
+frames draws the next one. Returns the widget.
 
 =head2 is_prepare_pending
 
-True while the widget is queued.
+	if ($widget->is_prepare_pending) { ... }
+
+Returns 1 while the widget is queued, 0 otherwise.
 
 =head1 SEE ALSO
 
-L<Clay::UI>, L<Clay::UI::Revision>.
+L<Clay::UI/render>, L<Clay::UI::Revision>, L<Clay::Manual>.
 
 =cut

@@ -63,86 +63,121 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Layout::HasParent - parent back-reference mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasParent - parent, root and UI of a Clay::UI widget
 
 =head1 SYNOPSIS
 
-	# Composed automatically into every Clay::UI widget via
-	# Clay::UI::Role::Core::Element and Clay::UI::Role::Core::TextNode.
-	my $child = $box->children->[0];
-	my $owner = $child->parent;   # the Box
-	my $top   = $child->root;     # walks the parent chain to the topmost widget
+	use v5.22;
+	use Object::Pad;
+	use Clay::UI;
+	use Clay::UI::Box;
+
+	class My::Box :strict(params) :does(Clay::UI::Box) {}
+
+	my $root  = My::Box->new(id => 'root');
+	my $panel = My::Box->new(id => 'panel');
+	my $child = My::Box->new;
+	$root->add_child($panel);
+	$panel->add_child($child);
+
+	my $ui = Clay::UI->new(width => 800, height => 600, root => $root);
+
+	$child->parent;    # $panel
+	$child->root;      # $root
+	$child->ui;        # $ui
+
+	$root->remove_child('panel');
+	$child->root;      # $panel: the removed subtree stands alone
+	$child->ui;        # undef
 
 =head1 DESCRIPTION
 
-Mixin role providing two pieces of upward navigation for Clay::UI
-widgets:
+C<Clay::UI::Role::Layout::HasParent> gives every widget its way up the
+tree: C<parent>, C<root> and C<ui>. L<Clay::UI::Role::Core::Element>
+and L<Clay::UI::Role::Core::TextNode> compose it, so every element
+widget and every text widget has these methods.
 
-=over 4
-
-=item *
-
-A C<parent> reader that returns the widget directly containing this one
-(or C<undef> for an unparented widget).
-
-=item *
-
-A C<root> method that walks the parent chain and returns the topmost
-ancestor (or C<$self> if this widget has no parent).
-
-=back
-
-The C<parent> slot is a weak reference: it does not keep the parent
-alive. The widget tree is held together by parents owning their
-C<children> arrayrefs, not by children referring back up.
-
-=head1 ATTACHING AND REMOVING
-
-B<A widget can be attached whenever it has no parent.> Attaching (for
-example L<Clay::UI::Role::Core::Container/add_child>) stamps the parent;
-attaching a widget that still has one dies with "is still attached to a
-parent; remove it first", whether the new parent is another widget or
-the same one again.
-
-Removing a widget (C<remove_child>, C<remove_children_with>,
-C<clear_children>, a Grid row removal or replacement) detaches it: its
-C<parent> becomes undef, it becomes the C<root> of its own subtree, and
-C<ui> returns undef for that subtree. Its hover, press and focus state
-is released on the way out, so it is idle when it comes back. A detached
-widget, like one whose parent has been garbage-collected, can be
-attached again, to its old parent or any other, or become the root of a
-L<Clay::UI>. Once attached it renders and receives pointer events like
-any other widget, from the next frame on; without a user C<id> it gets
-the id derived from its new position.
+The parent reference is weak: it does not keep the parent alive. A
+widget tree is held together by parents holding their children, and a
+whole tree by the L<Clay::UI> that has its root.
 
 =head1 METHODS
 
 =head2 parent
 
-Read-only accessor. Returns the widget that owns this one, or C<undef>
-if the widget has never been attached, has been removed from its
-parent, or its parent has been garbage-collected (the back-reference is
-weak).
+	my $parent = $widget->parent;
+
+Returns the widget this one is a child (or internal child) of. Returns
+undef when the widget was never attached, was removed from its parent,
+or its parent has been freed. Read-only: attaching and removing
+(L</ATTACHING AND REMOVING>) set it.
 
 =head2 root
 
-Walks C<< $self->parent->parent->... >> until the chain ends and
-returns the topmost widget. For an unparented widget returns C<$self>.
-If a mid-chain ancestor has been garbage-collected, returns the highest
-still-alive ancestor on the surviving prefix of the chain.
+	my $top = $widget->root;
 
-Each call walks the chain; the result is not cached. Trees are shallow
-enough in practice that the walk cost is negligible.
+Follows C<parent> up to the topmost widget and returns it; for a widget
+without a parent that is the widget itself. If an ancestor has been
+freed, returns the highest ancestor still reachable. The walk runs on
+every call; nothing is cached.
 
 =head2 ui
 
-Returns the L<Clay::UI> controller that owns this widget's tree, or
-C<undef> if the widget is not attached to a Clay::UI (not yet, or no
-longer: a removed subtree has no controller). Walks up to the root
-widget and returns the controller stamped there by
-C<< Clay::UI->new(root => $root) >>.
+	my $ui = $widget->ui;
 
-The Clay::UI back-reference is held weakly; if the controller has been
-garbage-collected, C<ui> returns C<undef>.
+Returns the L<Clay::UI> whose tree this widget is part of: the UI
+created with C<< Clay::UI->new(root => $root) >> for the widget's
+C<root>. Returns undef when the widget is not part of a UI: not yet
+attached to one, removed from it, or the UI has been freed (the
+reference to the UI is weak).
+
+=head1 ATTACHING AND REMOVING
+
+A widget can be attached whenever it has no parent. Attaching (for
+example L<Clay::UI::Role::Core::Container/add_child>) sets its parent;
+attaching a widget that still has one dies with
+C<Clay::UI: widget ... is still attached to a parent; remove it first>,
+whether the new parent is another widget or the same one again.
+
+
+Removing a widget (C<remove_child>, C<remove_children_with>,
+C<clear_children>, a removed or replaced row or cell of a
+L<Clay::UI::Grid>, C<remove_internal_children>) detaches it:
+
+=over 4
+
+=item *
+
+its C<parent> becomes undef and it is the C<root> of its own subtree;
+
+=item *
+
+C<ui> returns undef for the whole subtree;
+
+=item *
+
+hover, press and focus inside the subtree are released on the way out,
+with the usual C<OnHoverStopped> and C<OnBlur> events, so the subtree
+is idle when it comes back.
+
+=back
+
+A detached widget, like one whose parent has been freed, can be
+attached again, to its old parent or another one, or become the root of
+a new L<Clay::UI>. Once attached, the next C<render> lays it out, and
+it can be hovered and pressed from the frame after that (the pointer is
+tested against the previous frame's layout). Without an C<id> it gets the id derived from
+its new position (see L<Clay::UI::Role::Core::Element/resolve_id>).
+
+The root of a L<Clay::UI> belongs to that UI as long as the UI exists:
+it cannot become a child, and a second Clay::UI on the same root dies.
+The root refers to its UI weakly, so once the Clay::UI object is freed
+the root is free again (it can become a child or the root of a new
+Clay::UI).
+
+=head1 SEE ALSO
+
+L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>,
+L<Clay::UI::Role::Core::Container>, L<Clay::UI>.
 
 =cut

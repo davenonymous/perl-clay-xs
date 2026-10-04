@@ -51,74 +51,113 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Interaction::Disableable - role for widgets that can be
-disabled
+Clay::UI::Role::Interaction::Disableable - role for widgets that can be switched off
 
 =head1 SYNOPSIS
 
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
+
 	use Object::Pad;
-	use Clay::UI::Role::Core::Element;
+	use Clay::UI;
+	use Clay::UI::Box;
 	use Clay::UI::Role::Interaction::Focusable;
 	use Clay::UI::Role::Interaction::Pressable;
 	use Clay::UI::Role::Interaction::Disableable;
 
 	class My::Button :strict(params)
-		:does(Clay::UI::Role::Core::Element)
+		:does(Clay::UI::Box)
 		:does(Clay::UI::Role::Interaction::Focusable)
 		:does(Clay::UI::Role::Interaction::Pressable)
 		:does(Clay::UI::Role::Interaction::Disableable)
 	{}
 
-	my $button = My::Button->new( id => 'save', disabled => 1 );
-	$button->can_focus;      # 0 while disabled
-	$button->disabled(0);    # enabled again: can take the focus, can be pressed
-	$button->is_enabled;     # 1
+	my $button = My::Button->new(id => 'save', disabled => 1);
+	my $ui     = Clay::UI->new(width => 400, height => 300, root => $button);
+
+	say $button->can_focus;     # 0 while disabled
+	$button->disabled(0);       # enabled again: can take the focus and be pressed
+	say $button->is_enabled;    # 1
+	say $button->can_focus;     # 1
 
 =head1 DESCRIPTION
 
-A widget that composes this role can be switched off. While it is
+A widget that composes this role can be disabled. While it is
 disabled:
 
 =over 4
 
 =item *
 
-it cannot take the focus: L<Clay::UI::Role::Interaction::Focusable/"can_focus, can_focus($bool)">
-returns 0, so Tab skips it and C<set_focused_widget> rejects it, while
-the widget's own C<can_focus> wish is kept for when it is enabled again;
+it cannot take the focus: L<Clay::UI::Role::Interaction::Focusable/can_focus>
+returns 0, so C<focus_next> and C<focus_previous> skip it and
+C<set_focused_widget> rejects it. The widget's own C<can_focus> wish is
+kept for when it is enabled again;
 
 =item *
 
-it is never armed or pressed (L<Clay::UI::Interaction/"update(%args)">): a press
-over it fires no C<OnPress>, a release no C<OnRelease>, and C<is_pressed>
-stays 0, although it is still hovered;
+it is never armed or pressed (see
+L<Clay::UI::Interaction/PRESS AND RELEASE>): a press over it fires no
+C<OnPress> at it, a release no C<OnRelease>, and C<is_pressed> stays 0.
+It is still hovered and still gets the hover events. A press over a
+disabled Pressable goes to the nearest enabled Pressable under the
+pointer, for example a pressable card around a disabled button, since
+the button does not take part (see F<KNOWN-ISSUES.md>, issue 16);
 
 =item *
 
 it has the derived state C<disabled> (see
-L<Clay::UI::Role::Style::HasStates/DERIVED STATES>).
+L<Clay::UI::Role::Style::HasStates>), so a style can depend on it.
 
 =back
 
 Disabling a widget that has the focus, or that is armed or pressed,
-drops that at once: the interaction tracker fires C<OnBlur> on it right
-away (see L<Clay::UI::Interaction/"release_ineligible($widget)">).
+takes that away at once: it is disarmed and unpressed, and a focused
+widget gets C<OnBlur> before the C<disabled> writer returns (see
+L<Clay::UI::Interaction/release_ineligible>).
 
-Composes L<Clay::UI::Role::Layout::HasParent> (for the C<ui>
-back-reference) and L<Clay::UI::Role::Style::HasStates>.
+Disabling a widget does not disable its children; each widget has its
+own C<disabled> value.
+
+The role composes L<Clay::UI::Role::Layout::HasParent> and
+L<Clay::UI::Role::Style::HasStates>.
+
+=head1 PARAMETERS
+
+=head2 disabled (constructor parameter)
+
+	My::Button->new(disabled => 1);
+
+Constructor parameter: whether the widget starts disabled, any plain
+boolean value, stored as 1 or 0; default 0. Dies for a reference with
+C<Clay::UI: 'disabled' must be a plain boolean value>.
 
 =head1 METHODS
 
-=head2 disabled, disabled($bool)
+=head2 disabled
 
-Reads or writes whether the widget is disabled, 1 or 0. The named
-argument C<disabled> of the constructor sets it at first (default 0).
-Both take any plain boolean value and die for a reference. A write that
-changes the value bumps the revision (L<Clay::UI::Revision>) and lets
-the interaction tracker release the widget; it returns the new value.
+	my $off = $widget->disabled;    # 1 or 0
+	$widget->disabled(1);
+
+Reads or writes whether the widget is disabled. A write takes one plain
+boolean value and returns the new value, 1 or 0. A write that changes
+the value bumps the revision (L<Clay::UI::Revision>) and, when the
+widget belongs to a L<Clay::UI>, releases its focus, arming and press
+as described above; writing the current value does nothing. Dies with
+C<Clay::UI: 'disabled' must be a plain boolean value> for a reference
+and C<Clay::UI: 'disabled' takes one value> for more than one value.
 
 =head2 is_enabled
 
-1 while the widget is not disabled, 0 while it is.
+	my $on = $widget->is_enabled;
+
+Returns 1 while the widget is not disabled, 0 while it is.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Role::Interaction::Focusable>,
+L<Clay::UI::Role::Interaction::Pressable>, L<Clay::UI::Interaction>.
 
 =cut

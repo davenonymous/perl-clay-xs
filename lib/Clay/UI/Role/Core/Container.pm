@@ -41,32 +41,43 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Core::Container - Element role with public child mutators
+Clay::UI::Role::Core::Container - element widget role with public child mutators
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
 	use Clay::UI::Role::Core::Container;
+	use Clay::UI::Text;
 
 	class My::Panel :strict(params) :does(Clay::UI::Role::Core::Container) {}
+	class My::Label :strict(params) :does(Clay::UI::Text) {}
 
-	my $panel = My::Panel->new(id => 'panel');
-	$panel->add_child($header)->add_child($body, $footer);
+	my $panel  = My::Panel->new(id => 'panel');
+	my $header = My::Panel->new(id => 'header');
+	my $body   = My::Panel->new(id => 'body');
+
+	$panel->add_child($header)->add_child($body, My::Label->new(text => 'footer'));
 	$panel->remove_child('body');
+	$panel->remove_children_with(sub { $_->isa('My::Label') });
+	$panel->clear_children;
 
 =head1 DESCRIPTION
 
-Extends L<Clay::UI::Role::Core::Element> with the public methods that
-change a widget's children. Composed by L<Clay::UI::Box>,
-L<Clay::UI::Grid::Cell> and L<Clay::UI::Role::Layout::HasScroll>.
-L<Clay::UI::Grid> does not compose it: a grid's children are its rows,
-managed through C<append_row> and friends.
+C<Clay::UI::Role::Core::Container> extends
+L<Clay::UI::Role::Core::Element> with the public methods that change a
+widget's children. L<Clay::UI::Box>, L<Clay::UI::Grid::Cell> and
+L<Clay::UI::Role::Layout::HasScroll> compose it. L<Clay::UI::Grid> does
+not: a grid's children are its rows, changed through C<append_row> and
+the other row methods.
 
-All mutators follow the rules in
-L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>: new children are
-validated as a whole before anything changes, and removed children are
-detached; they can be attached again (see
-L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>).
+All methods follow L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>:
+new children are checked as a whole before anything changes, every
+change bumps the revision (L<Clay::UI::Revision>), and removed children
+are detached and can be attached again (see
+L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>). Changes
+show from the next C<render> on. None of these methods see the internal
+children of L<Clay::UI::Role::Core::Element/add_internal_children>.
 
 =head1 METHODS
 
@@ -74,32 +85,49 @@ L<Clay::UI::Role::Layout::HasParent/ATTACHING AND REMOVING>).
 
 	$widget->add_child(@kids);
 
-Appends one or more widgets. Each must be a blessed instance consuming
-C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>
-that has no parent (never attached, or removed since); see
-L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN> for everything that
-dies. Returns C<$self> so calls chain:
+Appends one or more widgets, in the given order. Each must be a widget
+(composing L<Clay::UI::Role::Core::Element> or
+L<Clay::UI::Role::Core::TextNode>) without a parent: never attached, or
+removed since. Returns the widget, so calls chain:
 
 	$root->add_child($header)->add_child($body, $footer);
 
+Dies, changing nothing, for the cases listed in
+L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>, for example
+C<Clay::UI: widget ... is still attached to a parent; remove it first>.
+
 =head2 clear_children
 
-Removes and detaches every child. Returns C<$self>.
+	$widget->clear_children;
+
+Removes and detaches every child. Returns the widget.
 
 =head2 remove_child
 
 	$widget->remove_child($id);
 
-Removes and detaches every direct child whose C<id> equals C<$id>. Text
-nodes have no id and are never removed. Unknown ids are silently
-ignored. Returns C<$self>.
+Removes and detaches every direct child whose C<id> equals C<$id>
+(string comparison). Children without an id and text widgets are never
+matched. An id no child has is ignored. Returns the widget.
 
 =head2 remove_children_with
 
-	$widget->remove_children_with(sub { $_->id =~ /^tmp-/ });
+	$widget->remove_children_with(sub { $_->can('id') && ($_->id // '') =~ /^tmp-/ });
+	$widget->remove_children_with(sub ($child) { $child->isa('My::Row') });
 
 Removes and detaches every direct child for which
-C<< $predicate->($child) >> is true. C<$_> is also bound to the current
-child inside the block. Returns C<$self>.
+C<< $predicate->($child) >> is true. C<$_> is set to the child as well.
+Text widgets are passed too and have no C<id> method; guard such calls.
+Returns the widget.
+
+If a removal releases the focused or hovered widget and one of the
+resulting C<OnBlur> / C<OnHoverStopped> listeners dies, the removal
+still completes and the method then dies with the listener's error
+(this applies to all removal methods).
+
+=head1 SEE ALSO
+
+L<Clay::UI::Role::Core::Element>, L<Clay::UI::Box>,
+L<Clay::UI::Role::Layout::HasParent>.
 
 =cut

@@ -539,222 +539,518 @@ Clay::UI::Interaction - hover, press and focus state of a Clay::UI
 
 =head1 SYNOPSIS
 
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
+
+	use Object::Pad;
+	use Clay::UI;
+	use Clay::UI::Box;
+	use Clay::UI::Role::Interaction::Pressable;
+	use Clay::UI::Role::Interaction::Focusable;
+
+	class My::Panel  :strict(params) :does(Clay::UI::Box) {}
+	class My::Button :strict(params)
+		:does(Clay::UI::Box)
+		:does(Clay::UI::Role::Interaction::Pressable)
+		:does(Clay::UI::Role::Interaction::Focusable)
+	{}
+
+	my $save   = My::Button->new(id => 'save');
+	my $cancel = My::Button->new(id => 'cancel');
+	my $root   = My::Panel->new(id => 'root');
+	$root->add_child($save, $cancel);
+	my $ui = Clay::UI->new(width => 400, height => 300, root => $root);
+
+	$save->on('OnRelease', sub ($event) { say 'save clicked'; return });
+
 	my $interaction = $ui->interaction;
 
-	$interaction->is_hovered($button);   # also $button->is_hovered
-	$interaction->is_pressed($button);   # also $button->is_pressed
-	my $widgets = $interaction->under_pointer;
+	# Synthetic input, for example in a test or for keyboard activation:
+	$interaction->update(over => [ $root, $save ], down => 1, x => 40, y => 12);
+	$interaction->update(over => [ $root, $save ], down => 0, x => 40, y => 12);
 
-	# Synthetic input, e.g. in a test or for keyboard activation:
-	$interaction->update(over => [ $button, $panel ], down => 1, x => 40, y => 12);
-	$interaction->update(over => [ $button, $panel ], down => 0, x => 40, y => 12);
+	$interaction->is_hovered($save);    # 1, also $save->is_hovered
+	$interaction->is_pressed($save);    # 0: the button is up again
+	my $widgets = $interaction->under_pointer;   # [ $root, $save ]
 
-	# Focus, e.g. from a Tab key handler:
-	$interaction->set_focused_widget($name_input);
-	$interaction->focus_next;
-	my $focused = $interaction->get_focused_widget;
+	# Focus, for example from a Tab key handler:
+	$interaction->focus_next;                    # focuses $save
+	$interaction->focus_next;                    # focuses $cancel
+	$interaction->set_focused_widget($save);
+	my $focused = $interaction->get_focused_widget;   # $save
 
 =head1 DESCRIPTION
 
 Every L<Clay::UI> owns one interaction tracker, returned by
-C<< $ui->interaction >>. It holds which widgets are hovered, armed and
-pressed, turns pointer input into state changes, and fires the pointer
-events (see L<Clay::UI/POINTER EVENTS>). C<< $ui->render >> feeds it the
-real pointer every frame; callers may feed it synthetic input in
-between. Synthetic state lasts until the next C<render> reports where
-the real pointer is. It also holds which widget has focus and moves it
-on request (see L</FOCUS>).
-
-The widget readers C<is_hovered> (L<Clay::UI::Role::Interaction::Hoverable>),
-C<is_pressed> (L<Clay::UI::Role::Interaction::Pressable>) and
-C<is_focused> (L<Clay::UI::Role::Interaction::Focusable>) and the
-derived C<hovered> / C<pressed> / C<focused> states of
-L<Clay::UI::Role::Style::HasStates> ask this object.
-
-Whenever the hovered, armed, pressed or focused widgets change, the
-tracker bumps the process-wide revision (L<Clay::UI::Revision>), since
-widgets may style themselves by those states.
-
-=head1 METHODS
-
-=head2 update(%args)
-
-One pointer frame:
+C<< $ui->interaction >>. The tracker holds:
 
 =over 4
 
-=item C<over> (required)
+=item *
 
-Arrayref of the widgets under the pointer in Clay's pointer-over order:
-the topmost floating root first, pre-order within each root, so within a
-root a later widget is a descendant of an earlier one or drawn over it.
-Widgets must belong to this Clay::UI. Only Hoverables
-become hovered and only Pressables can be pressed; the rest are
-reported by C<under_pointer>.
+which widgets are I<hovered> (L<Clay::UI::Role::Interaction::Hoverable>
+widgets under the pointer),
 
-=item C<down> (required)
+=item *
 
-Whether the pointer button is down. A change from up to down is a
-press, a change from down to up a release.
+which are I<armed> (L<Clay::UI::Role::Interaction::Pressable> widgets
+that were under the pointer when it went down, until it goes up),
 
-=item C<x>, C<y>
+=item *
 
-The pointer position carried by C<OnPress> and C<OnRelease>; default 0.
+which are I<pressed> (armed, enabled, under the pointer, button down),
 
-=item C<scrolled>
+=item *
 
-Arrayref of C<[ $widget, $delta_x, $delta_y ]> for scroll containers
-(widgets composing L<Clay::UI::Role::Layout::HasScroll>) that moved,
-each at most once; each gets an C<OnScroll>.
+and which widget has the I<focus>
+(L<Clay::UI::Role::Interaction::Focusable>).
 
 =back
 
-All state changes happen first, then the events fire in this order:
-C<OnHoverStopped>, C<OnHoverStart>, C<OnPress>, C<OnRelease>,
-C<OnScroll>, each group in tree order (widgets the last layout did not
-reach come after the others, in the order of the live tree). Every
-event fires even if a listener dies; C<update> then rethrows the first
-error. Calling C<update> from one of its own listeners dies.
+It turns pointer input into changes of these sets and fires the events
+that go with them (C<OnHoverStart>, C<OnHoverStopped>, C<OnPress>,
+C<OnRelease>, C<OnScroll>, C<OnFocus>, C<OnBlur>; see
+L<Clay::UI/EVENTS>). C<< $ui->render >> passes it the real pointer
+every frame through L</update>; you may call C<update> with synthetic
+input between frames. Synthetic state lasts until the next C<render>
+reports where the real pointer is.
 
-An event that an earlier listener of the same update made stale is
-dropped instead: C<OnPress>, C<OnRelease> and C<OnScroll> for a widget
-that has left the tree, C<OnHoverStart> for a widget that is no longer
-hovered. A widget gets C<OnHoverStopped> only after its
-C<OnHoverStart>, and C<OnBlur> only after its C<OnFocus>.
+The widget readers C<is_hovered>, C<is_pressed> and C<is_focused>, and
+the derived C<hovered>, C<pressed> and C<focused> states of
+L<Clay::UI::Role::Style::HasStates>, ask this object. Widgets hold no
+interaction state of their own.
 
-A press arms every enabled Pressable under the pointer (a widget
-composing L<Clay::UI::Role::Interaction::Disableable> that is disabled
-is never armed or pressed) and fires C<OnPress> at
-the one drawn on top: the last Pressable of C<over> that lies in the
-same root as the first one, skipping that one's ancestors. Nested
-Pressables give the innermost one; overlapping siblings, such as the
-children of a C<CLAY_BACK_TO_FRONT> container, give the later one; a
-Pressable in a floating root beats everything below that root. A
-Pressable is pressed
-while it is armed, under the pointer and the button is down. A release
-fires C<OnRelease> at the armed Pressable under the pointer chosen the
-same way, then disarms everything.
+Whenever the hovered, armed, pressed or focused widgets change, the
+tracker bumps the revision (L<Clay::UI::Revision>), because widgets may
+look different in those states.
 
-=head2 release_ineligible($widget)
+=head1 CONSTRUCTOR
 
-Called by a widget of this UI right after it became disabled (see
-L<Clay::UI::Role::Interaction::Disableable>) or its C<can_focus> was
-written. A disabled widget stops being armed and pressed at once, and a
-focused widget whose C<can_focus> is now false loses the focus: it gets
-C<OnBlur> before this returns, as from C<set_focused_widget(undef)>.
-Nothing happens to a widget that may keep what it has. Widget classes
-call it from their setters; you do not call it yourself.
+=head2 new
 
-=head2 is_hovered($widget), is_armed($widget), is_pressed($widget)
+	my $interaction = Clay::UI::Interaction->new(ui => $ui, tree_order => $sorter);
 
-1 or 0.
+L<Clay::UI> creates its tracker itself (read it with
+L<Clay::UI/interaction>); you never need to. Both parameters are
+required; unknown parameters die.
+
+=head2 ui
+
+The L<Clay::UI> the tracker belongs to. The tracker holds it weakly;
+the methods that need it die once it is freed, with
+C<Clay::UI::Interaction::update: its Clay::UI no longer exists> (the
+method's own name in place of C<update>).
+
+=head2 tree_order
+
+A coderef called as C<< $sorter->(@widgets) >> that returns the widgets
+in the tree order of the last layout (depth-first pre-order). Events of
+one kind fire in this order. Clay::UI passes a coderef that asks its
+last completed frame. C<new> dies with
+C<Clay::UI::Interaction: 'tree_order' must be a coderef> for anything
+else.
+
+
+=head1 POINTER METHODS
+
+=head2 update
+
+	$interaction->update(
+		over     => [ $panel, $button ],   # widgets under the pointer, topmost root first
+		down     => 1,                     # button state
+		x        => 40,                    # pointer position for OnPress / OnRelease
+		y        => 12,
+		scrolled => [ [ $list, 0, -30 ] ], # scroll containers that moved
+	);
+
+Processes one pointer frame: changes the hovered, armed and pressed
+widgets, then fires the events. L<Clay::UI/render> calls it every
+frame; call it yourself to feed synthetic input. Named arguments:
+
+=over 4
+
+=item over
+
+Required. Arrayref of the widgets under the pointer, in Clay's
+pointer-over order: the topmost floating element first, and each
+floating element (or the main tree) in depth-first pre-order. Within
+one such root, a later widget is therefore a descendant of an earlier
+one or drawn over it. Every widget must belong to this Clay::UI. Only
+Hoverable widgets become hovered and only Pressable widgets can be
+armed or pressed; L</under_pointer> reports all of them.
+
+=item down
+
+Required. Whether the pointer button is down, a plain boolean. A change
+from up to down is a I<press>, from down to up a I<release>.
+
+=item x
+
+=item y
+
+Optional. The pointer position that C<OnPress> and C<OnRelease> carry;
+finite numbers, default 0.
+
+=item scrolled
+
+Optional. Arrayref of C<[ $widget, $delta_x, $delta_y ]> entries, one
+per scroll container (a widget composing
+L<Clay::UI::Role::Layout::HasScroll>) that moved; each gets an
+C<OnScroll> with those deltas. A widget may appear only once.
+
+=back
+
+Order of work:
+
+=over 4
+
+=item 1.
+
+All state changes happen first: hover, arming, pressing (see
+L</PRESS AND RELEASE>), and the list behind L</under_pointer>.
+
+=item 2.
+
+Then the events fire in this order: every C<OnHoverStopped>, every
+C<OnHoverStart>, C<OnPress>, C<OnRelease>, every C<OnScroll>. Events of
+one kind fire in tree order; widgets the last layout did not reach come
+after the others, in the depth-first pre-order of the tree they are in
+now.
+
+=item 3.
+
+Every event fires even if a listener dies; C<update> then rethrows the
+first error.
+
+=back
+
+An event that an earlier listener of the same call made stale is
+dropped: C<OnPress>, C<OnRelease> and C<OnScroll> for a widget that has
+left the tree, C<OnHoverStart> for a widget that is no longer hovered,
+C<OnHoverStopped> for one that is hovered again. A widget gets
+C<OnHoverStopped> only after its C<OnHoverStart>, and C<OnBlur> only
+after its C<OnFocus>.
+
+Listeners may change the tree and the focus, but may not call
+C<update> again, and that includes listeners of the events
+C<< $ui->render >> fires.
+
+Returns nothing. Dies (all messages start with
+C<Clay::UI::Interaction::update:>) for an unknown argument, a missing
+C<over> or C<down>, a reference as C<down>, a non-finite C<x> or C<y>,
+a widget in C<over> or C<scrolled> that does not belong to this
+Clay::UI (C<'over' must hold widgets of this Clay::UI>), a malformed
+C<scrolled> entry, a C<scrolled> widget that is no scroll container, a
+widget listed twice in C<scrolled>, and a call from one of its own
+listeners (C<called from one of its own listeners>). Also dies with
+C<Clay::UI::Interaction::update: its Clay::UI no longer exists>.
 
 =head2 under_pointer
 
-Arrayref of the widgets of the last update's C<over> that still exist
-and are still in the tree, Hoverable or not.
+	my $widgets = $interaction->under_pointer;
+
+Returns a new arrayref of the widgets of the last C<update>'s C<over>
+(normally: under the pointer at the last C<render>), in that order,
+Hoverable or not. Widgets that have been freed or removed from the
+tree since are left out.
+
+=head2 is_hovered
+
+	my $bool = $interaction->is_hovered($widget);
+
+Returns 1 while C<$widget> is hovered, 0 otherwise.
+L<Clay::UI::Role::Interaction::Hoverable/is_hovered> asks this.
+
+=head2 is_armed
+
+	my $bool = $interaction->is_armed($widget);
+
+Returns 1 while C<$widget> is armed (see L</PRESS AND RELEASE>), 0
+otherwise.
+
+=head2 is_pressed
+
+	my $bool = $interaction->is_pressed($widget);
+
+Returns 1 while C<$widget> is pressed, 0 otherwise.
+L<Clay::UI::Role::Interaction::Pressable/is_pressed> asks this.
+
+=head1 PRESS AND RELEASE
+
+Only enabled Pressables take part: a widget composing
+L<Clay::UI::Role::Interaction::Disableable> that is disabled is never
+armed or pressed, although it is still hovered. Below, I<candidates>
+are the enabled Pressables in C<over>, in C<over>'s order. So a press
+over a disabled Pressable goes to the nearest enabled Pressable under
+the pointer, for example a pressable card around a disabled button:
+the card gets C<OnPress> and C<OnRelease> (see F<KNOWN-ISSUES.md>,
+issue 16).
+
+=over 4
+
+=item Press
+
+On a press (C<down> changes from false to true), every candidate
+becomes armed, and one of them gets C<OnPress>: the I<origin>.
+
+=item Origin
+
+Start with the first candidate. Walk through the remaining candidates
+in order; a candidate replaces the current pick unless it is an
+ancestor of the current pick, or it lies in a different I<root> than
+the first candidate. A widget's root is its nearest ancestor (or
+itself) that composes L<Clay::UI::Role::Layout::HasFloating> with a
+C<floating> setting whose C<attach_to> is not C<CLAY_ATTACH_TO_NONE>;
+widgets without such an ancestor share the main root. The last pick is
+the origin.
+
+In effect: of nested Pressables the innermost one wins (a button inside
+a pressable card); of overlapping siblings, such as the children of a
+C<CLAY_BACK_TO_FRONT> container, the later one wins; a Pressable inside
+a floating element beats every Pressable below that element, because
+Clay lists the topmost floating element first.
+
+=item Pressed
+
+After every C<update>, a Pressable is pressed when it is armed, enabled
+and in C<over>, and C<down> is true. Dragging off an armed widget
+unpresses it; dragging back on (button still down) presses it again.
+Dragging onto a widget that was not armed does not press it.
+
+=item Release
+
+On a release (C<down> changes from true to false), the origin is chosen
+again by the same rule, but only among the candidates that are armed.
+It gets C<OnRelease>: a completed click. Then every widget is disarmed.
+A press on a button inside a pressable card that is dragged off the
+button and released over the card gives the card its C<OnRelease>,
+because the press armed both. A release over no armed candidate fires
+nothing.
+
+=back
+
+C<OnPress> and C<OnRelease> bubble with C<IF_CONTINUE>
+(L<Clay::UI::Enum::Bubble>): the card in the example above sees the
+button's C<OnPress> only as a bubbled event, when the button has no
+C<OnPress> listener or all its listeners return
+C<< Clay::UI::Enum::Result->CONTINUE >>.
 
 =head1 FOCUS
 
-Focus changes only through C<set_focused_widget>, C<focus_next>,
-C<focus_previous>, the removal of a subtree holding the focused widget
-(which blurs it) and the focused widget becoming unable to take the
-focus, by C<can_focus(0)> or by being disabled (which blurs it too, see
-L</"release_ineligible($widget)">). C<render> never changes focus. Event listeners,
-including pointer listeners running inside C<update>, may move focus.
+The focus is held by at most one widget, a
+L<Clay::UI::Role::Interaction::Focusable> of this UI. It changes only
+through:
 
-Focus follows the widget tree as it is now, while pointer events follow
-the tree of the last layout: focus must work before the first C<render>
-and right after the tree changed, whereas the pointer was hit-tested
-against the last layout.
+=over 4
 
-The focus methods die when the Clay::UI that owns this object is gone.
+=item *
+
+L</set_focused_widget>, L</focus_next> and L</focus_previous>;
+
+=item *
+
+the removal of a subtree that holds the focused widget (it gets
+C<OnBlur>, see L</REMOVED WIDGETS>);
+
+=item *
+
+the focused widget becoming unable to take the focus, through
+C<can_focus(0)> or by being disabled (it gets C<OnBlur>, see
+L</release_ineligible>).
+
+=back
+
+C<render> never moves the focus. Event listeners, pointer listeners
+included, may move it.
+
+The focus follows the widget tree as it is now, while pointer events
+follow the tree of the last layout: the focus must work before the
+first C<render> and right after the tree changed, whereas the pointer
+was tested against the last layout.
+
+L</set_focused_widget>, L</focus_next>, L</focus_previous>,
+L</default_next_focus> and L</default_previous_focus> die with
+C<Clay::UI::Interaction::E<lt>methodE<gt>: its Clay::UI no longer exists>
+once the Clay::UI that owns this tracker has been freed.
+
 
 =head2 get_focused_widget
 
-The widget holding focus, or C<undef> if none is focused (or the
-focused widget has been garbage-collected). The reference is held
-weakly.
+	my $widget = $interaction->get_focused_widget;
 
-=head2 is_focused($widget)
+Returns the widget that has the focus, or C<undef> when none has it (or
+the focused widget has been freed; the tracker holds it weakly).
 
-1 or 0.
+=head2 is_focused
 
-=head2 can_take_focus($widget)
+	my $bool = $interaction->is_focused($widget);
 
-1 when C<set_focused_widget> would accept C<$widget> now: a widget
-composing L<Clay::UI::Role::Interaction::Focusable>, part of this UI,
-whose C<can_focus> is true; otherwise 0 (for anything, also a
-non-widget). Use it to find a widget to focus, for example the nearest
-ancestor of a clicked widget that can take the focus.
+Returns 1 when C<$widget> has the focus, 0 otherwise.
+L<Clay::UI::Role::Interaction::Focusable/is_focused> asks this.
 
-=head2 set_focused_widget($widget)
+=head2 can_take_focus
 
-Sets focus to C<$widget>; C<undef> clears focus (blur). Validates
-loudly, before anything changes: dies if C<$widget> is not blessed, does
-not consume L<Clay::UI::Role::Interaction::Focusable>, belongs to a
-different Clay::UI, or its C<can_focus> returns false.
+	my $bool = $interaction->can_take_focus($widget);
 
-Then the focus moves - the C<focused> state moves from the previous
-widget to the new one - and L<Clay::UI::Events::OnBlur> fires on the
-previously focused widget (if any) and L<Clay::UI::Events::OnFocus> on
-the new one (if any). Both events fire even if the first listener dies;
-the first error is rethrown afterwards, with focus already changed. An
-C<OnBlur> listener may move focus again; the C<OnFocus> of this call is
-then dropped, since its widget no longer has focus.
-Focusing the already-focused widget is a no-op (no events fire).
+Returns 1 when L</set_focused_widget> would accept C<$widget> now: it
+composes L<Clay::UI::Role::Interaction::Focusable>, belongs to this UI
+(and is not being removed), and its C<can_focus> is true. Returns 0
+otherwise, also for a non-widget. Use it to find a widget to focus, for
+example the nearest ancestor of a clicked widget that can take the
+focus:
 
-=head2 focus_next, focus_previous
+	my $target = $clicked;
+	$target = $target->parent until !defined $target || $interaction->can_take_focus($target);
+	$interaction->set_focused_widget($target) if defined $target;
 
-Move focus to the next / previous focusable widget.
+=head2 set_focused_widget
 
-The default order is the depth-first pre-order of the tree, skipping
-widgets whose C<can_focus> is false, wrapping from end to beginning
-(and vice versa). With no focused widget, C<focus_next> focuses the
-first widget of the chain and C<focus_previous> the last.
+	$interaction->set_focused_widget($widget);
+	$interaction->set_focused_widget(undef);     # clear the focus
+
+Gives the focus to C<$widget>, or clears it for C<undef>. Focusing the
+widget that already has the focus, or clearing an empty focus, does
+nothing (no events).
+
+The target is checked before anything changes. Dies with
+C<Clay::UI::Interaction::set_focused_widget: target> followed by
+C<must be a blessed widget>,
+C<must consume Clay::UI::Role::Interaction::Focusable>,
+C<does not belong to this Clay::UI> or
+C<is not currently focusable (can_focus returned false)>.
+
+
+Then the focus moves (the derived C<focused> state moves with it), the
+revision is bumped, and L<Clay::UI::Events::OnBlur> fires at the widget
+that had the focus (if any), then L<Clay::UI::Events::OnFocus> at the
+new one (if any). Both fire even if the first listener dies; the first
+error is rethrown afterwards, with the focus already moved. An
+C<OnBlur> listener may move the focus again; the C<OnFocus> of this
+call is then dropped, since its widget no longer has the focus.
+
+=head2 focus_next
+
+	$interaction->focus_next;
+
+Moves the focus to the next widget, for example on Tab. Returns
+nothing.
+
+=over 4
+
+=item Default order
+
+The depth-first pre-order of the current tree (children before the
+next sibling), skipping widgets whose C<can_focus> is false and
+wrapping around at the end. With nothing focused, the first widget that
+can take the focus gets it. Internal children of widgets count like
+children.
+
+=item Custom order
 
 If the focused widget or one of its ancestors composes
 L<Clay::UI::Role::Interaction::HasFocusOrder>, the nearest such widget
-decides instead: its C<get_next_focus> / C<get_previous_focus> is
-called. With no focused widget, the root decides if it composes
-HasFocusOrder. The result must be C<undef> (focus does not change), a
-Focusable widget of this UI (focused, or no change if its C<can_focus>
-is false right now), or else the call dies naming the HasFocusOrder
-class and what was wrong with the result.
+decides: its C<get_next_focus> is called. With nothing focused, the root
+widget decides if it composes HasFocusOrder. Its result must be C<undef>
+(the focus stays), or a Focusable widget of this UI, which gets the
+focus (or the focus stays, when its C<can_focus> is false right now).
+Anything else dies with
+C<Clay::UI::Interaction: E<lt>classE<gt> returned ...>, naming the
+HasFocusOrder class and what was wrong.
 
-=head2 default_next_focus, default_previous_focus
 
-The widget the default order would focus next / previously, ignoring
-every HasFocusOrder; C<undef> if no widget can focus. Nothing changes.
-L<Clay::UI::Role::Interaction::HasFocusOrder> uses them to fall back to
-the default order.
+=back
+
+=head2 focus_previous
+
+	$interaction->focus_previous;
+
+Moves the focus to the previous widget, for example on Shift+Tab: the
+mirror of L</focus_next>. With nothing focused, the last widget that
+can take the focus gets it; a HasFocusOrder decides through its
+C<get_previous_focus>.
+
+=head2 default_next_focus
+
+	my $widget = $interaction->default_next_focus;
+
+Returns the widget the default order (see L</focus_next>) would focus
+next, ignoring every HasFocusOrder, or C<undef> when no widget can take
+the focus. Changes nothing. A HasFocusOrder widget calls it to fall
+back to the default order (see
+L<Clay::UI::Role::Interaction::HasFocusOrder/default_next_focus>).
+
+=head2 default_previous_focus
+
+	my $widget = $interaction->default_previous_focus;
+
+The mirror of L</default_next_focus>.
+
+=head2 release_ineligible
+
+	$interaction->release_ineligible($widget);
+
+Drops what C<$widget> may no longer have, at once. A disabled widget
+stops being armed and pressed. A focused widget whose C<can_focus> is
+now false loses the focus and gets C<OnBlur> before this returns, as
+from C<set_focused_widget(undef)>. A widget that may keep everything is
+left alone. Bumps the revision when a state changed.
+
+The C<disabled> writer of L<Clay::UI::Role::Interaction::Disableable>
+and the C<can_focus> writer of L<Clay::UI::Role::Interaction::Focusable>
+call it; you do not call it yourself unless you write such a setter.
 
 =head1 REMOVED WIDGETS
 
-When a subtree leaves the tree, its hovered widgets stop being hovered,
-its armed and pressed widgets are dropped and focus inside it is
-released. Then the hovered ones get C<OnHoverStopped> and the focused
-one gets C<OnBlur>, all at once, during the removal.
+When a subtree leaves the tree, the tracker releases it at once, during
+the removal:
 
-While these events fire, the leaving subtrees already count as gone:
-a listener cannot hover, press or focus a widget inside them
-(C<set_focused_widget> and C<update> die as for a widget of another
-UI).
+=over 4
 
-=head2 release_subtrees(@tops)
+=item 1.
 
-Does the above for every widget of C<@tops> and everything below them,
-and bumps the revision if any state changed. The child-mutation methods
-of L<Clay::UI::Role::Core::Element> call it once per change, with all
-removed children, while they are still attached, so the events bubble
-through their old ancestors; a widget class that detaches children some
-other way must call it too. Every event fires even if a listener dies;
-the first error is rethrown.
+Its hovered widgets stop being hovered, its armed and pressed widgets
+are dropped, its widgets leave L</under_pointer>, and the focus is
+cleared if a widget inside it has it. The revision is bumped when a
+state changed.
 
-=head1 CONSTRUCTION
+=item 2.
 
-L<Clay::UI> builds its tracker with C<ui> (the UI, held weakly) and
-C<tree_order>, a coderef that sorts widgets into the tree order of the
-last layout. Nothing else needs to construct one.
+The hovered widgets get C<OnHoverStopped> (in tree order) and the
+focused widget gets C<OnBlur>. The removed widgets are still attached
+to their parents while these events fire, so C<OnBlur> bubbles through
+the old ancestors and C<< $event->target->parent >> still works.
+
+=back
+
+Armed or pressed widgets get no event: a pending click is simply
+dropped, and the next release fires nothing for them.
+
+While these events fire, the subtree already counts as gone: a listener
+cannot hover, press or focus a widget inside it (C<update> and
+C<set_focused_widget> die as for a widget of another UI). Every event
+fires even if a listener dies; the first error is rethrown after the
+children are detached.
+
+=head2 release_subtrees
+
+	$interaction->release_subtrees(@top_widgets);
+
+Does the above for every widget in C<@top_widgets> and everything below
+them. The child methods of L<Clay::UI::Role::Core::Element> (and so of
+L<Clay::UI::Role::Core::Container> and L<Clay::UI::Grid>) call it once
+per change, with all removed children, while the children are still
+attached. A widget class that detaches children some other way must
+call it too; otherwise you do not call it yourself.
+
+=head1 SEE ALSO
+
+L<Clay::UI> (L<Clay::UI/HOW A FRAME WORKS>, L<Clay::UI/EVENTS>),
+L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Pressable>,
+L<Clay::UI::Role::Interaction::Focusable>,
+L<Clay::UI::Role::Interaction::Disableable>,
+L<Clay::UI::Role::Interaction::HasFocusOrder>, L<Clay::Manual>.
 
 =cut

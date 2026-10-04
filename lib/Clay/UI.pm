@@ -545,144 +545,379 @@ class Clay::UI :strict(params) {
 1;
 
 __END__
-
 =head1 NAME
 
-Clay::UI - Perl-idiomatic high-level layer over Clay::XS
+Clay::UI - widget layer over Clay::XS: build a widget tree, lay it out, turn pointer input into events
 
 =head1 SYNOPSIS
+
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
 
 	use Object::Pad;
 	use Clay::XS qw(sizing_grow sizing_fixed);
 	use Clay::UI;
 	use Clay::UI::Box;
+	use Clay::UI::Text;
+	use Clay::UI::Role::Interaction::Pressable;
 
-	class My::Box :strict(params) :does(Clay::UI::Box) {}
+	# Widget classes: Object::Pad classes composed from Clay::UI roles.
+	class My::Panel  :strict(params) :does(Clay::UI::Box) {}
+	class My::Label  :strict(params) :does(Clay::UI::Text) {}
+	class My::Button :strict(params)
+		:does(Clay::UI::Box)
+		:does(Clay::UI::Role::Interaction::Pressable)
+	{}
 
-	my $root = My::Box->new(
+	# The widget tree.
+	my $root = My::Panel->new(
 		id               => 'root',
-		layout           => { sizing => { width => sizing_grow(), height => sizing_grow() } },
+		layout           => {
+			sizing  => { width => sizing_grow(), height => sizing_grow() },
+			padding => { left => 10, top => 10 },
+		},
 		background_color => [40, 50, 60, 255],
 	);
-	my $button = My::Box->new(
+	my $button = My::Button->new(
 		id     => 'ok',
 		layout => { sizing => { width => sizing_fixed(80), height => sizing_fixed(30) } },
 	);
-	$button->on('OnHoverStart', sub ($event) { warn "over the button\n"; return });
+	$button->add_child(My::Label->new(text => 'OK', font_size => 16));
+	$button->on('OnHoverStart', sub ($event) { say 'over the button'; return });
+	$button->on('OnRelease',    sub ($event) { say 'clicked';         return });
 	$root->add_child($button);
 
-	my $ui = Clay::UI->new(
-		width  => 800,
-		height => 600,
-		root   => $root,
-	);
+	# The UI that owns the tree and its Clay context.
+	my $ui = Clay::UI->new(width => 800, height => 600, root => $root);
 
-	my $commands = $ui->render(
-		pointer_state => { x => 120, y => 80, down => 0 },
-	);
-
-	my $hovered = $ui->interaction->under_pointer;  # arrayref of widget objects
+	# One call per frame: pointer input in, render commands out.
+	for my $down (0, 1, 0) {
+		my $commands = $ui->render(pointer_state => { x => 20, y => 20, down => $down });
+		for my $command (@$commands) {
+			my $widget = $ui->widget_for($command->{userData});
+			# draw $command; $widget is the widget that produced it
+		}
+	}
 
 =head1 DESCRIPTION
 
-C<Clay::UI> wraps the low-level L<Clay::XS> binding in an
-Object::Pad class. The class owns the Clay context, the measure-text
-callback, and the widget back-reference registries, so callers never
-have to invoke C<Clay_*> functions directly. Each L</render> turns the
-pointer and scroll input into widget events (see L</POINTER EVENTS>)
-and then lays out the widget tree.
+C<Clay::UI> is the widget layer of this distribution. You build a tree
+of widgets (Perl objects that describe boxes and text), hand its root
+widget to a C<Clay::UI> object, and call L</render> once per frame.
+C<render> does three things:
 
-Every setter that changes what a frame lays out or draws - widget
-attributes, children, user states, this object's C<width>, C<height> and
-C<measure_text>, and the hovered, armed, pressed and focused widgets of
-its L</interaction> - bumps a process-wide revision counter
-(L<Clay::UI::Revision>); reading never does. A renderer compares the
-counter with the value it saw at its last frame and skips the frame
-while the two are equal. Widgets that keep state of their own call
-C<mark_changed> (see L<Clay::UI::Role::Core::Element/mark_changed>).
+=over 4
 
-The low-level API is untouched and remains independently usable.
+=item *
+
+it turns the frame's pointer and scroll input into widget events
+(L</EVENTS>) and calls your listeners,
+
+=item *
+
+it lays out the widget tree with Clay, and
+
+=item *
+
+it returns Clay's render commands: an arrayref of hashes, each one a
+rectangle, text, border or clipping instruction with a bounding box
+(see L<Clay::XS/RENDER COMMANDS>).
+
+=back
+
+Nothing is drawn. A renderer (your code) draws the render commands with
+whatever graphics library you use, and finds the widget behind each
+command with L</widget_for>.
+
+A C<Clay::UI> object owns one Clay context (a L<Clay::XS> context: one
+independent Clay instance), the measure-text callback and the
+interaction tracker (L<Clay::UI::Interaction>), which holds which
+widgets are hovered, pressed and focused. You never call C<Clay_*>
+functions yourself, with one exception: to animate transitions, call
+C<Clay_SetTransitionHandlers> right after C<< Clay::UI->new >>, while
+the new UI's context is current (see L<Clay::Manual/TRANSITIONS>). The
+low-level L<Clay::XS> API stays usable on its own.
+
+
+For a guided introduction read L<Clay::Manual>; for ready-made
+solutions see L<Clay::Cookbook>.
+
+=head1 WIDGET CLASSES
+
+A I<widget class> is an L<Object::Pad> class that composes roles from
+this distribution. The roles provide the attributes, the children and
+the behaviour; the class itself is often empty:
+
+	class My::Button :strict(params)
+		:does(Clay::UI::Box)                             # an element with layout and style
+		:does(Clay::UI::Role::Interaction::Pressable)    # OnPress / OnRelease
+	{}
+
+There are two kinds of widget:
+
+=over 4
+
+=item element widgets
+
+Compose L<Clay::UI::Role::Core::Element> (usually through
+L<Clay::UI::Box>, which adds layout, background, border, corner radius,
+floating and the public child methods). An element widget becomes one
+Clay element and may have children.
+
+=item text widgets
+
+Compose L<Clay::UI::Role::Core::TextNode> (usually through
+L<Clay::UI::Text>). A text widget becomes one Clay text element and has
+no children.
+
+=back
+
+A grid is an element widget too: a class composing L<Clay::UI::Grid>
+(a widget role like C<Clay::UI::Box> and C<Clay::UI::Text>) lays its
+children out in rows and columns.
+
+Further roles add behaviour: L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Pressable>,
+L<Clay::UI::Role::Interaction::Focusable>,
+L<Clay::UI::Role::Interaction::Disableable>,
+L<Clay::UI::Role::Interaction::HasFocusOrder>,
+L<Clay::UI::Role::Layout::HasScroll> (scroll containers)
+and L<Clay::UI::Role::Core::Preparable> (widgets that rebuild their
+children right before the layout).
+
+Every widget can listen to events with C<on>
+(L<Clay::UI::Role::Events::Listener>); widgets that compose
+L<Clay::UI::Role::Events::Emitter> can also fire them. C<Clay::UI::Box>,
+L<Clay::UI::Role::Interaction::Hoverable>,
+L<Clay::UI::Role::Interaction::Pressable>,
+L<Clay::UI::Role::Interaction::Focusable> and
+L<Clay::UI::Role::Layout::HasScroll> compose it; C<Clay::UI::Text>,
+C<Disableable> and C<HasFocusOrder> do not.
+
+The C<class> keyword opens a new package, so C<use Clay::XS qw(...)>
+imports made at file scope are not visible inside the class block.
+
+=head1 KEYS AND VALIDATION
+
+Clay::UI accepts the keys of Clay's structs in snake_case
+(C<child_gap>, C<layout_direction>, C<background_color>) as well as in
+the camelCase spelling Clay::XS uses (C<childGap>, C<layoutDirection>).
+The layout pass converts every key to camelCase before it passes a
+widget's settings to Clay. Both spellings of the same key in one hash
+die:
+
+	Clay::UI: key 'child_gap' camelizes to 'childGap', which is already present in the same hash
+
+Widget attributes are validated where they are set: in the constructor
+and in the accessor that writes them, not later in C<render>. The rules
+are exactly the ones Clay::XS applies when the value reaches Clay
+(see C<check_struct> in L<Clay::XS/CHECKING STRUCTS>). Errors name the attribute and the
+snake_case path inside it:
+
+	Clay::UI: 'layout.padding.left' expected an integer in 0..65535, got '-5'
+	Clay::UI: 'layout' has unknown key 'chld_gap' (known keys: sizing, padding, child_gap, ...)
+
+Attributes are copied when they are set and when they are read, so a
+widget never shares a hash or array with your code: changing a hash
+after passing it, or changing what a reader returned, does not change
+the widget. Use the accessor to write a new value.
+
+=head1 HOW A FRAME WORKS
+
+One call to L</render> is one I<frame>. It runs these steps in order:
+
+=over 4
+
+=item 1. Pointer input
+
+The pointer position and button state (the C<pointer_state> argument,
+or the previous frame's when it is omitted) go to Clay. Clay tests the
+position against the layout of the previous frame and lists the
+elements under the pointer, topmost floating element first. Clay::UI
+maps those elements back to widgets: these are the widgets I<under the
+pointer>. A widget added to the tree can be hovered from the frame
+after the one that first lays it out.
+
+=item 2. Scrolling
+
+The C<scroll_delta>, C<enable_drag_scrolling> and C<delta_time>
+arguments go to Clay. Wheel input moves the scroll container under the
+pointer at once. Drag scrolling moves it while the button is held and,
+after the release, keeps it gliding (momentum) for some frames. Wheel
+input has no momentum.
+
+=item 3. Events
+
+The widgets under the pointer, the button state and the scroll
+containers that moved go to the interaction tracker
+(L<Clay::UI::Interaction/update>). It updates the hovered, armed and
+pressed widgets first, then fires the events in this order: every
+C<OnHoverStopped>, every C<OnHoverStart>, C<OnPress>, C<OnRelease>,
+every C<OnScroll>. Events of one kind fire in tree order (depth-first
+pre-order of the last layout). See L</EVENTS>.
+
+=item 4. Preparations
+
+Every widget of this UI that called C<request_prepare> since its last
+preparation gets its C<prepare_layout> method called
+(L<Clay::UI::Role::Core::Preparable>), so it can rebuild its children
+from its own state. Preparations may request more preparations; after
+100 rounds C<render> gives up and dies.
+
+=item 5. Layout pass
+
+C<render> records the current revision as L</laid_out_revision>, then
+declares the widget tree to Clay: one Clay element per element widget,
+one text element per text widget, in tree order. Nothing may change the
+tree from here on. Clay computes the layout.
+
+=item 6. Result
+
+C<render> returns the render commands. The frame is now the I<last
+completed frame>: L</widget_for>, L</bounding_box>, L</scroll_state>,
+L</scroll_to> and the next frame's pointer test refer to it.
+
+=back
+
+Listeners and preparations run in steps 3 and 4, while no Clay element
+is open. They may change the tree, widget attributes and focus, and use
+other Clay::UI objects; the changes show in this frame's layout. They
+must not call C<render> of the same Clay::UI.
+
+If a listener dies, the remaining events still fire and the
+preparations still run. If a C<prepare_layout> dies, preparation stops:
+the widgets after it in the same round are taken off the queue without
+being prepared, and stay out of date until something calls their
+C<request_prepare> again (see L<Clay::UI::Role::Core::Preparable/prepare_layout>).
+In both cases the layout pass still runs (Clay would otherwise forget
+the scroll positions at the next frame). Then C<render> dies with the
+first error and the frame's render commands are lost. The next
+C<render> works normally.
 
 =head1 CONSTRUCTOR
 
 =head2 new
 
-	my $ui = Clay::UI->new(%params);
+	my $ui = Clay::UI->new(
+		root   => $root_widget,
+		width  => 800,
+		height => 600,
+		# optional: memory_size, max_element_count, error_handler, measure_text
+	);
 
-Required:
+Creates a Clay::UI, its Clay context and its interaction tracker, and
+makes C<root> the root widget of this UI. The new context is current
+when C<new> returns. If C<new> dies, it frees the new context and makes
+the context that was current before current again.
+
+Unknown parameters die (C<Unrecognised parameters for Clay::UI constructor>).
 
 =over 4
 
-=item C<root>
+=item root
 
-The root widget. Must be a blessed object consuming
-L<Clay::UI::Role::Core::Element> or L<Clay::UI::Role::Core::TextNode>,
-and must not currently have a parent (it is the top of its tree) nor be
-the root of another Clay::UI; a widget that was removed from its parent
-may become a root. A constructor that dies leaves the Clay context that
-was current before it current again. Immutable after
-construction (the I<tree> below the root is still mutable through the
-widgets' own child-mutation methods).
+Required. The root widget: an object composing
+L<Clay::UI::Role::Core::Element> or L<Clay::UI::Role::Core::TextNode>.
+It must have no parent and must not be the root of another Clay::UI;
+a widget that was removed from its parent may become a root. Read it
+back with L</root>; it cannot be replaced, but the tree below it can
+change at any time. Dies with:
 
-=item C<width>, C<height>
+	Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode
+	Clay::UI: 'root' must not have a parent; the root is the top of its widget tree
+	Clay::UI: 'root' is already the root of another Clay::UI
 
-Positive finite numbers; the viewport dimensions. Mutable post-construction
-via the same-named accessor methods, which propagate the change to
-Clay automatically.
+=item width
+
+Required. The viewport width in layout units, a positive finite number.
+Change it later with L</width>.
+
+=item height
+
+Required. The viewport height, like C<width>. Both die with
+C<Clay::UI: 'width' and 'height' must be positive finite numbers>.
+
+
+=item memory_size
+
+Optional. Bytes of memory for the Clay context: an integer of at least
+C<Clay_MinMemorySize()> for this UI's C<max_element_count>, which is
+also the default. Dies with
+C<Clay::UI: 'memory_size' must be an integer E<gt>= Clay_MinMemorySize() (...)>.
+
+
+=item max_element_count
+
+Optional. How many Clay elements this UI's context holds: a positive
+integer, default 8192 (Clay's default). Every element widget and every
+text widget is one element. Clay keeps two slots for itself, so one
+frame fits C<max_element_count - 2> widgets (none for a count below 3).
+Clay's measure-text word cache gets twice this count (at least 32), as
+Clay's defaults do. Each Clay::UI has its own count, whatever context is
+current when it is constructed. A larger count needs more memory (see
+C<memory_size>). Dies with
+C<Clay::UI: 'max_element_count' must be a positive integer>. Read it
+back with L</max_element_count>.
+
+
+=item error_handler
+
+Optional. A coderef Clay calls as C<< $handler->($error, $userdata) >>
+when it reports an error; C<$error> is a hashref with C<errorType> (a
+C<CLAY_ERROR_TYPE_*> constant) and C<errorText>. The default handler
+dies with C<Clay error: $error-E<gt>{errorText}>, which makes C<render>
+die (see L<Clay::XS/ERRORS FROM CALLBACKS>); a handler that returns
+lets the frame continue. Dies with C<Clay::UI: 'error_handler' must be a coderef>.
+
+With the default handler, a tree with more widgets than
+C<max_element_count> allows makes C<render> die with a message that
+names C<max_element_count> (see L</render>) instead of the error Clay
+reports for it (Clay drops the extra elements without a word and then
+reports elements it could not close). A handler of your own receives
+Clay's error unchanged.
+
+The handler runs inside Clay and must not use any Clay::UI object (see
+L<Clay::XS/What a callback may do>).
+
+=item measure_text
+
+Optional. A coderef Clay calls as C<< $measure->($text, $config,
+$userdata) >> to measure a piece of text; it returns C<< { width =>
+$w, height => $h } >>. C<$config> is the text element's configuration
+with camelCase keys (C<fontSize>, C<fontId>, C<letterSpacing>, ...).
+The default is a monospace estimate: C<width = length($text) *
+fontSize>, C<height = fontSize>, with a C<fontSize> of 16 when it is 0
+or missing. Dies with C<Clay::UI: 'measure_text' must be a coderef>.
+Change it later with L</measure_text>.
+
+The callback runs inside Clay during the layout pass and must not use
+any Clay::UI object. Inside it:
+
+=over 4
+
+=item *
+
+C<render> dies (C<Clay::UI::render: called while this Clay::UI is already rendering>).
+
+=item *
+
+The writers C<width($w)>, C<height($h)> and C<measure_text($coderef)>
+die (C<Clay_SetCurrentContext: cannot be called from inside a Clay callback>);
+the readers C<width>, C<height> and C<measure_text> work.
+
+=item *
+
+C<bounding_box>, C<scroll_state> and C<scroll_to> die with the same
+message for a widget the last completed frame laid out, because they
+ask Clay; for a widget it did not lay out they return undef without
+asking Clay.
 
 =back
 
-Optional:
-
-=over 4
-
-=item C<memory_size>
-
-Bytes of arena memory to allocate: an integer of at least
-C<Clay_MinMemorySize()> for this UI's C<max_element_count>, which is
-also the default.
-
-=item C<max_element_count>
-
-How many Clay layout elements this UI's context holds: a positive
-integer, default 8192 (Clay's default). Every element widget and every
-text widget of the tree is one element; Clay keeps two of the slots
-for itself, so a frame fits C<max_element_count - 2> widgets (none
-for a count below 3). Clay's
-measure-text word cache is sized to twice this count (at least 32), as
-Clay's defaults are. Each Clay::UI has its own count, whatever context
-is current when it is constructed. A larger count needs more memory
-(see C<memory_size>).
-
-A tree with more widgets than fit makes C<render> die with
-C<Clay::UI: the widget tree has more elements than max_element_count
-(8192) allows: ...> when the default C<error_handler> is in use.
-
-=item C<error_handler>
-
-Coderef called with C<($error_hashref, $userdata)> when Clay reports an
-error. Default: C<die "Clay error: $err->{errorText}\n">. Like
-C<measure_text>, it runs inside Clay and must not use any Clay::UI
-object (a C<render> there dies, see
-L<Clay::XS/What a callback may do>). An exception
-thrown by the handler makes C<render> die with it (see
-L<Clay::XS/ERRORS FROM CALLBACKS>), so with the default handler any Clay
-error - for example two widgets with the same C<id> - makes C<render>
-die with C<Clay error: ...>. The one exception is a tree with more
-widgets than C<max_element_count> allows: Clay drops the excess
-elements silently and then reports open elements it could not close,
-so the default handler's error is replaced by one that names
-C<max_element_count>. A handler of your own receives Clay's error data
-unchanged.
-
-=item C<measure_text>
-
-Coderef called with C<($text, $config, $userdata)>, must return
-C<< { width => $w, height => $h } >>. Default: monospace estimate,
-C<width = length($text) * fontSize>, C<height = fontSize>. It runs while
-Clay lays out the frame and must not use any Clay::UI object: C<render>,
-C<width>, C<height> or C<measure_text> writes die there, which makes the
-outer C<render> die.
+If the callback lets such an error escape, the outer C<render> dies
+with it after the layout pass.
 
 =back
 
@@ -690,284 +925,491 @@ outer C<render> die.
 
 =head2 root
 
-Read-only accessor for the root widget passed at construction.
+	my $root = $ui->root;
+
+Returns the root widget passed to L</new>. Read-only.
 
 =head2 max_element_count
 
-Read-only accessor for the C<max_element_count> passed at construction
-(8192 by default).
+	my $count = $ui->max_element_count;
 
-=head2 width, width($new)
+Returns the C<max_element_count> passed to L</new> (8192 by default).
+Read-only.
 
-Read or write the viewport width, a positive finite number. Setting
-also issues C<Clay_SetLayoutDimensions> so the new size takes effect on
-the next C<render>; a value that is refused leaves the width as it
-was.
+=head2 width
 
-=head2 height, height($new)
+	my $width = $ui->width;
+	$ui->width(1024);
 
-Mirror of C<width>.
+Reads or writes the viewport width. A write takes one positive finite
+number, passes it to Clay (C<Clay_SetLayoutDimensions>), bumps the
+revision (L<Clay::UI::Revision>) and returns the new width; the next
+L</render> lays out at the new size. A refused value changes nothing.
+Dies with C<Clay::UI: width must be a positive finite number> or
+C<Clay::UI: width takes one value>.
 
-=head2 measure_text, measure_text($coderef)
+=head2 height
 
-Read or replace the measure-text callback. On write, also calls
-C<Clay_ResetMeasureTextCache> so previously cached measurements made
-by the old callback are discarded.
+	my $height = $ui->height;
+	$ui->height(768);
+
+Reads or writes the viewport height, exactly like L</width>.
+
+=head2 measure_text
+
+	my $measure = $ui->measure_text;
+	$ui->measure_text(sub ($text, $config, $userdata) { ... });
+
+Reads or replaces the measure-text callback (see C<measure_text> under
+L</new>). A write takes one coderef, passes it to Clay, clears Clay's
+cache of measurements made by the old callback
+(C<Clay_ResetMeasureTextCache>), bumps the revision and returns the new
+callback. Dies with C<Clay::UI: measure_text must be a coderef> or
+C<Clay::UI: measure_text takes one value>.
 
 =head2 render
 
 	my $commands = $ui->render(%args);
 
-Processes the frame's pointer and scroll input, fires the resulting
-events (see L</POINTER EVENTS>), then lays out the root widget tree and
-returns the render-command arrayref (see L<Clay::XS/RENDER COMMANDS>).
+Runs one frame (see L</HOW A FRAME WORKS>): processes the pointer and
+scroll input, fires the resulting events, prepares the widgets that
+asked for it, lays out the widget tree and returns the render commands
+as an arrayref of hashes (see L<Clay::XS/RENDER COMMANDS>). Each
+command's C<userData> identifies the widget that produced it (see
+L</widget_for>).
 
-Named arguments:
+All arguments are named and optional:
 
 =over 4
 
-=item C<pointer_state> (optional)
+=item pointer_state
 
-Hashref C<< { x => $x, y => $y, down => $bool } >> with finite numeric
-C<x> and C<y>; no other keys. When omitted, the pointer state from the previous
-frame is reused.
+	pointer_state => { x => 120, y => 80, down => 1 }
 
-=item C<delta_time> (optional, default 0)
+The pointer for this frame: a hashref with finite numbers C<x> and C<y>
+(layout units, origin at the top left of the viewport) and C<down>, a
+true value while the button is held (default false). No other keys.
+When omitted (or undef), the pointer state of the previous frame is
+used again. A change of C<down> from false to true is a press, from
+true to false a release (see L</EVENTS>). The constructor sets the
+pointer to "up, outside the viewport", so the first frame never reports
+a press that did not happen.
 
-Seconds since last frame, a finite number E<gt>= 0; passed to
-C<Clay_UpdateScrollContainers> and C<Clay_EndLayout>.
+=item delta_time
 
-=item C<scroll_delta> (optional, default C<< { x => 0, y => 0 } >>)
+	delta_time => 0.016
 
-Wheel input for this frame, C<< { x => ..., y => ... } >> (no other
-keys) or C<[x, y]>, finite numbers.
-Scroll containers (L<Clay::UI::Role::Layout::HasScroll>) under the
-pointer scroll by it; Clay applies momentum and clamping.
+Seconds since the previous frame, a finite number E<gt>= 0, default 0.
+Clay uses it for the momentum after drag scrolling and for transitions.
 
-=item C<enable_drag_scrolling> (optional, default false)
+=item scroll_delta
 
-Lets pressing and dragging scroll a container, as on touch screens.
+	scroll_delta => { x => 0, y => -1 }    # or [0, -1]
+
+Wheel input for this frame, as C<< { x => ..., y => ... } >> (both keys
+required, no others) or C<[$x, $y]>, both finite numbers; default
+C<[0, 0]>. Clay multiplies the delta by 10 and adds it to the scroll
+position of the scroll container under the pointer (the innermost one
+when containers are nested), on each axis that container can scroll (its
+content is larger than its viewport); the result is clamped to the
+content. A negative C<y> scrolls down, revealing what is below:
+C<< scroll_delta => { x => 0, y => -4 } >> scrolls the container 40
+layout units down: the content moves up, and its C<position> in
+L</scroll_state> goes from C<0> to C<-40>. A scroll container is a
+widget composing L<Clay::UI::Role::Layout::HasScroll>. Wheel input has
+no momentum: the container stops where the delta puts it, and wheel
+input also stops a glide left over from drag scrolling.
+
+
+=item enable_drag_scrolling
+
+	enable_drag_scrolling => 1
+
+A plain boolean, default false. When true, pressing and dragging inside
+a scroll container scrolls it, as on a touch screen. After the release
+the container keeps moving with momentum for some frames, slowing down
+each frame.
 
 =back
 
-Unknown arguments die. C<render> dies if an event listener dies (after
-all of the frame's events have fired and the layout pass has run, see
-L</POINTER EVENTS>), if any widget
-produces a config Clay::XS rejects, if the tree has more widgets than
-C<max_element_count> allows (with the default error handler), if Clay
-reports an error through the error handler, or if a callback dies; the
-frame is discarded and Clay
-stays usable, so the next C<render> works once the cause is fixed.
-C<render> cannot be called again while it is running (for example from
-an event listener).
+C<render> dies, with the frame discarded, in these cases:
+
+=over 4
+
+=item *
+
+A bad argument, before anything happens:
+C<Clay::UI::render: unknown argument(s)>,
+C<... 'pointer_state' must be a hashref>,
+C<... unknown pointer_state key(s)>,
+C<... pointer_state 'x' must be a finite number>,
+C<... 'delta_time' must be a finite number E<gt>= 0>,
+C<... unknown scroll_delta key(s)>, C<... 'scroll_delta' must be ...>,
+C<... 'enable_drag_scrolling' must be a plain boolean value>.
+
+
+=item *
+
+C<render> is called while the same Clay::UI is rendering, for example
+from an event listener, a C<prepare_layout> or the measure-text
+callback: C<Clay::UI::render: called while this Clay::UI is already rendering>.
+
+=item *
+
+An event listener died. All events of the frame fire, the preparations
+and the layout pass run, then C<render> dies with the first listener
+error.
+
+=item *
+
+A C<prepare_layout> died: the preparations still due in that round are
+dropped (see L</HOW A FRAME WORKS>), the layout pass runs, then
+C<render> dies with the first error of the frame. Or preparations kept requesting new
+ones: C<Clay::UI: widgets kept requesting preparation; 100 rounds of prepare_layout did not settle>.
+
+=item *
+
+Clay reported an error and the error handler died. With the default
+handler this is C<Clay error: ...>, for example when two widgets have
+the same C<id>
+(C<Clay error: An element with this ID was already previously declared during this layout.>).
+
+
+=item *
+
+The tree has more widgets than C<max_element_count> allows (default
+error handler only):
+C<Clay::UI: the widget tree has more elements than max_element_count (8192) allows: ...>.
+
+
+=item *
+
+The measure-text callback died: C<render> dies with its error.
+
+=item *
+
+A widget class produced settings Clay::XS rejects. Attributes are
+validated when they are set, so this happens only when a widget class
+builds settings of its own: a C<Clay::XS::StructError> (see
+L<Clay::XS/STRUCT ERRORS>) such as
+C<Clay_ElementDeclaration.layout.padding.left: expected an integer in 0..65535, got '-3'>,
+a key collision (C<Clay::UI: key '...' camelizes to ...>), or
+C<Clay::UI: widget ... set user_data in its config> (see L</NOTES>).
+
+
+=back
+
+When a listener error and a layout error happen in the same frame,
+C<render> dies with the listener error and appends
+C<(the layout pass also failed: ...)> to it (when the error is a
+string).
+
+
+After any of these, Clay stays usable and the next C<render> works
+once the cause is fixed. Which frame counts as the last completed frame
+depends on the case:
+
+=over 4
+
+=item *
+
+After a bad argument, a nested C<render> or a failed layout pass (a
+Clay error, too many widgets, a dying measure-text callback, rejected
+settings), the last completed frame is unchanged.
+
+=item *
+
+After a listener error or a preparation error (a dying
+C<prepare_layout>, or the 100 rounds) without a layout error,
+the layout pass completed: that frame becomes the last completed frame
+for L</widget_for>, L</bounding_box>, L</scroll_state> and the next
+frame's pointer test, even though its render commands were discarded.
+
+=back
 
 =head2 widget_for
 
-	my $widget = $ui->widget_for($user_data);
+	my $widget = $ui->widget_for($command->{userData});
 
-Given the C<userData> integer carried on a render command, returns the
-widget object that produced it (or C<undef> if the widget has been
-garbage-collected since the last C<render> call, or if C<$user_data> is
-falsy or unknown).
+Returns the widget that produced a render command, given the command's
+C<userData>. Returns C<undef> when C<$user_data> is undef, 0 or unknown,
+or when the widget has been freed since. Lookups use the last completed
+frame. Not every command has a widget: Clay gives C<SCISSOR_END>
+commands a C<userData> of 0, so C<widget_for> returns C<undef> for them.
 
-	for my $cmd (@$render_commands) {
-		my $widget = $ui->widget_for($cmd->{userData});
-		next unless $widget;
-		# dispatch on ref $widget, read its fields, etc.
+	for my $command (@$commands) {
+		my $widget = $ui->widget_for($command->{userData}) or next;
+		# choose how to draw by ref($widget), read its attributes, ...
 	}
 
 =head2 laid_out_revision
 
 	my $shown = $ui->laid_out_revision;
 
-The revision (L<Clay::UI::Revision>) at which the last C<render> began
-its layout pass, after the frame's events and preparations: every
-change up to it is part of that frame. A renderer that skips unchanged
-frames compares it with C<current_revision> to know whether another
-frame is due; changes made during the render before the layout pass
-(by event listeners or L<Clay::UI::Role::Core::Preparable> widgets) then
-need no frame of their own. C<undef> before the first C<render>.
+Returns the revision (L<Clay::UI::Revision>) at which the last
+C<render> started its layout pass, or C<undef> before the first
+C<render>. Every change up to that revision, including the changes the
+frame's listeners and preparations made, is part of that frame. A
+renderer that skips unchanged frames remembers this value when it
+draws a frame, and after each later C<render> draws again only when
+C<laid_out_revision> differs from the remembered value:
+
+	my $drawn;    # the laid_out_revision of the last frame drawn
+
+	my $commands = $ui->render(%input);
+	if (!defined $drawn || $drawn != $ui->laid_out_revision) {
+		draw($commands);
+		$drawn = $ui->laid_out_revision;
+	}
+
+A running transition is the exception: it changes the render commands
+from frame to frame without bumping the revision, so
+C<laid_out_revision> stays the same while the element animates (see
+F<KNOWN-ISSUES.md>, issue 27). While an element with a C<transition>
+may animate, draw every frame.
 
 =head2 bounding_box
 
 	my $box = $ui->bounding_box($widget);    # { x, y, width, height } or undef
 
-Where the last completed C<render> placed the widget, as a new hash of
-C<x>, C<y>, C<width> and C<height> in layout units (the same numbers as
-the C<boundingBox> of its render commands); scrolling is included, so
-a widget scrolled out of view lies outside its scroll container.
-Returns C<undef> for a widget that frame did not lay out (one added
-since, removed, or never part of this UI). Works for element widgets
-only (not text widgets); anything that is not an object dies.
+Returns where the last completed frame placed an element widget, as a
+new hashref with C<x>, C<y>, C<width> and C<height> in layout units (the
+same numbers as the C<boundingBox> of its render commands). Scrolling is
+included, so a widget scrolled out of view lies outside its scroll
+container. Returns C<undef> for a widget that frame did not lay out (one
+added since, one removed, a text widget, or a widget of another UI).
+
+Text widgets have no bounding box of their own: use the C<boundingBox>
+of their C<TEXT> render commands (L</widget_for> maps each command back
+to its text widget).
+
+The box is the size Clay gave the widget, which can be smaller than
+its sizing asks for: when the children of a parent do not fit into
+it, Clay shrinks them, down to their minimum size, and
+C<bounding_box> reports the shrunk size. A parent that clips an axis
+(a scroll container scrolling that way) does not shrink its children
+along that axis.
+
+Dies when C<$widget> is not an object: C<Clay::UI: expected a widget, got ...>.
 
 =head2 scroll_state
 
 	my $state = $ui->scroll_state($scroll_box);
 	# { position => { x, y }, viewport => { width, height }, content => { width, height } }
 
-The scroll data of a scroll container (a widget composing
-L<Clay::UI::Role::Layout::HasScroll>) as the last completed C<render>
-left it: C<position> is Clay's scroll position (0 at the top and left,
-negative when scrolled down or right), C<viewport> the size of the
-visible area and C<content> the size of everything inside. Returns
-C<undef> when that frame did not lay the container out; dies for a
-widget that is not a scroll container.
+Returns the scroll data of a scroll container (a widget composing
+L<Clay::UI::Role::Layout::HasScroll>) as a new hashref:
+
+=over 4
+
+=item position
+
+Clay's scroll position: C<0> at the top and left, negative when the
+content is scrolled down or right. Reflects every scroll since the last
+frame, including L</scroll_to>.
+
+=item viewport
+
+The size of the visible area.
+
+=item content
+
+The size of everything inside the container.
+
+=back
+
+Returns C<undef> when the last completed frame did not lay the
+container out. Dies for anything that is not a scroll container:
+C<Clay::UI: ... is not a scroll container (it does not compose Clay::UI::Role::Layout::HasScroll)>.
 
 =head2 scroll_to
 
 	$ui->scroll_to($scroll_box, { y => -12 });         # 12 units down
 	$ui->scroll_to($scroll_box, { x => 0, y => 0 });   # back to the top left
 
-Moves a scroll container (see L</scroll_state>) to a scroll position,
-kept within its content (from 0 down to C<viewport - content> on each
-axis); an axis left out keeps its position. Returns the position set,
-as a new hash, or C<undef> when the last completed C<render> did not lay
-the container out (then nothing moves). The next C<render> shows the
-new position; like every C<set_scroll_position> it counts as a change
-for L<Clay::UI::Revision>. Unknown keys, non-numbers and widgets that
-are not scroll containers die.
+Moves a scroll container to a scroll position (in the sense of
+C<position> under L</scroll_state>). Each axis is clamped to the range
+from C<0> down to C<viewport - content> (or C<0> when the content fits);
+an axis left out keeps its position. Returns the position set as a new
+hashref C<< { x => ..., y => ... } >>, or C<undef> when the last
+completed frame did not lay the container out (then nothing moves). The
+next C<render> shows the new position. The move counts as a change for
+L<Clay::UI::Revision>. It fires no C<OnScroll> (that event reports only the
+scrolling Clay does inside C<render>), and it does not stop momentum: a
+glide started by drag scrolling continues from the new position in
+the next frames.
+
+Dies with
+C<Clay::UI: scroll_to needs a position { x =E<gt> ..., y =E<gt> ... }>,
+C<Clay::UI: scroll_to got unknown position key(s)>,
+C<Clay::UI: scroll_to position 'y' must be a finite number>, and for a
+widget that is not a scroll container (as L</scroll_state>).
+
 
 =head2 interaction
 
-Returns this UI's L<Clay::UI::Interaction>, which owns hover, armed,
-pressed and focus state. C<< $ui->interaction->under_pointer >> lists the widgets
-that were under the pointer at the last C<render>, in Clay's
-pointer-over order (see L</POINTER EVENTS>), Hoverable or not; widgets
-that have been garbage-collected or removed from the tree since are
-skipped. C<< $ui->interaction->update(...) >> takes synthetic pointer
-input between renders, and C<< $ui->interaction->set_focused_widget >>,
-C<focus_next> and C<focus_previous> move focus (see
-L<Clay::UI::Interaction/FOCUS>).
+	my $interaction = $ui->interaction;
 
-=head1 POINTER EVENTS
+Returns this UI's interaction tracker, a L<Clay::UI::Interaction>. It
+holds the hovered, armed, pressed and focused widgets and fires the
+pointer and focus events. Common uses:
 
-C<render> handles the frame's input before it lays anything out:
+	# widgets under the pointer at the last frame
+	my $widgets = $ui->interaction->under_pointer;
+	$ui->interaction->set_focused_widget($input);    # move the focus
+	$ui->interaction->focus_next;                    # Tab
+	$ui->interaction->update(over => [$button], down => 1);   # synthetic input
 
-=over 4
+=head1 EVENTS
 
-=item 1.
+C<render> fires the pointer events below at widgets; focus events come
+from the focus methods of L<Clay::UI::Interaction>. Listen with C<<
+$widget->on($name, sub ($event) { ... }) >>
+(L<Clay::UI::Role::Events::Listener>). An event that I<bubbles> is then
+offered to the widget's parent, its parent's parent and so on, as its
+bubble mode allows (L<Clay::UI::Enum::Bubble>). With C<IF_CONTINUE>, an
+ancestor sees the event only when every listener of the widget below
+returned C<< Clay::UI::Enum::Result->CONTINUE >> (or the widget has no
+listener for it).
 
-The pointer (C<pointer_state>, or the previous frame's) goes to
-C<Clay_SetPointerState>. Clay tests it against the layout computed by
-the previous C<render>, so the widgets I<under the pointer> are those
-whose elements Clay lists in C<Clay_GetPointerOverIds>, in that order:
-the topmost floating element first, depth-first within it. A widget
-added to the tree can be hovered from the render after the one that
-first lays it out.
+B<A listener that returns nothing stops the event.> An empty C<return>,
+C<undef>, or the value of the last statement (such as the return value
+of C<say>) all count as C<< Clay::UI::Enum::Result->HANDLED >>; only
+C<CONTINUE> lets the event bubble on (L<Clay::UI::Enum::Result>):
 
-=item 2.
+	$button->on('OnPress', sub ($event) {
+		highlight($event->current_target);
+		return Clay::UI::Enum::Result->CONTINUE;    # the card around the button sees it too
+	});
 
-C<scroll_delta> goes to C<Clay_UpdateScrollContainers>, which scrolls
-the scroll container under the pointer.
+=head2 OnHoverStart
 
-=item 3.
+Fires at a L<Clay::UI::Role::Interaction::Hoverable> widget in the frame
+it comes under the pointer. Does not bubble: every hovered widget,
+nested ones included, gets its own event. See
+L<Clay::UI::Events::OnHoverStart>.
 
-The widgets under the pointer, whether the pointer is down and the
-scroll containers that moved go to the interaction tracker
-(C<< $ui->interaction->update >>, see L<Clay::UI::Interaction>). It
-updates the widget states first (C<hovered>, C<pressed>, see below),
-then the events fire in this order: every OnHoverStopped, every
-OnHoverStart, OnPress, OnRelease, every OnScroll. Events of one kind
-fire in tree order (depth-first pre-order of the last layout).
+=head2 OnHoverStopped
 
-=item 4.
+Fires at a hovered widget in the frame it is no longer under the
+pointer, and at once, during the removal, when a hovered widget is
+removed from the tree. Does not bubble. See
+L<Clay::UI::Events::OnHoverStopped>.
 
-Widgets that asked for it (L<Clay::UI::Role::Core::Preparable>) bring
-their subtrees up to date: C<prepare_layout> is called on each widget
-of this UI that called C<request_prepare> since its last preparation,
-so changes the listeners made above are included.
+=head2 OnPress
 
-=item 5.
+Fires when the pointer goes down, at exactly one
+L<Clay::UI::Role::Interaction::Pressable>: the enabled Pressable under
+the pointer that is drawn on top. A button inside a pressable card gets
+it, not the card; of two overlapping siblings (such as the children of
+a C<CLAY_BACK_TO_FRONT> container) the later one gets it; a Pressable
+in a floating element beats every Pressable below that element. Every
+enabled Pressable under the pointer becomes I<armed>. Bubbles with
+C<IF_CONTINUE>. The precise rule is under
+L<Clay::UI::Interaction/PRESS AND RELEASE>. See
+L<Clay::UI::Events::OnPress>.
 
-The layout pass runs and C<render> returns its commands.
+=head2 OnRelease
 
-=back
+Fires when the pointer goes up, at the topmost I<armed> Pressable still
+under the pointer, chosen like the target of C<OnPress>: a completed
+click. Every release disarms all Pressables, so a press that started
+elsewhere, or one dragged off every armed widget, ends without
+C<OnRelease>. Bubbles with C<IF_CONTINUE>. See
+L<Clay::UI::Events::OnRelease>.
 
-The events:
+A Pressable is I<pressed> (C<is_pressed>, the derived C<pressed> state)
+while it is armed, enabled and under the pointer and the button is
+down.
 
-=over 4
+=head2 OnScroll
 
-=item L<Clay::UI::Events::OnHoverStart>, L<Clay::UI::Events::OnHoverStopped>
+Fires at a scroll container (L<Clay::UI::Role::Layout::HasScroll>)
+whose scroll position changed in this frame through wheel input, drag
+scrolling or the momentum that follows drag scrolling; C<delta_x> and C<delta_y> say how far. Such a
+change also bumps the revision. Bubbles with C<IF_CONTINUE>. See
+L<Clay::UI::Events::OnScroll>.
 
-A L<Clay::UI::Role::Interaction::Hoverable> gets OnHoverStart when it
-comes under the pointer and OnHoverStopped when it leaves it. A hovered
-widget removed from the tree gets OnHoverStopped at once, during the
-removal (as a focused one gets OnBlur); a removed armed or pressed
-Pressable is dropped without events. They do not bubble: every hovered widget, nested
-ones included, gets its own event.
+=head2 OnFocus
 
-=item L<Clay::UI::Events::OnPress>
+Fires at a L<Clay::UI::Role::Interaction::Focusable> that receives the
+focus through C<set_focused_widget>, C<focus_next> or
+C<focus_previous>. C<render> never moves the focus. Bubbles with
+C<IF_CONTINUE>. See L<Clay::UI::Events::OnFocus>.
 
-When the pointer goes down, exactly one
-L<Clay::UI::Role::Interaction::Pressable> gets OnPress: the Pressable
-under the pointer that is drawn on top (a button inside a pressable
-card, not the card; the later of two overlapping siblings, such as the
-children of a C<CLAY_BACK_TO_FRONT> container; a Pressable in a floating
-element, not one below it). Every Pressable under the pointer becomes I<armed>.
+=head2 OnBlur
 
-=item L<Clay::UI::Events::OnRelease>
+Fires at the widget that loses the focus: when the focus moves
+elsewhere or is cleared, when the focused widget is removed from the
+tree, is disabled, or cannot take the focus any more. Bubbles with
+C<IF_CONTINUE>. See L<Clay::UI::Events::OnBlur>.
 
-When the pointer goes up, the topmost I<armed> Pressable still under
-the pointer (chosen the same way) gets OnRelease - a completed click. Every release disarms
-all Pressables, so a press that started elsewhere and a press that was
-dragged off the widget end without OnRelease.
+=head1 CLAY CONTEXTS
 
-A Pressable's C<is_pressed> (and C<pressed> state) is true while it is
-armed, under the pointer and the pointer is down. OnPress and OnRelease
-bubble with C<IF_CONTINUE>: an ancestor sees the event only when the
-widget's listeners return C<< Clay::UI::Enum::Result->CONTINUE >>.
-
-=item L<Clay::UI::Events::OnScroll>
-
-A widget composing L<Clay::UI::Role::Layout::HasScroll> gets OnScroll
-with C<delta_x> / C<delta_y> whenever its scroll position changed in
-this frame (wheel input, drag scrolling or momentum). Such a change also
-bumps the revision (L<Clay::UI::Revision>), as the frame shows it.
-
-=back
-
-The constructor settles Clay's pointer state, so the first C<render>
-never reports a press or release that did not happen.
-
-Listeners and preparations run while no Clay element is open. They may change the tree,
-widget attributes and focus, and use other Clay::UI objects; the
-changes show in this frame's layout. They must not call this object's
-C<render>. If a listener dies, the remaining events of the frame still
-fire, the widgets are still prepared and the layout pass still runs
-(Clay would otherwise forget the scroll positions at the next
-C<render>), then C<render> dies with the first error (of a listener or
-of a C<prepare_layout>) and the frame's render commands are discarded;
-the widget states are already up to date and the next C<render> works
-normally.
-
-Focus events (L<Clay::UI::Events::OnFocus>, L<Clay::UI::Events::OnBlur>)
-do not come from C<render>; see L<Clay::UI::Interaction/FOCUS>.
+Clay has one I<current> context per process. Every method of
+Clay::UI that talks to Clay (C<new>, C<render>, the C<width>,
+C<height> and C<measure_text> writers, C<bounding_box>,
+C<scroll_state>, C<scroll_to>) first makes this UI's context current
+and leaves it current. Several Clay::UI objects can coexist; code that
+mixes Clay::UI with direct L<Clay::XS> calls must set the context it
+needs with C<Clay_SetCurrentContext> before its own calls.
 
 =head1 NOTES
 
-The walker auto-injects C<refaddr($widget)> as each element's
-C<user_data> (into its own copy of the config the widget returned) so
-render commands carry a back-reference. A widget's C<to_config> (or
-C<text_config>) must therefore NOT set C<user_data> itself; C<render>
-dies with a clear message if it sees one already present.
+=over 4
 
-For a scroll container (a widget composing
-L<Clay::UI::Role::Layout::HasScroll>) without an explicit C<child_offset>,
-the walker also sets the C<clip> slice's C<childOffset> to Clay's scroll
-offset, so its children follow the scroll position. A C<clip> slice from
-any other widget is passed on as is: it clips, but does not scroll.
+=item Back-references in render commands
 
-Widgets without an C<id> get one derived from their position below the
+The layout pass sets each element's C<userData> to a number that
+identifies its widget, so L</widget_for> can map a render command back
+to the widget. A widget class must therefore not set C<user_data> (or
+C<userData>) in its settings; C<render> dies with
+C<Clay::UI: widget ... set user_data in its config> if one does.
+
+
+=item Scroll containers
+
+For a scroll container without an explicit C<child_offset>, the layout
+pass sets Clay's C<childOffset> to the container's current scroll
+offset, so its children follow the scroll position. A C<clip> setting
+from any other widget clips, but does not scroll.
+
+=item Widgets without an id
+
+A widget without an C<id> gets one derived from its position below the
 nearest ancestor that has one; see
-L<Clay::UI::Role::Core::Element/resolve_id>.
+L<Clay::UI::Role::Core::Element/resolve_id>. User ids must not start
+with C<anon:>.
 
-Registry entries are weak references. The widget tree is kept alive by
-the C<root> field on this object, so as long as the C<Clay::UI>
-instance is alive, every widget reachable from C<root> stays
-resolvable.
+=item Lifetime
+
+The lookup tables behind L</widget_for> and the interaction tracker
+hold widgets weakly. The Clay::UI object keeps its root widget, and so
+the whole tree, alive. The tracker and the widgets refer to the
+Clay::UI weakly; the methods of L<Clay::UI::Interaction> that need it
+die once it is gone.
+
+=item Revision
+
+Every setter that changes what a frame lays out or draws bumps the
+process-wide revision (L<Clay::UI::Revision>): widget attributes,
+children, user states, this object's C<width>, C<height> and
+C<measure_text>, and the hovered, armed, pressed and focused widgets.
+Reading never bumps it. Widget classes that keep state of their own
+call C<mark_changed> (L<Clay::UI::Role::Core::Element/mark_changed>).
+
+=back
 
 =head1 SEE ALSO
 
-L<Clay::UI::Role::Core::Element>, L<Clay::XS>.
+L<Clay::Manual> (user guide), L<Clay::Cookbook> (recipes),
+L<Clay::UI::Interaction>, L<Clay::UI::Revision>, L<Clay::UI::Box>,
+L<Clay::UI::Text>, L<Clay::UI::Grid>,
+L<Clay::UI::Role::Core::Element>, L<Clay::XS>, L<Clay::XS::Structs>.
+
+=head1 LICENSE
+
+Released under the same zlib/libpng license as Clay itself. See
+F<src/clay/LICENSE.md> for the upstream notice.
 
 =cut

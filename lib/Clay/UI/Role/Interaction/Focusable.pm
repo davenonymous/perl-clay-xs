@@ -62,82 +62,143 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Interaction::Focusable - role marking a widget as focusable
+Clay::UI::Role::Interaction::Focusable - role for widgets that can take the keyboard focus
 
 =head1 SYNOPSIS
 
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
+
 	use Object::Pad;
-	use Clay::UI::Role::Core::Element;
+	use Clay::UI;
+	use Clay::UI::Box;
 	use Clay::UI::Role::Interaction::Focusable;
 	use Clay::UI::Role::Interaction::Disableable;
 
+	class My::Panel     :strict(params) :does(Clay::UI::Box) {}
 	class My::TextInput :strict(params)
-		:does(Clay::UI::Role::Core::Element)
+		:does(Clay::UI::Box)
 		:does(Clay::UI::Role::Interaction::Focusable)
 		:does(Clay::UI::Role::Interaction::Disableable)
 	{}
 
 	my $input = My::TextInput->new(id => 'name');
-	$input->on('OnFocus', sub ($e) { warn "got focus" });
-	$input->on('OnBlur',  sub ($e) { warn "lost focus" });
+	$input->on('OnFocus', sub ($event) { say 'got the focus';  return });
+	$input->on('OnBlur',  sub ($event) { say 'lost the focus'; return });
 
-	# ... after attaching to a Clay::UI ...
-	$ui->interaction->set_focused_widget($input);
-	$input->is_focused;   # 1
-	$input->disabled(1);  # OnBlur fires; can_focus is 0 until it is enabled
+	my $root = My::Panel->new(id => 'form');
+	$root->add_child($input);
+	my $ui = Clay::UI->new(width => 400, height => 300, root => $root);
+
+	$ui->interaction->set_focused_widget($input);   # got the focus
+	say $input->is_focused;                         # 1
+	$input->disabled(1);    # lost the focus; can_focus is 0 until enabled
 
 =head1 DESCRIPTION
 
-Composed by widgets that participate in the focus system. The UI's
-interaction tracker (L<Clay::UI::Interaction>) tracks which Focusable
-is the currently focused widget; Focusable's job is to advertise eligibility
-and let the widget query its own focus state.
+A widget that composes this role can take the focus: the one widget of
+a L<Clay::UI> that receives keyboard input. The UI's interaction
+tracker (L<Clay::UI::Interaction>) holds which widget has the focus and
+moves it (L<Clay::UI::Interaction/FOCUS>); this role says whether the
+widget may take it (L</can_focus>) and whether it has it
+(L</is_focused>).
 
-Composes L<Clay::UI::Role::Layout::HasParent> (for the C<parent> chain
-walk and the C<ui> back-reference to Clay::UI) and
-L<Clay::UI::Role::Events::Emitter> (so OnFocus / OnBlur events can be
-fired and bubble up the parent chain).
+The widget receives L<Clay::UI::Events::OnFocus> when it gets the focus
+and L<Clay::UI::Events::OnBlur> when it loses it. Both bubble with
+C<IF_CONTINUE>.
+
+The role composes L<Clay::UI::Role::Layout::HasParent>,
+L<Clay::UI::Role::Events::Emitter> and
+L<Clay::UI::Role::Style::HasStates>, which provides the derived state
+C<focused>.
+
+=head1 PARAMETERS
+
+=head2 can_focus (constructor parameter)
+
+	My::TextInput->new(can_focus => 0);
+
+Constructor parameter: whether the widget's users want it to take the
+focus, any plain boolean value; default 1. Dies for a reference with
+C<Clay::UI: 'can_focus' must be a plain boolean value>.
 
 =head1 METHODS
 
-=head2 can_focus, can_focus($bool)
+=head2 can_focus
 
-Reads whether the widget can take the focus now, 1 or 0: it can when
-its users want it to (the C<can_focus> named argument of the
-constructor, default true, or the last value written), its class
-accepts the focus (L</accepts_focus>), and it is not disabled, when it
-composes L<Clay::UI::Role::Interaction::Disableable>.
+	my $eligible = $widget->can_focus;    # 1 or 0
+	$widget->can_focus(0);
 
-Writing records what the users want, whatever the widget's state: a
-widget written C<can_focus(1)> while disabled takes the focus once it
-is enabled, and one built with C<< can_focus => 0 >> stays unfocusable
-when it is enabled. A write takes any plain boolean value and dies for
-a reference, returns what reading returns now, and does not bump the
-revision, since nothing drawn depends on it. When the widget has the
-focus and cannot take it any more, it loses it at once: the tracker
-fires C<OnBlur> on it (see L<Clay::UI::Interaction/"release_ineligible($widget)">).
+Reads whether the widget can take the focus now. It can when all of
+these hold:
 
-C<< $ui->interaction->set_focused_widget >>, C<focus_next>, and
-C<focus_previous> all consult C<can_focus>; a widget that returns false is skipped by
-the default focus chain, rejected (loud die) by direct
-C<set_focused_widget> calls, and means "no change" when a
+=over 4
+
+=item *
+
+its users want it to: the C<can_focus> constructor parameter, or the
+last value written;
+
+=item *
+
+its class accepts the focus (L</accepts_focus>);
+
+=item *
+
+it is not disabled, when it composes
+L<Clay::UI::Role::Interaction::Disableable>.
+
+=back
+
+A write records what the users want, whatever the widget's state: a
+widget given C<can_focus(1)> while disabled can take the focus once it
+is enabled, and one built with C<< can_focus => 0 >> stays unable to
+take it when it is enabled. A write takes one plain boolean value,
+returns what reading returns now, and does not bump the revision
+(nothing drawn depends on it). When the widget has the focus and can no
+longer take it, it loses the focus at once and gets C<OnBlur> (see
+L<Clay::UI::Interaction/release_ineligible>). Dies with
+C<Clay::UI: 'can_focus' must be a plain boolean value> or
+C<Clay::UI: 'can_focus' takes one value>.
+
+
+A widget whose C<can_focus> is 0 is skipped by C<focus_next> and
+C<focus_previous>, rejected by C<set_focused_widget> (which dies), and
+means "the focus stays" when a
 L<Clay::UI::Role::Interaction::HasFocusOrder> returns it.
 
 =head2 accepts_focus
 
 	method accepts_focus :override () { return 0 }
 
-Whether widgets of the class take the focus at all; the default is 1.
-A subclass of a class that composes Focusable overrides it when its
-widgets never take the focus themselves, for example a radio button
-whose group takes the focus for all its buttons. L</"can_focus, can_focus($bool)"> then
-returns 0 whatever was written. Since a class cannot override a method
-of a role it composes itself, the override belongs into a subclass.
+Whether widgets of the class take the focus at all; returns 1 here. A
+subclass overrides it to return 0 when its widgets never take the
+focus themselves, for example a radio button whose group takes the
+focus for all its buttons. L</can_focus> then returns 0 whatever was
+written. A class cannot override a method of a role it composes itself,
+so the override goes into a subclass of the class that composes
+Focusable:
+
+	class My::RadioButton :strict(params)
+		:does(Clay::UI::Box)
+		:does(Clay::UI::Role::Interaction::Focusable) {}
+	class My::GroupedRadioButton :strict(params) :isa(My::RadioButton) {
+		method accepts_focus :override () { return 0 }
+	}
 
 =head2 is_focused
 
-Returns C<1> when this widget is the one currently held in
-C<< $self->ui->interaction->get_focused_widget >>, C<0> otherwise. Returns C<0>
-when the widget has not yet been attached to a Clay::UI.
+	my $has_focus = $widget->is_focused;
+
+Returns 1 while this widget has the focus of its L<Clay::UI>, 0
+otherwise. Returns 0 for a widget that does not belong to a Clay::UI.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Interaction/FOCUS>, L<Clay::UI::Events::OnFocus>,
+L<Clay::UI::Events::OnBlur>, L<Clay::UI::Role::Interaction::HasFocusOrder>,
+L<Clay::UI::Role::Interaction::Disableable>.
 
 =cut

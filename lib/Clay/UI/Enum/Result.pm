@@ -21,40 +21,78 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Enum::Result - handler-return-value enum for Clay::UI events
+Clay::UI::Enum::Result - what an event listener returns: stop the event or let it continue
 
 =head1 SYNOPSIS
 
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
+
+	use Object::Pad;
+	use Clay::UI::Box;
+	use Clay::UI::Events::OnPress;
 	use Clay::UI::Enum::Result;
 
-	$widget->on('OnPress', sub ($event) {
-		do_thing();
-		return Clay::UI::Enum::Result->HANDLED;  # stop bubbling (only matters for IF_CONTINUE)
+	class My::Panel :strict(params) :does(Clay::UI::Box) {}
+
+	my $card   = My::Panel->new(id => 'card');
+	my $button = My::Panel->new(id => 'button');
+	$card->add_child($button);
+
+	$card->on('OnPress', sub ($event) { say 'card saw the press'; return });
+	$button->on('OnPress', sub ($event) {
+		say 'button pressed';
+		return Clay::UI::Enum::Result->CONTINUE;   # let the card see it too
 	});
+
+	my $result = $button->fire_event(Clay::UI::Events::OnPress->new);
+	say 'stopped at ', $result == Clay::UI::Enum::Result->HANDLED ? 'the card' : 'nowhere';
 
 =head1 DESCRIPTION
 
-Two singleton values handlers may return:
+An event listener's return value decides whether the event I<stops>
+at the listener's widget. Return C<CONTINUE> to let it go on; anything
+else stops it. The bubble mode of the event decides what stopping means
+(L<Clay::UI::Enum::Bubble>): with C<IF_CONTINUE> the event does not
+move on to the parent, with C<ALWAYS> and C<NEVER> it travels as it
+would anyway, but the widget is still recorded as the event's
+C<handled_by>.
 
-=over 4
+L<Clay::UI::Role::Events::Emitter/fire_event> and
+L<Clay::UI::Events::Event/result> also report the outcome as one of
+these values.
 
-=item C<< Clay::UI::Enum::Result->HANDLED >>
+The values are singleton objects (built with L<Object::PadX::Enum>);
+compare them with C<==> and C<!=>.
 
-Equivalent to returning C<undef> from a handler. In
-C<< Clay::UI::Enum::Bubble->IF_CONTINUE >> mode this stops further
-propagation. In C<ALWAYS> or C<NEVER> mode it does not change how far
-the event travels, but it still marks the widget as the event's
-C<handled_by> and makes C<fire_event> return C<HANDLED>.
+=head1 VALUES
 
-=item C<< Clay::UI::Enum::Result->CONTINUE >>
+=head2 HANDLED
 
-Tells C<IF_CONTINUE> mode to keep walking up the parent chain even
-after this handler.
+	return Clay::UI::Enum::Result->HANDLED;
 
-=back
+Stops the event at this widget. Returning C<undef>, an empty C<return>,
+or any other value has the same effect: only C<CONTINUE> lets an event
+go on. As a result of C<fire_event>: some listener stopped the event,
+and C<< $event->handled_by >> names the widget.
 
-Handlers may also return any other value: it is treated as C<HANDLED>
-for the purposes of the C<IF_CONTINUE> check. Only C<CONTINUE> (this
-singleton, compared with C<==>) is recognised as "keep going".
+=head2 CONTINUE
+
+	return Clay::UI::Enum::Result->CONTINUE;
+
+Lets the event go on to the parent (with C<IF_CONTINUE>). As a result
+of C<fire_event>: no listener stopped the event.
+
+=head1 METHODS
+
+C<name>, C<values> and C<from_name> work as described in
+L<Clay::UI::Enum::Bubble/METHODS>.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Enum::Bubble>, L<Clay::UI::Role::Events::Emitter>,
+L<Clay::UI::Role::Events::Listener>.
 
 =cut

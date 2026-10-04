@@ -33,45 +33,103 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Events::Listener - mixin role giving every Clay::UI widget on()
+Clay::UI::Role::Events::Listener - role that lets every widget listen to events
 
 =head1 SYNOPSIS
 
-	# Composed automatically into every widget via Role::Element and
-	# Role::TextNode; you never compose it directly.
+	use v5.22;
+	use warnings;
+	use feature 'signatures';
+	no warnings 'experimental::signatures';
 
-	$box->on('OnPress', sub ($event) {
-		warn "saw a press at ", $event->target->id;
+	use Object::Pad;
+	use Clay::UI::Box;
+	use Clay::UI::Events::OnPress;
+	use Clay::UI::Enum::Result;
+
+	class My::Panel :strict(params) :does(Clay::UI::Box) {}
+
+	my $box = My::Panel->new(id => 'box');
+	# Both listeners always run; the return values only decide whether
+	# the event moves on to the parent.
+	$box->on('OnPress', sub ($event) {    # stops bubbling
+		say 'first listener';
+		return;
+	})->on('OnPress', sub ($event) {
+		say 'second listener';
+		return Clay::UI::Enum::Result->CONTINUE;
 	});
+
+	say scalar @{ $box->handlers_for('OnPress') }, ' listeners';   # 2 listeners
+	$box->fire_event(Clay::UI::Events::OnPress->new);    # first listener, second listener
 
 =head1 DESCRIPTION
 
-Mixin role composed transitively into every Clay::UI widget (through
-L<Clay::UI::Role::Core::Element> and L<Clay::UI::Role::Core::TextNode>). Provides
-the I<receive> half of the event system - registration of handlers and
-read-back of the per-widget handler list.
+This role is the I<receiving> half of the Clay::UI event system. Every
+widget has it: L<Clay::UI::Role::Core::Element> and
+L<Clay::UI::Role::Core::TextNode> compose it, so you never compose it
+yourself. Any widget can therefore listen to events fired at it and to
+events that bubble up to it from its descendants, whether or not it can
+fire events itself (see L<Clay::UI::Role::Events::Emitter>).
 
-The complementary I<send> half (C<fire_event>) lives in
-L<Clay::UI::Role::Events::Emitter> and is composed only into widgets that
-originate events (e.g. L<Clay::UI::Box>).
-A non-emitting widget can still be a bubble target: when an Emitter
-fires an event, the dispatcher walks up the parent chain and calls
-C<handlers_for> on every ancestor, regardless of whether each ancestor
-is itself an Emitter.
+Text widgets have the role too, but no event reaches them: a text
+widget cannot fire, nothing bubbles through it (it has no descendants),
+and Clay::UI fires events only at element widgets. Listen on the
+element widget around the text instead.
 
 =head1 METHODS
 
-=head2 on($event_name, $handler)
+=head2 on
 
-Registers C<$handler> (a coderef receiving the dispatched event object)
-as a listener for events whose C<name> equals C<$event_name>. Multiple
-handlers can be registered against the same name; they fire in
-registration order. Returns C<$self> for chaining.
+	$widget->on($event_name, sub ($event) { ... });
 
-=head2 handlers_for($event_name)
+Registers a listener: a coderef called with the event object when an
+event whose C<name> is C<$event_name> is fired at the widget or bubbles
+to it. A widget may have several listeners for one name; they run in
+the order they were registered. There is no way to remove a listener.
 
-Returns an arrayref (a fresh shallow copy) of registered handlers for
-C<$event_name>. Useful for introspection and tests, and called by
-L<Clay::UI::Role::Events::Emitter/fire_event> during the bubble walk.
+All listeners of a widget for the event always run, whatever the
+earlier ones return. The return values only decide whether the event
+moves on to the parent (see L<Clay::UI::Enum::Result>): return
+C<< Clay::UI::Enum::Result->CONTINUE >> to let it bubble on. B<Anything
+else stops it> from bubbling, including an empty C<return>, C<undef>
+and whatever the last statement happens to return; one stopping
+listener is enough.
+
+A listener that needs the widget it is registered on should read it
+from the event (C<< $event->current_target >>) instead of naming the
+widget's variable inside the closure. The widget keeps its listeners,
+so a closure that captures the widget makes a reference cycle, and the
+widget is never freed:
+
+	$box->on('OnPress', sub ($event) {
+		my $box = $event->current_target;    # not the outer $box
+		...
+		return;
+	});
+
+Returns the widget, so calls can be chained. Dies with
+C<Clay::UI::Role::Events::Listener: event name must be a non-empty string>
+or C<Clay::UI::Role::Events::Listener: handler must be a coderef>.
+
+
+=head2 handlers_for
+
+	my $listeners = $widget->handlers_for($event_name);
+
+Returns a new arrayref of the listeners registered for C<$event_name>,
+in registration order (empty when there are none). Changing the
+arrayref does not change the widget.
+L<Clay::UI::Role::Events::Emitter/fire_event> calls it for every widget
+the event visits.
+
+Listeners are called I<handlers> in this method's name and in the
+error message of L</on> (C<handler must be a coderef>); both words mean
+the coderefs registered with C<on>.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Role::Events::Emitter>, L<Clay::UI::Events::Event>,
+L<Clay::UI/EVENTS>.
 
 =cut

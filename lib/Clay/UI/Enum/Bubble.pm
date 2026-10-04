@@ -22,44 +22,94 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Enum::Bubble - bubble-policy enum for Clay::UI events
+Clay::UI::Enum::Bubble - how far a Clay::UI event travels up the widget tree
 
 =head1 SYNOPSIS
 
-	use Clay::UI::Enum::Bubble;
+	use v5.22;
+	use warnings;
 
-	my $event = Clay::UI::Events::OnPress->new(
-		bubble_mode => Clay::UI::Enum::Bubble->IF_CONTINUE,
+	use Clay::UI::Enum::Bubble;
+	use Clay::UI::Events::Event;
+
+	my $event = Clay::UI::Events::Event->new(
+		name        => 'OnPing',
+		bubble_mode => Clay::UI::Enum::Bubble->ALWAYS,
 	);
+	say $event->bubble_mode->name;    # ALWAYS
+	say 'travels to every ancestor'                  # compare with == and !=
+		if $event->bubble_mode == Clay::UI::Enum::Bubble->ALWAYS;
 
 =head1 DESCRIPTION
 
-Singleton-bearing enum (built with L<Object::PadX::Enum>) carrying the
-three bubble policies a Clay::UI event can use:
+Every event has a I<bubble mode>
+(L<Clay::UI::Events::Event/bubble_mode>). When a widget fires an event
+(L<Clay::UI::Role::Events::Emitter/fire_event>), all listeners of that
+widget for the event's name run first, in the order they were
+registered. Then the bubble mode decides whether the event moves on to
+the widget's parent, where the same happens again, up to the root
+widget.
 
-=over 4
+A listener I<stops> the event when it returns anything but
+C<< Clay::UI::Enum::Result->CONTINUE >>, including C<undef> and an
+empty C<return> (see L<Clay::UI::Enum::Result>). Stopping never skips
+other listeners of the same widget: the decision is made per widget,
+after all its listeners ran.
 
-=item C<Clay::UI::Enum::Bubble->ALWAYS>
+The values are singleton objects (built with L<Object::PadX::Enum>);
+compare them with C<==> and C<!=>.
 
-Bubble up to every ancestor unconditionally, ignoring handler return
-values.
+=head1 VALUES
 
-=item C<Clay::UI::Enum::Bubble->IF_CONTINUE>
+=head2 ALWAYS
 
-After all handlers at the current node have fired (in registration
-order), bubble to the parent only if every one of them returned
-C<Clay::UI::Enum::Result->CONTINUE>. A single handler returning
-C<undef>, C<Clay::UI::Enum::Result->HANDLED>, or any unrelated value
-halts propagation B<after> the current node finishes - sibling handlers
-at the same node still all run; the stop decision is per-node, not
-per-handler.
+	Clay::UI::Enum::Bubble->ALWAYS
 
-=item C<Clay::UI::Enum::Bubble->NEVER>
+The event visits the widget and every ancestor, whatever the listeners
+return. C<handled_by> names the first widget where a listener stopped
+it.
 
-Fire on the originating widget only. Ancestors never see the event.
+=head2 IF_CONTINUE
 
-=back
+	Clay::UI::Enum::Bubble->IF_CONTINUE
 
-Comparison uses ordinary object identity (C<==>).
+The event moves on to the parent unless a listener of the current
+widget stopped it. A widget without listeners for the event passes it
+on. This is the default of L<Clay::UI::Events::Event> and of the
+built-in C<OnPress>, C<OnRelease>, C<OnScroll>, C<OnFocus> and
+C<OnBlur>.
+
+=head2 NEVER
+
+	Clay::UI::Enum::Bubble->NEVER
+
+Only the widget the event was fired at sees it; ancestors never do.
+The default of C<OnHoverStart> and C<OnHoverStopped>.
+
+=head1 METHODS
+
+=head2 name
+
+	my $name = $mode->name;    # 'ALWAYS', 'IF_CONTINUE' or 'NEVER'
+
+The value's name.
+
+=head2 values
+
+	my @modes = Clay::UI::Enum::Bubble->values;
+
+All three values, in the order C<ALWAYS>, C<IF_CONTINUE>, C<NEVER>.
+
+=head2 from_name
+
+	my $mode = Clay::UI::Enum::Bubble->from_name('NEVER');
+
+The value with that name. Further methods (C<ordinal>,
+C<from_ordinal>) come from L<Object::PadX::Enum>.
+
+=head1 SEE ALSO
+
+L<Clay::UI::Enum::Result>, L<Clay::UI::Role::Events::Emitter>,
+L<Clay::UI::Events::Event>.
 
 =cut

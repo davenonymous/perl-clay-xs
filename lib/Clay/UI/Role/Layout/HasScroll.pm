@@ -65,80 +65,170 @@ __END__
 
 =head1 NAME
 
-Clay::UI::Role::Layout::HasScroll - scrollable-container mixin for Clay::UI widgets
+Clay::UI::Role::Layout::HasScroll - make a Clay::UI widget a scroll container
 
 =head1 SYNOPSIS
 
+	use v5.22;
 	use Object::Pad;
-	use Clay::XS qw(sizing_grow sizing_fixed);
+	use Clay::XS qw(sizing_grow sizing_fixed CLAY_TOP_TO_BOTTOM);
+	use Clay::UI;
+	use Clay::UI::Text;
 	use Clay::UI::Role::Layout::HasScroll;
 	use Clay::UI::Role::Layout::HasLayout;
 
-	class My::LogView :strict(params) :does(Clay::UI::Role::Layout::HasScroll)
-	                  :does(Clay::UI::Role::Layout::HasLayout)
+	class My::LogView :strict(params)
+		:does(Clay::UI::Role::Layout::HasScroll)
+		:does(Clay::UI::Role::Layout::HasLayout)
 	{}
+	class My::Line :strict(params) :does(Clay::UI::Text) {}
 
-	My::LogView->new(
-		id       => 'log',
+	my $log = My::LogView->new(
+		id       => 'log',    # required
 		vertical => 1,
-		layout   => { sizing => { width => sizing_grow(), height => sizing_fixed(300) } },
+		layout   => {
+			sizing           => { width => sizing_grow(), height => sizing_fixed(300) },
+			layout_direction => CLAY_TOP_TO_BOTTOM,
+		},
 	);
+	$log->add_child(map { My::Line->new(text => "line $_") } 1 .. 100);
+
+	my $ui = Clay::UI->new(width => 800, height => 600, root => $log);
+	$ui->render;    # one frame first: scrolling works on the last frame's layout
+	$ui->render(
+		pointer_state => { x => 10, y => 10, down => 0 },
+		scroll_delta  => { x => 0, y => -4 },    # wheel input: 40 units down
+	);
+	$ui->scroll_to($log, { y => 0 });               # back to the top
 
 =head1 DESCRIPTION
 
-Mixin role that turns a widget into a scroll container. Only a widget
-composing this role is one: the walker gives only it Clay's scroll offset,
-and only it receives L<Clay::UI::Events::OnScroll>. A widget that writes
-a C<clip> slice itself, without this role, is clipped but does not
-scroll. Composes
-L<Clay::UI::Role::Core::Stateful> (an C<id> is mandatory because Clay
-needs a stable address to track scroll state across frames),
-L<Clay::UI::Role::Core::Container> (the scrolled content is added with
-C<add_child>) and L<Clay::UI::Role::Events::Emitter>.
+C<Clay::UI::Role::Layout::HasScroll> turns a widget into a scroll
+container: an element that clips its children to its own box and moves
+them by a scroll offset. Only a widget composing this role scrolls:
 
-Constructor parameters, each also a read/write accessor (call with no
-argument to read, with one to write; a write takes effect on the next
-C<render>; C<child_offset> is copied on write and on read, so changing
-the hash afterwards does not change the widget):
+=over 4
 
-=over
+=item *
 
-=item C<horizontal>
+the layout pass (the part of L<Clay::UI/render> that declares the tree
+to Clay) gives only it Clay's scroll offset;
 
-Enable horizontal scrolling. Defaults to C<0>.
+=item *
 
-=item C<vertical>
+only it receives L<Clay::UI::Events::OnScroll>;
 
-Enable vertical scrolling. Defaults to C<1>.
+=item *
 
-=item C<child_offset>
-
-Undef by default, meaning "Clay-managed": each frame the walker positions
-the children at Clay's own scroll offset (C<Clay_GetScrollOffset>), which
-L<Clay::UI/render> updates from its C<scroll_delta> and
-C<enable_drag_scrolling> arguments (wheel input applies while the pointer
-is over the container). Set C<< { x =E<gt> ..., y =E<gt> ... } >> to take
-over and position the content yourself; the explicit offset is used as
-is. Set it back to undef to return control to Clay.
+only it works with L<Clay::UI/scroll_state> and L<Clay::UI/scroll_to>.
 
 =back
 
-=head1 USAGE NOTES
+A widget that writes a C<clip> part into its declaration without this
+role is clipped but does not scroll.
 
-Scrolling needs no extra plumbing:
+The role composes:
 
-	$ui->render(
-		pointer_state => { x => $mx, y => $my, down => $button },
-		scroll_delta  => { x => 0, y => $wheel_delta },
-	);
+=over 4
 
-C<render> calls C<Clay_UpdateScrollContainers> once per frame; do not
-call it yourself between renders: Clay then drops the scroll state of
-every container that was not declared since its previous call.
+=item *
 
-For programmatic scrolling that keeps Clay's momentum and clamping, use
-L<Clay::XS/set_scroll_position> with the container's element id
-(C<< Clay::XS::Clay_GetElementId($widget-E<gt>id) >>); for full manual
-control, set C<child_offset>.
+L<Clay::UI::Role::Core::Stateful>: C<id> is required, because Clay
+keeps the scroll position under the element id from frame to frame;
+
+=item *
+
+L<Clay::UI::Role::Core::Container>: the scrolled content is added with
+C<add_child>;
+
+=item *
+
+L<Clay::UI::Role::Events::Emitter>: events can be fired on it.
+
+=back
+
+C<render> scrolls the containers itself: it passes its C<scroll_delta>
+and C<enable_drag_scrolling> arguments to Clay once per frame (wheel
+input moves the container under the pointer, by ten times
+C<scroll_delta>; negative values scroll down and right). Wheel input
+has no momentum. Drag scrolling moves the container with the pointer
+and, after the release, lets it glide on with momentum for some frames.
+Scrolling uses the
+layout of the previous frame, so it starts working after one completed
+C<render>. Do not call C<Clay_UpdateScrollContainers> yourself between
+renders: Clay then drops the scroll state of every container that was
+not declared since its previous call.
+
+=head1 CONSTRUCTOR PARAMETERS
+
+=head2 id
+
+Required. See L<Clay::UI::Role::Core::Element/id>. The constructor dies
+with C<Clay::UI::Role::Core::Stateful: widget '...' requires an explicit 'id'> without one.
+
+=head1 ATTRIBUTES
+
+Each attribute is a constructor parameter and a read/write accessor:
+call it without an argument to read, with one argument to write. A
+write bumps the revision (L<Clay::UI::Revision>), takes effect at the
+next C<render> and returns the new value. Values are checked when they
+are set; a bad value dies naming the attribute.
+
+=head2 horizontal
+
+	$scroll->horizontal(1);
+
+Whether the container clips and scrolls horizontally. A plain scalar,
+used as a Perl boolean. Default C<0>. Undef dies with
+C<Clay::UI: 'horizontal' must be defined>, a reference with
+C<Clay::UI: 'horizontal' expected a plain boolean value>.
+
+
+=head2 vertical
+
+	$scroll->vertical(0);
+
+Whether the container clips and scrolls vertically, like
+L</horizontal>. Default C<1>.
+
+=head2 child_offset
+
+	$scroll->child_offset({ x => 0, y => -120 });    # you place the content
+	$scroll->child_offset(undef);                    # Clay scrolls again
+
+Where the content is placed, relative to the container's top left
+corner. Default undef: each frame the layout pass uses Clay's own
+scroll position, which C<render> updates from wheel and drag input.
+Set C<< { x, y } >> (or C<[x, y]>) to place the content yourself:
+the offset is used as it is, and input no longer moves the content.
+Clay still tracks its own scroll position meanwhile: wheel and drag
+input still change C<position> in L<Clay::UI/scroll_state>, fire
+L<Clay::UI::Events::OnScroll> and bump the revision, although the
+content does not move.
+Negative values move the content up and left, like scrolling down and
+right. Set it back to undef to give control back to Clay.
+
+Reading returns a new copy (or undef); writing stores a copy. An unknown
+key or a non-number dies, for example
+C<Clay::UI: 'child_offset' has unknown key 'z' (known keys: x, y)>.
+
+
+To scroll to a position while keeping Clay in control (and its limits
+to the content size), use L<Clay::UI/scroll_to> instead.
+
+=head1 METHODS
+
+=head2 contribute_clip
+
+Adds the C<clip> part to the widget's declaration (see
+L<Clay::UI::Role::Core::Element/EXTENDING THE DECLARATION> and
+L<Clay::XS::Structs/clip>): C<horizontal>, C<vertical> and, when set,
+C<child_offset>.
+
+=head1 SEE ALSO
+
+L<Clay::UI/scroll_state>, L<Clay::UI/scroll_to>,
+L<Clay::UI::Events::OnScroll>, L<Clay::XS::Structs/clip>,
+L<Clay::Manual>.
 
 =cut
