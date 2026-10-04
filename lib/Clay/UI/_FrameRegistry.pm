@@ -108,7 +108,7 @@ class Clay::UI::_FrameRegistry :strict(params) {
 		while (@stack) {
 			my $node = shift @stack;
 			push @order, $node;
-			unshift @stack, @{ $node->children } if $node->DOES('Clay::UI::Role::Core::Element');
+			unshift @stack, @{ $node->layout_children } if $node->DOES('Clay::UI::Role::Core::Element');
 		}
 		return @order;
 	}

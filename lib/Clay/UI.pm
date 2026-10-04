@@ -529,7 +529,7 @@ class Clay::UI :strict(params) {
 			}
 			Clay__ConfigureOpenElement($camelized);
 
-			my @children = @{ $node->children };
+			my @children = @{ $node->layout_children };
 			for my $index (0 .. $#children) {
 				$self->_walk($frame, $children[$index], $child_base, [ @$child_indices, $index ]);
 			}

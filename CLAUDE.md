@@ -175,7 +175,11 @@ through Clay::UI and replaces `userData` with widget class and id.
   itself is an error.
 - Children are changed only through `Element`'s validating primitives;
   the public mutators live in the `Container` role. A widget can be
-  attached whenever it has no parent (removed ones can come back). `$widget->ui` walks to the root, which a Clay::UI
+  attached whenever it has no parent (removed ones can come back).
+  Internal children (`add_internal_children`) are a widget class's own
+  helpers in the laid-out tree; `children` and the Container mutators
+  never see them. Every tree walk (the walker, the focus order, the
+  frame registry) reads `layout_children`, never `children`. `$widget->ui` walks to the root, which a Clay::UI
   stamps at construction (write-once).
 - Attributes are validated where set (accessors and `ADJUST` via
   `Clay::UI::_validate`) and copied there; readers return copies too

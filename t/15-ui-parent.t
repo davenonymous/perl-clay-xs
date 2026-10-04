@@ -12,6 +12,7 @@ sub same ($a, $b, $name) { is(refaddr($a), refaddr($b), $name) }
 
 use Object::Pad 0.800;
 use Clay::UI;
+use Clay::XS ();
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Grid;
 use Clay::UI::Test::Text;
@@ -232,6 +233,35 @@ subtest 'a removed widget can become a Clay::UI root' => sub {
 # Clay::UI back-reference: every widget reachable from the root can find
 # its Clay::UI controller via $self->ui.
 # -----------------------------------------------------------------------------
+
+subtest 'internal children are laid out but are not children' => sub {
+	my $box    = Clay::UI::Test::Box->new(id => 'box');
+	my $kid    = Clay::UI::Test::Box->new(id => 'kid');
+	my $helper = Clay::UI::Test::Box->new(
+		id               => 'helper',
+		background_color => [ 1, 2, 3, 255 ],
+		layout           => { sizing => { width => Clay::XS::sizing_fixed(10), height => Clay::XS::sizing_fixed(10) } },
+	);
+	$box->add_child($kid);
+	$box->add_internal_children($helper);
+	same($helper->parent, $box, 'an internal child is parent-stamped');
+	is([ map { $_->id } @{ $box->children } ],          ['kid'],           'children shows only the children');
+	is([ map { $_->id } @{ $box->internal_children } ], ['helper'],        'internal_children shows the helper');
+	is([ map { $_->id } @{ $box->layout_children } ],   [ 'kid', 'helper' ], 'layout_children lays out both, children first');
+	$box->clear_children;
+	is([ map { $_->id } @{ $box->layout_children } ], ['helper'], 'clear_children leaves the internal children alone');
+	like(dies { $box->add_internal_children($helper) }, qr/still attached/, 'attaching it again dies like add_child');
+
+	my $ui = Clay::UI->new(root => $box, width => 100, height => 100);
+	same($helper->ui, $ui, 'an internal child reaches the controller');
+	my @drawn = map { $ui->widget_for($_->{userData}) } @{ $ui->render };
+	ok((grep { defined && refaddr($_) == refaddr($helper) } @drawn), 'the walker declares the internal child');
+
+	$box->remove_internal_children($helper, Clay::UI::Test::Box->new);
+	is($helper->parent, undef, 'remove_internal_children detaches it and ignores strangers');
+	is($box->layout_children, [], 'and it is laid out no more');
+	ok(lives { $box->add_child($helper) }, 'a removed internal child can become a child');
+};
 
 subtest 'unattached widget ui() is undef' => sub {
 	my $w = Clay::UI::Test::Box->new;

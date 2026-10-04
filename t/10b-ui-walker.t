@@ -43,7 +43,7 @@ class RawConfigWidget :does(Clay::UI::Role::Core::Container) {
 }
 
 class RottenWidget :isa(TestWidget) {
-	method children { return [ { not => 'a widget' } ] }
+	method layout_children { return [ { not => 'a widget' } ] }
 }
 
 class HoverWidget
@@ -135,8 +135,9 @@ subtest 'fail loud on bad root' => sub {
 # -----------------------------------------------------------------------------
 
 subtest 'fail loud on bad child without segfault' => sub {
-	# add_child rejects non-widgets, so a widget whose children method
-	# returns garbage stands in for a rotten tree only the walker can catch.
+	# add_child rejects non-widgets, so a widget whose layout_children
+	# method returns garbage stands in for a rotten tree only the walker
+	# can catch.
 	my $parent = RottenWidget->new(id => 'parent');
 	my $ui = make_ui($parent);
 	like(

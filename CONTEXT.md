@@ -156,3 +156,11 @@ A widget composing HasScroll. Only scroll containers get Clay's scroll offset
 injected while they are walked, and only they receive OnScroll. A widget that
 writes a `clip` slice without HasScroll is clipped but does not scroll.
 _Avoid_: clip element, scrollable
+
+**Internal child**:
+A widget a widget class attaches below itself with `add_internal_children`
+because it needs it in the laid-out tree (a floating scrollbar over a scroll
+container), as opposed to the children its user adds. `children` and the
+Container mutators never show or remove it; `layout_children` lists children
+and internal children, and every tree walk reads that.
+_Avoid_: hidden child, private child, helper widget (the role it plays, not the term)

@@ -458,7 +458,7 @@ class Clay::UI::Interaction :strict(params) {
 		while (@stack) {
 			my $node = shift @stack;
 			push @focusables, $node if $node->DOES($FOCUSABLE);
-			unshift @stack, @{ $node->children } if $node->DOES('Clay::UI::Role::Core::Element');
+			unshift @stack, @{ $node->layout_children } if $node->DOES('Clay::UI::Role::Core::Element');
 		}
 		return @focusables;
 	}

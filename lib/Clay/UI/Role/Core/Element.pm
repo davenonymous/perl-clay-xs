@@ -85,6 +85,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
                               :does(Clay::UI::Role::Events::Listener) {
 	field $id :param :reader = undef;
 	field @_children;
+	field @_internal_children;
 
 	ADJUST {
 		validate_id('id', $id) if defined $id;
@@ -96,6 +97,39 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 
 	method get_children_with ($predicate) {
 		return grep { $predicate->($_) } @_children;
+	}
+
+	method internal_children () {
+		return [ @_internal_children ];
+	}
+
+	# What a frame lays out below this widget: the children, then the
+	# internal children. The walker, the focus order and the frame
+	# registry read this list, never children.
+	method layout_children () {
+		return [ @_children, @_internal_children ];
+	}
+
+	# Internal children belong to the widget class, not to its user: a
+	# helper the widget needs in the laid-out tree (a floating scrollbar,
+	# a popup) that children and the Container mutators never show or
+	# touch. They are validated and parent-stamped like children.
+	method add_internal_children (@kids) {
+		_validate_attachment($self, @kids);
+		push @_internal_children, @kids;
+		$_->_set_parent($self) for @kids;
+		bump_revision();
+		return $self;
+	}
+
+	method remove_internal_children (@kids) {
+		my %leaving = map { refaddr($_) => 1 } @kids;
+		my @removed = grep { $leaving{ refaddr($_) } } @_internal_children;
+		return $self unless @removed;
+		@_internal_children = grep { !$leaving{ refaddr($_) } } @_internal_children;
+		bump_revision();
+		$self->_release_children(@removed);
+		return $self;
 	}
 
 	method resolve_id ($base, $indices) {
@@ -242,7 +276,19 @@ derived ids; the constructor dies for a user id that starts with it.
 =head2 children
 
 Returns a new arrayref holding the direct children, in order. Changing
-that array does not change the widget.
+that array does not change the widget. Internal children (see
+L</add_internal_children>) are not in it.
+
+=head2 internal_children
+
+Returns a new arrayref holding the internal children, in order.
+
+=head2 layout_children
+
+Returns a new arrayref holding the children followed by the internal
+children: everything a frame lays out directly below this widget. The
+walker, the focus order of L<Clay::UI::Interaction> and the frame
+registry read this list; C<children> is only for the widget's user.
 
 =head1 METHODS
 
@@ -307,10 +353,33 @@ Returns the list of direct children for which C<< $predicate->($child) >>
 is true. C<$_> is also set to the current child inside the block, so
 both calling styles work. Does not recurse into descendants.
 
+=head2 add_internal_children
+
+	$self->add_internal_children($gutter);
+
+For widget classes: attaches widgets that the class needs in the
+laid-out tree but that are not its user's content, such as a floating
+scrollbar over a scroll container. They are validated and
+parent-stamped like children (see L</ATTACHING CHILDREN>), laid out
+after the children, and reach the UI through C<ui> like any child;
+C<children>, C<get_children_with> and the mutators of
+L<Clay::UI::Role::Core::Container> never show or remove them. Bumps the
+revision and returns the widget.
+
+=head2 remove_internal_children
+
+	$self->remove_internal_children($gutter);
+
+Detaches the given internal children like removed children (their
+C<parent> becomes undef, their interaction state is released); widgets
+that are not internal children of this widget are ignored. Bumps the
+revision when something was removed and returns the widget.
+
 =head1 ATTACHING CHILDREN
 
 Every change to the children - through
-L<Clay::UI::Role::Core::Container> or L<Clay::UI::Grid> - validates all
+L<Clay::UI::Role::Core::Container>, L<Clay::UI::Grid> or
+L</add_internal_children> - validates all
 new children before anything is changed, so a failed call leaves the
 widget as it was. It dies if a child is not a widget
 (C<Clay::UI::Role::Core::Element> or C<Clay::UI::Role::Core::TextNode>),
