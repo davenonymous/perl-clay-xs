@@ -270,6 +270,14 @@ writes C<clip>): Clay does not compress the children of a clipping
 parent on the clipped axis. F<examples/15-og-card.pl> uses this
 technique.
 
+=for text Figure: images/example-15-og-card.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/example-15-og-card.png" alt="The output of examples/15-og-card.pl: a 1200 by 630 dark card with an orange stripe at the left, the site name Layout Notes with an icon, a 7 MIN READ pill, a three-line white headline, a grey summary, an author avatar with name and date, and four tag pills."></p>
+
+=end html
+
 =head1 TABLES
 
 =head2 Make a table whose columns fit their content
@@ -388,6 +396,14 @@ a view of the image that ignores drawing outside that rectangle.
 Measure text with the same Imager fonts. Complete renderers are in
 F<examples/06-png-render.pl> and F<examples/15-og-card.pl>.
 
+=for text Figure: images/example-06-png-render.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/example-06-png-render.png" alt="The output of examples/06-png-render.pl: a blue header titled Clay -&gt; PNG demo above a white panel with three cards, orange to olive, each holding the same paragraph in a monospace font, aligned left, centred and right."></p>
+
+=end html
+
 =head2 Render to a PDF document
 
 Use L<PDF::Builder> (or L<PDF::API2>). Treat one layout unit as one PDF
@@ -398,7 +414,8 @@ axis points up, Clay's down, so flip each box:
 
 Text is placed at its baseline; a good approximation is
 C<< $page_height - $box->{y} - $font_size * 0.8 >>. A complete renderer
-is in F<examples/16-invoice-pdf.pl>.
+is in F<examples/16-invoice-pdf.pl>; the invoice it writes is at
+L<https://github.com/davenonymous/perl-clay-xs/blob/v0.04/images/example-16-invoice-pdf.pdf>.
 
 =head2 Split a long document into pages
 
@@ -423,7 +440,8 @@ footer, table heading) on every page.
 
 =back
 
-F<examples/16-invoice-pdf.pl> paginates an invoice this way.
+F<examples/16-invoice-pdf.pl> paginates an invoice this way; see the
+PDF at L<https://github.com/davenonymous/perl-clay-xs/blob/v0.04/images/example-16-invoice-pdf.pdf>.
 
 =head2 Find the widget or data behind a render command
 

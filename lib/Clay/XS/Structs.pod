@@ -786,6 +786,14 @@ element it is attached to), and it is drawn as its own layer, above or
 below other content by its C<zIndex>. Tooltips, menus and dialogs float.
 Its own size and its children are laid out as usual.
 
+=for text Figure: images/floating.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
+
+=end html
+
     floating => {
         attachTo     => CLAY_ATTACH_TO_PARENT,
         attachPoints => { element => CLAY_ATTACH_POINT_CENTER_BOTTOM,

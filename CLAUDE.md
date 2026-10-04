@@ -228,6 +228,18 @@ through Clay::UI and replaces `userData` with widget class and id.
   `Requires:`, `Run with:`); `Features:` lists the exact identifiers
   used. New examples go into the README table and the Manual's
   FEATURE INDEX.
+- Figures live in `images/`, rendered by `tools/make-images` (`make
+  images`; `make images-check` reports stale files): each is a Clay::UI
+  tree in that script, laid out by Clay and drawn with Imager, plus the
+  outputs of examples 06, 15 and 16. The POD shows a figure as a
+  `=for text Figure: images/NAME.png in the distribution.` paragraph
+  followed by a `=begin html` block with
+  `<img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/vVERSION/images/NAME.png" alt="...">`
+  (MetaCPAN needs absolute URLs); the PDF is linked through its
+  `github.com/.../blob/vVERSION/images/` URL. The script dies when the
+  POD and the rendered set differ and rewrites `vVERSION` to the current
+  `$Clay::UI::VERSION`, so run `make images` after changing a figure,
+  a POD reference or the version, and commit what it wrote.
 
 ## Conventions
 

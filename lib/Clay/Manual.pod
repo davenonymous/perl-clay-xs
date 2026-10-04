@@ -480,6 +480,14 @@ Children are stacked on top of each other. See L</Stack layout>.
 The other axis is the I<off axis> (the cross axis). A text element is a leaf: it has no
 children and its size comes from the measure function (see L</TEXT>).
 
+=for text Figure: images/layout-direction.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/layout-direction.png" alt="Two grey parent elements, each with three numbered coloured children. With CLAY_LEFT_TO_RIGHT the children sit side by side in a row at the top left of the parent; with CLAY_TOP_TO_BOTTOM they form a column."></p>
+
+=end html
+
 =head2 Sizing: FIT, GROW, FIXED and PERCENT
 
 Each axis of an element has a I<sizing rule>, given as
@@ -529,6 +537,14 @@ gives:
     GROW (max 30)                             =  30
     GROW                   250 - 125 - 50 - 30 = 45
 
+=for text Figure: images/sizing.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing.png" alt="A 300 wide row with padding 10 and childGap 10 holding four coloured children. The labels under them give each sizing rule and the width Clay computed: GROW 45, FIXED 50 is 50, PERCENT 0.5 is 125, GROW with max 30 is 30."></p>
+
+=end html
+
 When the content of a parent is larger than the parent (for example a
 FIXED parent with too many children), Clay I<compresses> the children
 along the layout axis: it shrinks the largest FIT and GROW children
@@ -552,6 +568,14 @@ the last child.
 Padding and gaps count as content: a FIT element includes them in its
 size.
 
+=for text Figure: images/padding-and-child-gap.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/padding-and-child-gap.png" alt="A grey parent with three numbered children. Brackets mark the 16 units of padding between the parent's left edge and the first child, the 4 units of childGap between the first and the second child, and the 8 units of padding between the parent's top edge and the children."></p>
+
+=end html
+
 =head2 childAlignment
 
 C<< childAlignment => { x => ..., y => ... } >> (Clay::UI:
@@ -564,6 +588,14 @@ do not fill it:
 Along the layout axis the children move as one block; along the off
 axis each child is aligned on its own. To right-align the content of a
 table cell, give the cell C<< child_alignment => { x => CLAY_ALIGN_X_RIGHT } >>.
+
+=for text Figure: images/child-alignment.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/child-alignment.png" alt="Nine grey elements in three rows of three, each with one small blue child. The child sits at the left, the centre or the right of its element depending on x, and at the top, the centre or the bottom depending on y."></p>
+
+=end html
 
 =head2 Flow layout
 
@@ -594,6 +626,14 @@ Wrapping is horizontal only. The full rules (alignment per line,
 borders between children) are in L<Clay::XS/FLOW LAYOUT>; see
 F<examples/07-ui-flow.pl>.
 
+=for text Figure: images/flow-layout.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
+
+=end html
+
 =head2 Stack layout
 
 C<CLAY_BACK_TO_FRONT> places all children on top of each other inside
@@ -603,6 +643,14 @@ positions each child on both axes, so a stack is the tool for "badge in
 the top right corner of an avatar" or "caption at the bottom of a
 picture". See L<Clay::XS/STACK LAYOUT> and F<examples/08-ui-stack.pl>.
 
+=for text Figure: images/stack-layout.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
+
+=end html
+
 =head2 Floating elements
 
 A I<floating> element is taken out of the normal layout: it does not
@@ -610,6 +658,14 @@ take space in its parent, and its siblings do not move for it. It is
 positioned relative to another element (or the layout root) and drawn
 above the normal content. Tooltips, dropdown menus, modal dialogs and
 badges are floating elements.
+
+=for text Figure: images/floating.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
+
+=end html
 
     floating => {
     	attachTo     => CLAY_ATTACH_TO_PARENT,
@@ -673,6 +729,14 @@ its bounding box on the clipped axes. Clay wraps the children's render
 commands in a C<SCISSOR_START> / C<SCISSOR_END> pair that your renderer
 turns into a clip region.
 
+=for text Figure: images/clipping-and-scrolling.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/clipping-and-scrolling.png" alt="Two lists of eight coloured rows in parents of the same size. Without clipping, rows 5 to 8 are drawn below the parent's bottom edge. With vertical clipping and a scroll position of y -44, only rows 2 to 6 are visible, the first and the last of them cut off at the parent's edges."></p>
+
+=end html
+
 C<childOffset> shifts all children by C<< { x, y } >>; that is how
 scrolling works. Clay can track the offset for you:
 
@@ -719,6 +783,14 @@ content) or a FIXED height; an empty FIT element without a FIXED height
 comes out 0 x 0. It is usually
 combined with C<image>. See L<Clay::XS::Structs/aspectRatio>.
 
+=for text Figure: images/aspect-ratio.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/aspect-ratio.png" alt="Three blue boxes 120 wide. With aspectRatio 16 / 9 the box is 67.5 tall, with aspectRatio 1 it is a 120 by 120 square, with aspectRatio 4 / 3 it is 90 tall."></p>
+
+=end html
+
 =head2 Sizing groups
 
 A I<sizing group> makes elements that are not siblings equally wide (or
@@ -730,6 +802,14 @@ L<Clay::XS/SIZING GROUPS>. In Clay::UI every widget has C<width_group>
 and C<height_group> attributes (L<Clay::UI::Role::Layout::HasSizingGroup>),
 and L<Clay::UI::Grid> uses them to build tables.
 
+=for text Figure: images/sizing-groups.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
+
+=end html
+
 =head2 Grids and tables
 
 L<Clay::UI::Grid> builds a table from rows of widgets. Each column is as
@@ -739,6 +819,14 @@ computed in one layout pass. Grids support styled cells
 without rebuilding them, and several grids sharing their column widths
 (a fixed header above a scrolling body). See
 F<examples/05-ui-grid.pl> and F<examples/16-invoice-pdf.pl>.
+
+=for text Figure: images/grid.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
+
+=end html
 
 =head1 STYLING
 
@@ -893,6 +981,14 @@ box, so a renderer simply draws every C<TEXT> command at its position.
 A parent with a FIT width takes the width of the longest line it does
 not have to break; give the parent a FIXED, GROW or PERCENT width (or a
 C<$max> on FIT) to make text wrap.
+
+=for text Figure: images/text-wrapping.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/text-wrapping.png" alt="The same text, which contains one newline, in three grey parents 200 wide. With CLAY_TEXT_WRAP_WORDS it breaks at a space and at the newline into three lines inside the parent. With CLAY_TEXT_WRAP_NEWLINES it breaks only at the newline and the first line runs past the parent's right edge. With CLAY_TEXT_WRAP_NONE it is one line that runs far past the parent."></p>
+
+=end html
 
 =head2 Fonts
 

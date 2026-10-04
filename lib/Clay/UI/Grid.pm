@@ -537,6 +537,14 @@ every column is as wide as its widest cell and every row as tall as its
 tallest cell. You add rows of widgets; the grid works out the sizes in
 the same layout pass as the rest of the UI.
 
+=for text Figure: images/grid.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
+
+=end html
+
 Like every widget in Clay::UI it is a role: compose it in a class of
 your own (as C<My::Grid> above) to get a widget you can construct. A
 grid can be the root of a L<Clay::UI> or a child of any container, and

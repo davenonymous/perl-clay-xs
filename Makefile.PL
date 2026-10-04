@@ -99,6 +99,9 @@ WriteMakefile(
 
     META_MERGE => {
         'meta-spec' => { version => 2 },
+        # tools/make-images renders the figures in images/ that the
+        # documentation shows; both are shipped but not installed.
+        no_index    => { directory => [qw(tools images)] },
         resources   => {
             bugtracker => { web => 'https://github.com/dave/perl-clay-xs/issues' },
             repository => {
@@ -132,6 +135,24 @@ lib/Clay/XS$(OBJ_EXT) : src/clay/clay.h
 
 src/%$(OBJ_EXT) : src/%.c
 	$(CCCMD) $(CCCDLFLAGS) -I. -Isrc "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) -o $@ $<
+
+# --- Documentation figures -------------------------------------------
+# Usage: make images         (after changing a figure or a pod reference)
+#        make images-check   (fails when a figure or an image URL is stale)
+#
+# tools/make-images lays every figure in images/ out with the Clay::UI
+# in blib/, draws it with Imager, runs the examples that write a PNG or
+# a PDF, and points the image URLs in the pod to the tag of the current
+# version on GitHub. It fails when the pod shows a file it does not
+# render, or does not show one that it renders.
+
+.PHONY: images images-check
+
+images : pure_all
+	$(FULLPERLRUN) -Mblib tools/make-images
+
+images-check : pure_all
+	$(FULLPERLRUN) -Mblib tools/make-images --check
 
 POSTAMBLE
 }

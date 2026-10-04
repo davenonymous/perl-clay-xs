@@ -3217,6 +3217,14 @@ A patched Clay adds the declaration key
 C<< sizingGroup => { width => $id, height => $id } >> (see
 L<Clay::XS::Structs/sizingGroup>). L<Clay::UI::Grid> builds on it.
 
+=for text Figure: images/sizing-groups.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
+
+=end html
+
 =over 4
 
 =item *
@@ -3266,6 +3274,14 @@ L<Clay::XS::Structs/layout>).
 A I<wrap container> lays its children out left to right and starts a
 new line below whenever the next child would not fit into the remaining
 inner width.
+
+=for text Figure: images/flow-layout.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
+
+=end html
 
 =over 4
 
@@ -3338,6 +3354,14 @@ wrapping into columns cannot be expressed.
 A third patch adds the layout direction C<CLAY_BACK_TO_FRONT>. A
 I<stack container> places all its children on top of each other inside
 its padding.
+
+=for text Figure: images/stack-layout.png in the distribution.
+
+=begin html
+
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
+
+=end html
 
 =over 4
 

@@ -131,10 +131,21 @@ Every function, method, attribute and struct key has a heading or an
 `=item` of its own, spelled as in code, so
 `grep -rnE '^=(head.|item) (C<)?scroll_to' lib/` finds it.
 
+The Manual and the Cookbook illustrate the layout model with figures
+from [`images/`](images/), each laid out by Clay itself and drawn with
+Imager by `tools/make-images` (`make images` regenerates them, `make
+images-check` reports stale ones). `perldoc` names the figure files
+where the HTML shows them.
+
 ## Examples
 
 All examples run headless. Those that write a PNG or PDF (06, 15, 16)
-take the output path as their first argument; the SVG examples write to
+take the output path as their first argument; their outputs are kept in
+`images/`
+([06](images/example-06-png-render.png),
+[15](images/example-15-og-card.png),
+[16](images/example-16-invoice-pdf.pdf)).
+The SVG examples write to
 the path given or to standard output. The `Features:`
 line in each file's header lists the identifiers it uses, so
 `grep -l 'Features:.*floating' examples/*.pl` finds the examples for a
