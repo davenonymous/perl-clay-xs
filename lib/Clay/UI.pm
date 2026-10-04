@@ -275,13 +275,10 @@ class Clay::UI :strict(params) {
 
 	# One frame: pointer and scroll input, event dispatch and the widgets
 	# that asked to be prepared (plain Perl, with no element open, so they
-	# may change the tree), then the layout pass.
-	#
-	# Clay_UpdateScrollContainers clears every scroll container's "declared
-	# this frame" mark, and the next update drops the scroll state of any
-	# container still unmarked. So once it has run, the layout pass runs
-	# too, even when a listener died; its commands are then discarded and
-	# the listener's error is rethrown.
+	# may change the tree), then the layout pass. The layout pass runs even
+	# when a listener died (documented behaviour): the frame then shows the
+	# scroll input already applied and the changes made before the error;
+	# its commands are discarded and the listener's error is rethrown.
 	method _render_frame ($frame) {
 		Clay_SetCurrentContext($_ctx);
 
@@ -788,9 +785,10 @@ preparations still run. If a C<prepare_layout> dies, preparation stops:
 the widgets after it in the same round are taken off the queue without
 being prepared, and stay out of date until something calls their
 C<request_prepare> again (see L<Clay::UI::Role::Core::Preparable/prepare_layout>).
-In both cases the layout pass still runs (Clay would otherwise forget
-the scroll positions at the next frame). Then C<render> dies with the
-first error and the frame's render commands are lost. The next
+In both cases the layout pass still runs, so the frame shows the scroll
+input already applied and the changes made before the error. Then
+C<render> dies with the first error and the frame's render commands are
+lost. The next
 C<render> works normally.
 
 =head1 CONSTRUCTOR
@@ -1159,11 +1157,9 @@ C<laid_out_revision> differs from the remembered value:
 		$drawn = $ui->laid_out_revision;
 	}
 
-A running transition is the exception: it changes the render commands
-from frame to frame without bumping the revision, so
-C<laid_out_revision> stays the same while the element animates (see
-F<KNOWN-ISSUES.md>, issue 3). While an element with a C<transition>
-may animate, draw every frame.
+A running transition (L<Clay::Manual/TRANSITIONS>) counts as a change
+too: every frame that animates an element moves the revision, so the
+loop above redraws until the animation is over.
 
 =head2 bounding_box
 

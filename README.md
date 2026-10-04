@@ -170,9 +170,6 @@ feature.
 - Neither layer reads the keyboard or draws; both are left to your
   program.
 
-See also `KNOWN-ISSUES.md` for problems found in the code that are not
-fixed yet.
-
 ## License
 
 zlib/libpng, the same license as Clay. See `src/clay/LICENSE.md` for the

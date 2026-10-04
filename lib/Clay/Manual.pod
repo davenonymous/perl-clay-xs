@@ -1346,8 +1346,9 @@ done.
 
 =back
 
-The revision does not move while a transition runs; see
-L</REDRAWING ONLY WHEN SOMETHING CHANGED>.
+Every frame that animates an element moves the revision (see
+L</REDRAWING ONLY WHEN SOMETHING CHANGED>), so a renderer that redraws
+only on a changed revision keeps drawing until the animation is over.
 
 Without handlers nothing is animated: the C<transition> key does
 nothing, and a changed value shows at once.
@@ -1400,10 +1401,8 @@ turns input into events), but draw only when the revision moved:
 C<laid_out_revision> is the revision the last C<render> laid out,
 including changes made by event listeners during that C<render>.
 
-A running transition (see L</TRANSITIONS>) changes the render commands
-from frame to frame without bumping the revision. While an element with
-a C<transition> may be animating - up to its C<duration> after the
-revision last moved - draw every frame.
+A running transition (see L</TRANSITIONS>) moves the revision in every
+frame that animates an element, so this loop redraws the animation too.
 
 =head1 ERRORS AND VALIDATION
 

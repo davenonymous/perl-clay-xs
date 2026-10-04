@@ -14,7 +14,8 @@ our @EXPORT_OK = qw(bump_revision current_revision);
 
 # One counter for the whole process: a renderer only needs to know whether
 # anything changed, not what or in which Clay::UI. Scroll positions are
-# written in Clay::XS, which counts them itself.
+# written in Clay::XS, which counts them itself, as it counts the
+# transition handler calls Clay makes while an element animates.
 my $revision = 0;
 
 sub bump_revision () {
@@ -23,7 +24,7 @@ sub bump_revision () {
 }
 
 sub current_revision () {
-	return $revision + Clay::XS::_scroll_position_writes();
+	return $revision + Clay::XS::_scroll_position_writes() + Clay::XS::_transition_handler_calls();
 }
 
 1;
@@ -101,12 +102,16 @@ C<mark_changed> (L<Clay::UI::Role::Core::Element/mark_changed>), which
 widget classes that keep state of their own call from their setters,
 and C<request_prepare> (L<Clay::UI::Role::Core::Preparable>).
 
-=back
+=item *
 
-A running transition (L<Clay::XS::Structs/transition>) does not bump
-the revision: its render commands change from frame to frame while the
-revision stays the same (see F<KNOWN-ISSUES.md>, issue 3). While an
-element with a C<transition> may animate, draw every frame.
+every frame in which Clay runs a transition handler
+(L<Clay::XS::Structs/transition>), that is, animates an element: its
+render commands differ from the frame before, and the frame after the
+last step shows the final state. The counting happens in L<Clay::XS>,
+so the revision moves during C<render>, after L<Clay::UI/laid_out_revision>
+was recorded; the next frame then shows a new revision.
+
+=back
 
 Reading an attribute never bumps the revision; neither does writing
 C<can_focus>, which changes nothing drawn (unless it takes the focus

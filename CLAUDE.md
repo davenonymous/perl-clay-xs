@@ -59,7 +59,12 @@ through Clay::UI and replaces `userData` with widget class and id.
   element carries its zIndex, `CLAY_TEXT_WRAP_NONE` never breaks,
   `lineHeight` boxes stack from the element's top, no `BORDER` for a
   transparent colour, a culled clip container still emits its scissor
-  commands). The
+  commands, a floating element may attach to an element declared later
+  in the frame (the clip lookup waits until `Clay_EndLayout`), scroll
+  containers are pruned by the frame generation they were last declared
+  in, so repeated `Clay_UpdateScrollContainers` calls between frames are
+  harmless, and the container swapped into a pruned slot is not skipped).
+  The
   `postamble` in `Makefile.PL` holds that rule and a `src/%.o : src/%.c`
   rule; EUMM's default rule drops subdirectory objects in the CWD, so
   removing it breaks the build.
@@ -216,7 +221,6 @@ through Clay::UI and replaces `userData` with widget class and id.
 - `lib/Clay/Manual.pod` (user guide, feature index), `lib/Clay/Cookbook.pod`
   (task recipes), `lib/Clay/XS/Structs.pod` (every struct key) and the
   module POD are the docs; `README.md` is a short entry point.
-  `KNOWN-ISSUES.md` tracks bugs found but not fixed yet.
 - Every public function, method, parameter, event, constant group and
   struct key gets its own heading spelled as in code, so one grep finds
   it. Code samples in the POD must run (test them).

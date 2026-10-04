@@ -1262,9 +1262,9 @@ The time in seconds since the last call, a finite number.
 =back
 
 Call it once per frame, after C<Clay_SetPointerState> and before
-C<Clay_BeginLayout>. Clay drops every scroll container that was not
-declared since the previous call, so a second call without a frame in
-between makes Clay forget all scroll containers and their positions.
+C<Clay_BeginLayout>. Clay drops the scroll state of every container
+that the last completed frame did not declare; calling it again before
+the next frame changes nothing more.
 
 Croaks C<Clay_UpdateScrollContainers: cannot be called between Clay_BeginLayout and Clay_EndLayout>, C<Clay_UpdateScrollContainers: the last frame was never finished; ...> and
 C<Clay_UpdateScrollContainers: deltaTime: expected a finite number, got ...>. The second croak follows the same rule as for

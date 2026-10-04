@@ -155,9 +155,10 @@ has no momentum. Drag scrolling moves the container with the pointer
 and, after the release, lets it glide on with momentum for some frames.
 Scrolling uses the
 layout of the previous frame, so it starts working after one completed
-C<render>. Do not call C<Clay_UpdateScrollContainers> yourself between
-renders: Clay then drops the scroll state of every container that was
-not declared since its previous call.
+C<render>. Leave C<Clay_UpdateScrollContainers> to C<render>: movement
+from a call of your own between renders goes unnoticed, since C<render>
+compares the positions it finds at its start with those after its own
+call (no C<OnScroll>, no revision bump).
 
 =head1 CONSTRUCTOR PARAMETERS
 

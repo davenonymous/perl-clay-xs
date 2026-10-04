@@ -420,6 +420,14 @@ Clay_TransitionData clay_perl_transition_set_final_trampoline(
  * around the Clay_EndLayout call. */
 extern CLAY_PERL_THREAD_LOCAL clay_perl_context *clay_perl_active_transition_ctx;
 
+/* How often Clay called the transition handler trampoline: once per
+ * element and frame while the element animates, so a frame that moved
+ * this count drew differently from the one before it. Clay::UI::Revision
+ * adds it to its revision (Clay::XS::_transition_handler_calls); a
+ * renderer that skips unchanged frames then redraws while anything
+ * animates. Process-wide, like Clay's current context. */
+extern UV clay_perl_transition_handler_calls;
+
 /* Number of Clay callbacks running on this thread. While it is non-zero
  * Clay is in the middle of one of its own functions, so the XS wrappers
  * that change Clay's state croak (see the guards in lib/Clay/XS.xs). */

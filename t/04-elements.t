@@ -318,4 +318,39 @@ subtest 'a culled clip container still clips its children' => sub {
         'the offscreen container emits its scissor commands around the visible child' );
 };
 
+subtest 'a floating element may attach to an element declared later in the frame' => sub {
+    my @errors;
+    my $ctx = Clay_Initialize(Clay_MinMemorySize(), { width => 200, height => 200 }, sub ($err, $userdata) { push @errors, $err->{errorType} });
+    Clay_SetMeasureTextFunction(sub { return { width => 0, height => 0 } });
+    my $frame = sub {
+        Clay_BeginLayout();
+        element('root', { layout => { sizing => { width => sizing_fixed(200), height => sizing_fixed(200) } } },
+            sub { element('f', { layout => $square, backgroundColor => [1, 1, 1, 255],
+                                 floating => { attachTo => CLAY_ATTACH_TO_ELEMENT_WITH_ID, parentId => Clay_GetElementId('t'), clipTo => CLAY_CLIP_TO_ATTACHED_PARENT } },
+                sub { element('kid', { layout => $square }) }) },
+            sub { element('clip', { layout => { sizing => { width => sizing_fixed(50), height => sizing_fixed(50) }, layoutDirection => CLAY_TOP_TO_BOTTOM }, clip => { vertical => 1 } },
+                sub { element('pad', { layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(45) } } }) },
+                sub { element('t', { layout => $square, backgroundColor => [2, 2, 2, 255] }) }) });
+        return Clay_EndLayout(0);
+    };
+    my @commands = map { $frame->() } 1 .. 3;
+    is( \@errors, [], 'three frames report no error' );
+    is( [ map { $_->{commandType} } @{ $commands[-1] } ],
+        [ CLAY_RENDER_COMMAND_TYPE_SCISSOR_START, CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_SCISSOR_END,
+          CLAY_RENDER_COMMAND_TYPE_SCISSOR_START, CLAY_RENDER_COMMAND_TYPE_RECTANGLE, CLAY_RENDER_COMMAND_TYPE_SCISSOR_END ],
+        'the floating element is clipped like its target' );
+    is( $commands[-1][4]{boundingBox}, { x => 0, y => 45, width => 10, height => 10 }, 'and positioned at it' );
+    Clay_SetPointerState({ x => 5, y => 48 }, 0);
+    is( [ map { $_->{stringId} } @{ Clay_GetPointerOverIds() } ], [ 'f', 'kid' ], 'its subtree is under a pointer inside the clip' );
+    Clay_SetPointerState({ x => 5, y => 53 }, 0);
+    is( [ map { $_->{stringId} } @{ Clay_GetPointerOverIds() } ], [ 'Clay__RootContainer', 'root' ], 'but not outside it' );
+
+    Clay_BeginLayout();
+    element('root', { layout => $square },
+        sub { element('g', { layout => $square, floating => { attachTo => CLAY_ATTACH_TO_ELEMENT_WITH_ID, parentId => Clay_GetElementId('nope') } }) });
+    Clay_EndLayout(0);
+    is( \@errors, [CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND], 'a target that is never declared is still reported' );
+};
+
+
 done_testing;

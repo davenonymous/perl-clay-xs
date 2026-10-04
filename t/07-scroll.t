@@ -101,6 +101,39 @@ set_scroll_position($scroll_id, { x => 0, y => -30 });
 drag_frame(33, 0);
 is( $y_of->(), -30, 'set_scroll_position stops the glide' );
 
+# Clay_UpdateScrollContainers drops the containers the last frame did not
+# declare; a second run between frames changes nothing.
+Clay_UpdateScrollContainers(0, [0, 0], 0.016);
+Clay_UpdateScrollContainers(0, [0, 0], 0.016);
+ok( Clay_GetScrollContainerData($scroll_id)->{found}, 'the container survives a second update without a frame in between' );
+is( $y_of->(), -30, 'with its position' );
+
+# The update that removes a vanished container still scrolls the one that
+# took its slot.
+sub build_page (@containers) {
+    Clay__OpenElementWithId( Clay_GetElementId("page") );
+    Clay__ConfigureOpenElement({ layout => { layoutDirection => CLAY_TOP_TO_BOTTOM } });
+        for my $name (@containers) {
+            Clay__OpenElementWithId( Clay_GetElementId($name) );
+            Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(50) } }, clip => { vertical => 1 } });
+                Clay__OpenElementWithId( Clay_GetElementId("$name-content") );
+                Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(200) } } });
+                Clay__CloseElement();
+            Clay__CloseElement();
+        }
+    Clay__CloseElement();
+}
+Clay_BeginLayout();
+build_page("first", "second");
+Clay_EndLayout(0);
+Clay_BeginLayout();
+build_page("second");
+Clay_EndLayout(0);
+Clay_SetPointerState({ x => 50, y => 25 }, 0);
+Clay_UpdateScrollContainers(0, { x => 0, y => -2 }, 0.016);
+ok( !Clay_GetScrollContainerData(Clay_GetElementId("first"))->{found}, 'the vanished container is dropped' );
+is( Clay_GetScrollContainerData(Clay_GetElementId("second"))->{scrollPosition}{y}, -20, 'the remaining one scrolled in the same update' );
+
 # With external scroll handling, Clay asks the query function for the offset.
 my @queried;
 like( dies { Clay_SetExternalScrollHandlingEnabled(1) }, qr/Clay_SetQueryScrollOffsetFunction first/,

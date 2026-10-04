@@ -1476,6 +1476,18 @@ xs__scroll_position_writes()
         RETVAL
 
 # =============================================================================
+# Internal: how often Clay ran a transition handler (one call per animating
+# element and frame), for Clay::UI::Revision.
+# =============================================================================
+
+UV
+xs__transition_handler_calls()
+    CODE:
+        RETVAL = clay_perl_transition_handler_calls;
+    OUTPUT:
+        RETVAL
+
+# =============================================================================
 # Internal: how many string-arena chunks a context holds, for the tests of
 # the arena's retention rule.
 # =============================================================================

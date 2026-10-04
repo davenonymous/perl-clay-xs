@@ -10,7 +10,7 @@ use lib 't/lib';
 use Object::Pad 0.800;
 use Clay::UI;
 use Clay::UI::Box;
-use Clay::XS qw(Clay_GetElementId set_scroll_position sizing_fixed);
+use Clay::XS qw(Clay_GetElementId Clay_SetTransitionHandlers Clay_EaseOut set_scroll_position sizing_fixed);
 use Clay::UI::Revision qw(bump_revision current_revision);
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
@@ -39,6 +39,13 @@ class FocusBox :strict(params)
 	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Interaction::Focusable)
 {}
+
+class FadingBox :strict(params) :does(Clay::UI::Box) {
+	method contribute_transition ($config) {
+		$config->{transition} = { duration => 1, properties => Clay::XS::CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR() };
+		return;
+	}
+}
 
 sub bumps ($code) {
 	my $before = current_revision();
@@ -162,5 +169,26 @@ subtest 'scrolling inside render bumps the revision' => sub {
 	ok( bumps(sub { $ui->render(scroll_delta => [0, -1]) }), 'wheel input that moves the container' );
 	ok( !bumps(sub { $ui->render }), 'a frame without movement does not' );
 };
+
+subtest 'a running transition bumps the revision' => sub {
+	my $root = FadingBox->new(id => 'fade', background_color => [255, 0, 0, 255], layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } });
+	my $ui = Clay::UI->new(width => 20, height => 20, root => $root);
+	Clay_SetTransitionHandlers(sub ($args, $userdata) {
+		my $eased = Clay_EaseOut($args);
+		$args->{current} = $eased->{current};
+		return $eased->{complete};
+	});
+	$ui->render(delta_time => 0.25);
+	ok( !bumps(sub { $ui->render(delta_time => 0.25) }), 'an idle element does not' );
+
+	$root->background_color([0, 0, 0, 255]);
+	$ui->render(delta_time => 0.25);    # the colour starts to move
+	ok( bumps(sub { $ui->render(delta_time => 0.25) }), 'a frame that animates an element bumps the revision' );
+	my $frames = 0;
+	$frames++ while $frames < 10 && bumps(sub { $ui->render(delta_time => 0.25) });
+	ok( $frames >= 2 && $frames < 10, "until the animation is over ($frames more frames)" );
+	is( $ui->render->[0]{renderData}{backgroundColor}{r}, 0, 'and the final colour is shown' );
+};
+
 
 done_testing;

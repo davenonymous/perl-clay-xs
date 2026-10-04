@@ -1,6 +1,23 @@
 --- a/src/clay/clay.h
 +++ b/src/clay/clay.h
-@@ -1682,6 +1682,11 @@
+@@ -1294,7 +1294,7 @@
+     Clay_Vector2 previousDelta;
+     float momentumTime;
+     uint32_t elementId;
+-    bool openThisFrame;
++    uint32_t generation; // The frame this container was last declared in
+     bool pointerScrollActive;
+ } Clay__ScrollContainerDataInternal;
+ 
+@@ -1371,6 +1371,7 @@
+     int32_t layoutElementIndex;
+     uint32_t parentId; // This can be zero in the case of the root layout tree
+     uint32_t clipElementId; // This can be zero if there is no clip element
++    bool clipElementPending; // attachTo element declared later in the frame; clipElementId holds the stand-in until Clay_EndLayout resolves it
+     int16_t zIndex;
+     Clay_Vector2 pointerOffset; // Only used when scroll containers are managed externally
+ } Clay__LayoutElementTreeRoot;
+@@ -1687,6 +1688,11 @@
      hash += (hash << 10);
      hash ^= (hash >> 6);
  
@@ -12,7 +29,7 @@
      hash += (hash << 3);
      hash ^= (hash >> 11);
      hash += (hash << 15);
-@@ -1795,7 +1800,7 @@
+@@ -1800,7 +1806,7 @@
              return &Clay__MeasureTextCacheItem_DEFAULT;
          }
          char current = text->chars[end];
@@ -21,7 +38,65 @@
              int32_t length = end - start;
              Clay_Dimensions dimensions = CLAY__DEFAULT_STRUCT;
              if (length > 0) {
-@@ -2963,7 +2968,7 @@
+@@ -2217,6 +2223,7 @@
+         Clay_LayoutElement *hierarchicalParent = Clay_LayoutElementArray_Get(&context->layoutElements, Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 2));
+         if (hierarchicalParent) {
+             uint32_t clipElementId = 0;
++            bool clipElementPending = false;
+             if (declaration->floating.attachTo == CLAY_ATTACH_TO_PARENT) {
+                 // Attach to the element's direct hierarchical parent
+                 floatingConfig->parentId = hierarchicalParent->id;
+@@ -2225,19 +2232,20 @@
+                 }
+             } else if (declaration->floating.attachTo == CLAY_ATTACH_TO_ELEMENT_WITH_ID) {
+                 Clay_LayoutElementHashMapItem *parentItem = Clay__GetHashMapItem(floatingConfig->parentId);
+-                if (parentItem == &Clay_LayoutElementHashMapItem_DEFAULT) {
+-                    context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
+-                            .errorType = CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND,
+-                            .errorText = CLAY_STRING("A floating element was declared with a parentId, but no element with that ID was found."),
+-                            .userData = context->errorHandler.userData });
+-                } else {
++                if (parentItem->generation > context->generation) { // Declared earlier in this frame
+                     clipElementId = Clay__int32_tArray_GetValue(&context->layoutElementClipElementIds, (int32_t)(parentItem->layoutElement - context->layoutElements.internalArray));
++                } else {
++                    // The target may still be declared later in this frame (a stale item only says it was declared in an earlier
++                    // one). Until Clay__ResolvePendingClipElementIds looks it up at the end of the frame, this element's own id
++                    // stands in for its clip element id, here and in everything that inherits it from the clip stack.
++                    clipElementId = openLayoutElement->id;
++                    clipElementPending = true;
+                 }
+             } else if (declaration->floating.attachTo == CLAY_ATTACH_TO_ROOT) {
+                 floatingConfig->parentId = Clay__HashString(CLAY_STRING("Clay__RootContainer"), 0).id;
+             }
+             if (declaration->floating.clipTo == CLAY_CLIP_TO_NONE) {
+-                clipElementId = 0;
++                clipElementId = 0; // A pending lookup still runs, to report a target that never comes
+             }
+             int32_t currentElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);
+             Clay__int32_tArray_Set(&context->layoutElementClipElementIds, currentElementIndex, clipElementId);
+@@ -2246,6 +2254,7 @@
+                 .layoutElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1),
+                 .parentId = floatingConfig->parentId,
+                 .clipElementId = clipElementId,
++                .clipElementPending = clipElementPending,
+                 .zIndex = floatingConfig->zIndex,
+             });
+         }
+@@ -2260,11 +2269,11 @@
+             if (openLayoutElement->id == mapping->elementId) {
+                 scrollOffset = mapping;
+                 scrollOffset->layoutElement = openLayoutElement;
+-                scrollOffset->openThisFrame = true;
++                scrollOffset->generation = context->generation;
+             }
+         }
+         if (!scrollOffset) {
+-            scrollOffset = Clay__ScrollContainerDataInternalArray_Add(&context->scrollContainerDatas, CLAY__INIT(Clay__ScrollContainerDataInternal){.layoutElement = openLayoutElement, .scrollOrigin = {-1,-1}, .elementId = openLayoutElement->id, .openThisFrame = true});
++            scrollOffset = Clay__ScrollContainerDataInternalArray_Add(&context->scrollContainerDatas, CLAY__INIT(Clay__ScrollContainerDataInternal){.layoutElement = openLayoutElement, .scrollOrigin = {-1,-1}, .elementId = openLayoutElement->id, .generation = context->generation});
+         }
+         if (context->externalScrollHandlingEnabled) {
+             scrollOffset->scrollPosition = Clay__QueryScrollOffset(scrollOffset->elementId, context->queryScrollOffsetUserData);
+@@ -2969,7 +2978,7 @@
  // between neighbours on a line, and a horizontal bar centered in every lineGap, spanning the
  // container. A vertical bar spans its line's band, which reaches halfway into the lineGaps around
  // the line and to the container's edge above the first line and below the last one.
@@ -30,7 +105,7 @@
      Clay_Context* context = Clay_GetCurrentContext();
      Clay_LayoutConfig *layoutConfig = &parent->config.layout;
      Clay_BorderElementConfig *borderConfig = &parent->config.border;
-@@ -2995,6 +3000,7 @@
+@@ -3001,6 +3010,7 @@
              .renderData = { .rectangle = { .backgroundColor = borderConfig->color } },
              .userData = parent->config.userData,
              .id = Clay__HashNumber(parent->id, parent->children.length + 1 + i).id,
@@ -38,7 +113,7 @@
              .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
          });
      }
-@@ -3257,7 +3263,8 @@
+@@ -3275,7 +3285,8 @@
          float lineHeight = containerElement->textConfig.lineHeight > 0 ? (float)containerElement->textConfig.lineHeight : textElementData->preferredDimensions.height;
          int32_t lineLengthChars = 0;
          int32_t lineStartOffset = 0;
@@ -48,7 +123,7 @@
              Clay__WrappedTextLineArray_Add(&context->wrappedTextLines, CLAY__INIT(Clay__WrappedTextLine) { containerElement->dimensions,  textElementData->text });
              textElementData->wrappedLines.length++;
              continue;
-@@ -3493,6 +3500,7 @@
+@@ -3511,6 +3522,7 @@
                      continue;
                  }
                  Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
@@ -56,7 +131,7 @@
                  if (generateRenderCommands && !Clay__ElementIsOffscreen(&currentElementData->boundingBox)) {
                      // DFS is returning upwards backwards
                      bool closeClipElement = false;
-@@ -3510,7 +3518,7 @@
+@@ -3528,7 +3540,7 @@
                          }
                      }
  
@@ -65,7 +140,7 @@
                          Clay_BoundingBox currentElementBoundingBox = currentElementData->boundingBox;
                          Clay_BorderElementConfig *borderConfig = &currentElement->config.border;
                          Clay_RenderCommand renderCommand = {
-@@ -3522,15 +3530,16 @@
+@@ -3540,15 +3552,16 @@
                              }},
                              .userData = currentElement->config.userData,
                              .id = Clay__HashNumber(currentElement->id, currentElement->children.length).id,
@@ -84,7 +159,7 @@
                              } else if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT) {
                                  for (int32_t i = 0; i < currentElement->children.length; ++i) {
                                      Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
-@@ -3542,6 +3551,7 @@
+@@ -3560,6 +3573,7 @@
                                                  } },
                                                  .userData = currentElement->config.userData,
                                                  .id = Clay__HashNumber(currentElement->id, currentElement->children.length + 1 + i).id,
@@ -92,7 +167,7 @@
                                                  .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
                                          });
                                      }
-@@ -3558,6 +3568,7 @@
+@@ -3576,6 +3590,7 @@
                                                  } },
                                                  .userData = currentElement->config.userData,
                                                  .id = Clay__HashNumber(currentElement->id, currentElement->children.length + 1 + i).id,
@@ -100,7 +175,7 @@
                                                  .commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE,
                                          });
                                      }
-@@ -3579,9 +3590,17 @@
+@@ -3597,9 +3612,17 @@
                      if (closeClipElement) {
                          Clay__AddRenderCommand(CLAY__INIT(Clay_RenderCommand) {
                                  .id = Clay__HashNumber(currentElement->id, rootElement->children.length + 11).id,
@@ -118,7 +193,7 @@
                  }
  
                  dfsBuffer.length--;
-@@ -3649,8 +3668,9 @@
+@@ -3667,8 +3690,9 @@
                      Clay_TextElementConfig *textElementConfig = &currentElement->textConfig;
                      float naturalLineHeight = currentElement->textElementData.preferredDimensions.height;
                      float finalLineHeight = textElementConfig->lineHeight > 0 ? (float)textElementConfig->lineHeight : naturalLineHeight;
@@ -130,7 +205,7 @@
                      for (int32_t lineIndex = 0; lineIndex < currentElement->textElementData.wrappedLines.length; ++lineIndex) {
                          Clay__WrappedTextLine *wrappedLine = Clay__WrappedTextLineArraySlice_Get(&currentElement->textElementData.wrappedLines, lineIndex);
                          if (wrappedLine->line.length == 0) {
-@@ -3748,7 +3768,8 @@
+@@ -3766,7 +3790,8 @@
                          };
                          Clay__AddRenderCommand(renderCommand);
                      }
@@ -140,7 +215,7 @@
                          Clay_RenderCommand renderCommand = {
                              .boundingBox = currentElementBoundingBox,
                              .renderData = { .rectangle = {
-@@ -3763,6 +3784,21 @@
+@@ -3781,6 +3806,21 @@
                          Clay__AddRenderCommand(renderCommand);
                      }
                  }
@@ -162,7 +237,7 @@
              }
  
              Clay_LayoutElementHashMapItem *hashMapItem = Clay__GetHashMapItem(currentElement->id);
-@@ -3874,7 +3910,7 @@
+@@ -3892,7 +3932,7 @@
          if (root->clipElementId) {
              Clay_LayoutElementHashMapItem *clipHashMapItem = Clay__GetHashMapItem(root->clipElementId);
              if (clipHashMapItem && !Clay__ElementIsOffscreen(&clipHashMapItem->boundingBox)) {
@@ -171,7 +246,113 @@
              }
          }
      }
-@@ -5187,6 +5223,8 @@
+@@ -4952,15 +4992,16 @@
+     Clay__ScrollContainerDataInternal *highestPriorityScrollData = CLAY__NULL;
+     for (int32_t i = 0; i < context->scrollContainerDatas.length; i++) {
+         Clay__ScrollContainerDataInternal *scrollData = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
+-        if (!scrollData->openThisFrame) {
++        if (scrollData->generation != context->generation) { // Not declared in the last frame, however often this runs in between
+             Clay__ScrollContainerDataInternalArray_RemoveSwapback(&context->scrollContainerDatas, i);
++            i--; // the swapped-in container gets its turn too
+             continue;
+         }
+-        scrollData->openThisFrame = false;
+         Clay_LayoutElementHashMapItem *hashMapItem = Clay__GetHashMapItem(scrollData->elementId);
+         // Element isn't rendered this frame but scroll offset has been retained
+         if (!hashMapItem) {
+             Clay__ScrollContainerDataInternalArray_RemoveSwapback(&context->scrollContainerDatas, i);
++            i--;
+             continue;
+         }
+ 
+@@ -5150,6 +5191,78 @@
+     }
+ }
+ 
++uint32_t Clay__ResolvePendingClipElementId(Clay__LayoutElementTreeRoot *root, int32_t depth);
++
++// The clip element id of the element with the given id, now that the whole frame is declared. When that element is,
++// or sits in, a floating element whose own clip element is still pending, that one is resolved first.
++uint32_t Clay__ClipElementIdOfElement(uint32_t elementId, int32_t depth) {
++    Clay_Context* context = Clay_GetCurrentContext();
++    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(elementId);
++    if (item->generation <= context->generation) { // Not declared in this frame
++        context->errorHandler.errorHandlerFunction(CLAY__INIT(Clay_ErrorData) {
++                .errorType = CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND,
++                .errorText = CLAY_STRING("A floating element was declared with a parentId, but no element with that ID was found."),
++                .userData = context->errorHandler.userData });
++        return 0;
++    }
++    int32_t elementIndex = (int32_t)(item->layoutElement - context->layoutElements.internalArray);
++    uint32_t clipElementId = (uint32_t)Clay__int32_tArray_GetValue(&context->layoutElementClipElementIds, elementIndex);
++    for (int32_t rootIndex = 0; rootIndex < context->layoutElementTreeRoots.length; ++rootIndex) {
++        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
++        if (!root->clipElementPending) {
++            continue;
++        }
++        Clay_LayoutElement *pendingElement = Clay_LayoutElementArray_Get(&context->layoutElements, root->layoutElementIndex);
++        bool isTheElement = root->layoutElementIndex == elementIndex;
++        bool inheritedItsStandIn = pendingElement->id == clipElementId && pendingElement->config.floating.clipTo != CLAY_CLIP_TO_NONE
++            && !pendingElement->config.clip.horizontal && !pendingElement->config.clip.vertical;
++        if (isTheElement || inheritedItsStandIn) {
++            return Clay__ResolvePendingClipElementId(root, depth + 1);
++        }
++    }
++    return clipElementId;
++}
++
++// Looks up the clip element of a floating element attached to an element declared after it (reporting a target that
++// never came) and replaces the stand-in it was declared with (its own id, see Clay__ConfigureOpenElementPtr). Only a
++// clipping element pushes its own id on the clip stack, so unless the floating element clips, every element and tree
++// root carrying its id inherited the stand-in; when it clips, its descendants are clipped by it and only its own
++// entry is replaced. Attachments that lead around in a circle end unclipped.
++uint32_t Clay__ResolvePendingClipElementId(Clay__LayoutElementTreeRoot *root, int32_t depth) {
++    Clay_Context* context = Clay_GetCurrentContext();
++    Clay_LayoutElement *rootElement = Clay_LayoutElementArray_Get(&context->layoutElements, root->layoutElementIndex);
++    uint32_t targetClipElementId = depth > context->layoutElementTreeRoots.length ? 0 : Clay__ClipElementIdOfElement(root->parentId, depth);
++    uint32_t clipElementId = rootElement->config.floating.clipTo == CLAY_CLIP_TO_NONE ? 0 : targetClipElementId;
++    root->clipElementPending = false;
++    root->clipElementId = clipElementId;
++    Clay__int32_tArray_Set(&context->layoutElementClipElementIds, root->layoutElementIndex, (int32_t)clipElementId);
++    if (rootElement->config.floating.clipTo == CLAY_CLIP_TO_NONE || rootElement->config.clip.horizontal || rootElement->config.clip.vertical) {
++        return clipElementId;
++    }
++    for (int32_t i = 0; i < context->layoutElements.length; ++i) {
++        if ((uint32_t)Clay__int32_tArray_GetValue(&context->layoutElementClipElementIds, i) == rootElement->id) {
++            Clay__int32_tArray_Set(&context->layoutElementClipElementIds, i, (int32_t)clipElementId);
++        }
++    }
++    for (int32_t rootIndex = 0; rootIndex < context->layoutElementTreeRoots.length; ++rootIndex) {
++        Clay__LayoutElementTreeRoot *other = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
++        if (other->clipElementId == rootElement->id) {
++            other->clipElementId = clipElementId;
++        }
++    }
++    return clipElementId;
++}
++
++void Clay__ResolvePendingClipElementIds(void) {
++    Clay_Context* context = Clay_GetCurrentContext();
++    for (int32_t rootIndex = 0; rootIndex < context->layoutElementTreeRoots.length; ++rootIndex) {
++        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
++        if (root->clipElementPending) {
++            Clay__ResolvePendingClipElementId(root, 0);
++        }
++    }
++}
++
+ CLAY_WASM_EXPORT("Clay_EndLayout")
+ Clay_RenderCommandArray Clay_EndLayout(float deltaTime) {
+     Clay_Context* context = Clay_GetCurrentContext();
+@@ -5161,6 +5274,7 @@
+             .errorText = CLAY_STRING("There were still open layout elements when EndLayout was called. This results from an unequal number of calls to Clay__OpenElement and Clay__CloseElement."),
+             .userData = context->errorHandler.userData });
+     }
++    Clay__ResolvePendingClipElementIds();
+ 
+     // Prune non exiting transitions
+     for (int i = 0; i < context->transitionDatas.length; ++i) {
+@@ -5205,6 +5319,8 @@
                          data->state = CLAY_TRANSITION_STATE_EXITING;
                          data->activeProperties = config->properties;
                          data->elapsedTime = 0;
@@ -180,7 +361,7 @@
                          data->targetState = config->exit.setFinalState(data->targetState, config->properties);
                      }
  
-@@ -5426,6 +5464,7 @@
+@@ -5444,6 +5560,7 @@
                                  transitionData->activeProperties = CLAY_TRANSITION_PROPERTY_NONE;
                              } else if (transitionData->state == CLAY_TRANSITION_STATE_EXITING) {
                                  Clay__TransitionDataInternalArray_RemoveSwapback(&context->transitionDatas, i);

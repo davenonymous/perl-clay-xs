@@ -892,11 +892,10 @@ its C<id>. Other C<attachTo> values ignore it.
     floating => { attachTo => CLAY_ATTACH_TO_ELEMENT_WITH_ID,
                   parentId => Clay_GetElementId('menu-button') }
 
-Declare the target element before the floating element in the same
-frame. When no element with that id was declared before it in the
-frame, Clay reports C<CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND>
-to the error handler (in later frames, when the target is declared after
-the floating element, an internal error instead).
+The target may be declared anywhere in the same frame, before or after
+the floating element. When the frame declares no element with that id,
+Clay reports C<CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND> to
+the error handler at the end of the frame.
 
 Clay::UI: C<< floating => { parent_id => ... } >>.
 

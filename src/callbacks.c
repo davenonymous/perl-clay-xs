@@ -58,6 +58,10 @@
 /* The context the binding treats as current; mirrors Clay's global. */
 clay_perl_context *clay_perl_current_ctx = NULL;
 
+/* How often Clay ran a Perl transition handler, i.e. animated an element
+ * (see src/clay_perl.h). Process-wide, like Clay's current context. */
+UV clay_perl_transition_handler_calls = 0;
+
 /* ---------------------------------------------------------------------------
  * Thread-local active transition context.
  *
@@ -553,6 +557,7 @@ static int transition_handler_args(pTHX_ const void *data, SV **args)
 bool clay_perl_transition_handler_trampoline(Clay_TransitionCallbackArguments args)
 {
     dTHX;
+    clay_perl_transition_handler_calls++;
     clay_perl_context *ctx = clay_perl_active_transition_ctx;
     if (!ctx || !ctx->callbacks[CLAY_PERL_DISPATCH_TRANSITION_HANDLER].code) return true;
 
