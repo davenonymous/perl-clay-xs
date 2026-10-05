@@ -17,6 +17,11 @@ role Clay::UI::Role::Core::Container :does(Clay::UI::Role::Core::Element) {
 		return $self;
 	}
 
+	method insert_children ($offset, @kids) {
+		$self->_splice_children($offset, 0, @kids);
+		return $self;
+	}
+
 	method clear_children () {
 		$self->_detach_children(@{ $self->children });
 		return $self;
@@ -95,6 +100,17 @@ removed since. Returns the widget, so calls chain:
 Dies, changing nothing, for the cases listed in
 L<Clay::UI::Role::Core::Element/ATTACHING CHILDREN>, for example
 C<Clay::UI: widget ... is still attached to a parent; remove it first>.
+
+=head2 insert_children
+
+	$widget->insert_children($offset, @kids);
+
+Like L</add_child>, but puts the widgets before the child at index
+C<$offset> (0 inserts them first, the number of children appends). The
+children already there keep their state: none is detached. Returns the
+widget. Dies, changing nothing, like L</add_child>, and with
+C<Clay::UI: child offset ... out of range 0..N> for an offset outside
+the children.
 
 =head2 clear_children
 

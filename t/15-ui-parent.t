@@ -43,6 +43,20 @@ subtest 'children added via add_child are parent-stamped' => sub {
 	same($kid->root,   $parent, 'add_child child root resolves');
 };
 
+subtest 'insert_children puts widgets before an index without detaching the others' => sub {
+	my $parent = Clay::UI::Test::Box->new(id => 'p');
+	my ($a, $b, $c, $d) = map { Clay::UI::Test::Box->new(id => $_) } qw(a b c d);
+	$parent->add_child($a, $d);
+	$parent->insert_children(1, $b, $c);
+	is( [ map { $_->id } @{ $parent->children } ], [qw(a b c d)], 'the new children sit at the offset, in order' );
+	same($b->parent, $parent, 'they are parent-stamped');
+	same($parent->children->[3], $d, 'the child after the offset is the same object');
+	$parent->insert_children(4, Clay::UI::Test::Box->new(id => 'e'));
+	is( [ map { $_->id } @{ $parent->children } ], [qw(a b c d e)], 'the child count appends' );
+	like( dies { $parent->insert_children(6, Clay::UI::Test::Box->new) }, qr/child offset 6 out of range 0\.\.5/, 'an offset past the end dies' );
+	is( scalar @{ $parent->children }, 5, 'and changes nothing' );
+};
+
 subtest 'TextNode children are parent-stamped too' => sub {
 	my $text = Clay::UI::Test::Text->new(text => 'hi');
 	my $box  = Clay::UI::Test::Box->new;

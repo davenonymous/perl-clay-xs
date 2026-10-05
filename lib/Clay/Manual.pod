@@ -1560,7 +1560,14 @@ reports the memory needed for the current settings.
 =item Text measurement cache
 
 Clay caches measured words; C<Clay_SetMaxMeasureTextCacheWordCount>
-sizes the cache. After changing fonts, call
+sizes the cache (16384 words by default, twice the element count), or
+C<< Clay::UI->new(max_measure_text_cache_word_count => $n) >>. Every
+text laid out in a frame counts, visible or not, and the words of the
+last few frames stay cached; past the capacity Clay reports
+C<CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED> and lays the rest
+out with no size. Clay also wraps at most as many text lines per frame
+as the element count allows and silently stops wrapping past that.
+After changing fonts, call
 C<Clay_ResetMeasureTextCache> (Clay::UI does this when you set
 C<measure_text>).
 

@@ -13,6 +13,8 @@ use Clay::XS qw(:all);
 use Clay::UI;
 use Clay::UI::Revision qw(current_revision);
 use Clay::UI::Role::Core::Preparable;
+use Clay::UI::Role::Layout::HasLayout;
+use Clay::UI::Role::Layout::HasScroll;
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
 
@@ -32,6 +34,20 @@ class Clay::UI::Test::List :strict(params) :does(Clay::UI::Box) :does(Clay::UI::
 		$self->clear_children;
 		$self->add_child( map { Clay::UI::Test::Text->new(text => $_) } @items );
 		$on_prepare->($self) if $on_prepare;
+		return;
+	}
+}
+
+# A scroll container that prepares its children for the position it shows.
+class Clay::UI::Test::ScrollList :strict(params)
+	:does(Clay::UI::Role::Layout::HasScroll)
+	:does(Clay::UI::Role::Layout::HasLayout)
+	:does(Clay::UI::Role::Core::Preparable)
+{
+	field $prepared :reader = 0;
+
+	method prepare_layout () {
+		$prepared++;
 		return;
 	}
 }
@@ -106,6 +122,23 @@ subtest 'the queue holds widgets weakly' => sub {
 	undef $list;
 	is( $weak, undef, 'a queued widget can be freed' );
 	ok( lives { ui_with()->render }, 'and is forgotten' );
+};
+
+subtest 'scroll_to prepares a scroll container that prepares itself' => sub {
+	my $list = Clay::UI::Test::ScrollList->new(
+		id     => 'scroll',
+		layout => { layout_direction => CLAY_TOP_TO_BOTTOM, sizing => { width => sizing_fixed(50), height => sizing_fixed(10) } },
+	);
+	$list->add_child( map { Clay::UI::Test::Text->new(text => "line $_") } 1 .. 100 );
+	my $ui = ui_with($list);
+	$ui->render;
+	is( $list->prepared, 0, 'a container that never asked is not prepared' );
+	is( $ui->scroll_to($list, { y => -5 }), { x => 0, y => -5 }, 'scroll_to moves the container' );
+	ok( $list->is_prepare_pending, 'and queues its preparation' );
+	$ui->render;
+	is( [ $list->prepared, $ui->scroll_state($list)->{position}{y} ], [ 1, -5 ], 'the frame prepared it and shows the position' );
+	$ui->scroll_to($list, { y => -5 });
+	ok( !$list->is_prepare_pending, 'a move to the current position queues nothing' );
 };
 
 done_testing;

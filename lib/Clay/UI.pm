@@ -36,6 +36,7 @@ use Clay::XS qw(
 	Clay__OpenTextElement
 	CLAY_POINTER_DATA_PRESSED
 	CLAY_POINTER_DATA_PRESSED_THIS_FRAME
+	CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED
 );
 use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::_validate qw(is_finite_number);
@@ -61,10 +62,11 @@ class Clay::UI :strict(params) {
 	field $width  :param;
 	field $height :param;
 
-	field $memory_size       :param = undef;
-	field $max_element_count :param :reader = $DEFAULT_MAX_ELEMENT_COUNT;
-	field $error_handler     :param = undef;
-	field $measure_text      :param = undef;
+	field $memory_size                       :param = undef;
+	field $max_element_count                 :param :reader = $DEFAULT_MAX_ELEMENT_COUNT;
+	field $max_measure_text_cache_word_count :param :reader = undef;
+	field $error_handler                     :param = undef;
+	field $measure_text                      :param = undef;
 
 	field $_ctx;
 	field $_uses_default_error_handler;
@@ -98,9 +100,19 @@ class Clay::UI :strict(params) {
 			&& $max_element_count >= 1) {
 			croak_ui "Clay::UI: 'max_element_count' must be a positive integer";
 		}
+		$max_measure_text_cache_word_count //= _default_measure_cache_words($max_element_count);
+		unless (is_finite_number($max_measure_text_cache_word_count)
+			&& $max_measure_text_cache_word_count == int($max_measure_text_cache_word_count)
+			&& $max_measure_text_cache_word_count >= $MIN_MEASURE_CACHE_WORDS) {
+			croak_ui "Clay::UI: 'max_measure_text_cache_word_count' must be an integer >= $MIN_MEASURE_CACHE_WORDS";
+		}
 
+		# The handler closes over the count, not over $self: Clay's context
+		# keeps the handler, and a cycle would keep the UI alive.
 		$_uses_default_error_handler = !defined $error_handler;
+		my $measure_cache_error = _measure_cache_error($max_measure_text_cache_word_count);
 		$error_handler //= sub ($err, $userdata) {
+			die $measure_cache_error if $err->{errorType} == CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED;
 			die "Clay error: $err->{errorText}\n";
 		};
 		$measure_text //= sub ($text, $config, $userdata) {
@@ -143,20 +155,18 @@ class Clay::UI :strict(params) {
 	# current context, so a throwaway seed context carries this UI's counts
 	# to them: setting the counts on another UI's context would disable it
 	# until it is initialised again, and setting them with no current
-	# context would change Clay's process-wide defaults. The measure cache
-	# gets twice as many words as elements, as Clay's defaults do.
+	# context would change Clay's process-wide defaults.
 	method _initialize_context () {
 		my $seed = Clay_Initialize(Clay_MinMemorySize(), { width => $width, height => $height });
 		Clay_SetMaxElementCount($max_element_count);
-		my $word_count = 2 * $max_element_count;
-		Clay_SetMaxMeasureTextCacheWordCount($word_count > $MIN_MEASURE_CACHE_WORDS ? $word_count : $MIN_MEASURE_CACHE_WORDS);
+		Clay_SetMaxMeasureTextCacheWordCount($max_measure_text_cache_word_count);
 
 		my $min_memory = Clay_MinMemorySize();
 		$memory_size //= $min_memory;
 		unless (is_finite_number($memory_size) && $memory_size == int($memory_size)
 			&& $memory_size >= $min_memory) {
 			croak_ui "Clay::UI: 'memory_size' must be an integer >= Clay_MinMemorySize() ($min_memory)"
-				. " for max_element_count $max_element_count";
+				. " for max_element_count $max_element_count and max_measure_text_cache_word_count $max_measure_text_cache_word_count";
 		}
 		# The new context copies the seed's counts and becomes current.
 		return Clay_Initialize($memory_size, { width => $width, height => $height }, $error_handler);
@@ -166,6 +176,21 @@ class Clay::UI :strict(params) {
 	# slot, so this many widgets fit into one frame.
 	method _widget_capacity () {
 		return $max_element_count > 2 ? $max_element_count - 2 : 0;
+	}
+
+	# Clay's own default: twice as many cached words as elements, and at
+	# least the 32 its hash buckets need.
+	sub _default_measure_cache_words ($element_count) {
+		my $words = 2 * $element_count;
+		return $words > $MIN_MEASURE_CACHE_WORDS ? $words : $MIN_MEASURE_CACHE_WORDS;
+	}
+
+	# Clay measures every text laid out in a frame word by word and keeps
+	# the words of the last few frames; past the capacity it reports an
+	# error and lays the rest of the text out with no size at all.
+	sub _measure_cache_error ($word_count) {
+		return "Clay::UI: the texts laid out in one frame have more words than max_measure_text_cache_word_count ($word_count) allows;"
+			. " pass a larger max_measure_text_cache_word_count to Clay::UI->new\n";
 	}
 
 	sub _is_viewport_size ($value) {
@@ -445,7 +470,8 @@ class Clay::UI :strict(params) {
 
 	# Moves a scroll container, kept within its content; an axis left out
 	# keeps its position. Returns the position, or undef when the last frame
-	# did not lay the container out.
+	# did not lay the container out. A container that prepares its subtree
+	# for the position it shows (a Preparable) is prepared for the new one.
 	method scroll_to ($widget, $position) {
 		croak_ui "Clay::UI: scroll_to needs a position { x => ..., y => ... }"
 			unless ref $position eq 'HASH';
@@ -464,8 +490,14 @@ class Clay::UI :strict(params) {
 			my $wanted = $position->{$axis} // $data->{scrollPosition}{$axis};
 			$clamped{$axis} = $wanted > 0 ? 0 : $wanted < $lowest ? $lowest : $wanted + 0;
 		}
+		# Clay holds the position in single precision, so what it holds
+		# after the move decides whether anything changed.
 		set_scroll_position($element, \%clamped);
-		return \%clamped;
+		my $moved = Clay_GetScrollContainerData($element)->{scrollPosition};
+		my %held  = map { $_ => $moved->{$_} + 0 } qw(x y);
+		return \%held if !grep { $held{$_} != $data->{scrollPosition}{$_} } qw(x y);
+		$widget->request_prepare if $widget->DOES('Clay::UI::Role::Core::Preparable');
+		return \%held;
 	}
 
 	# Injects the back-reference into a config hash the walker owns (a
@@ -838,8 +870,8 @@ C<Clay::UI: 'width' and 'height' must be positive finite numbers>.
 =item memory_size
 
 Optional. Bytes of memory for the Clay context: an integer of at least
-C<Clay_MinMemorySize()> for this UI's C<max_element_count>, which is
-also the default. Dies with
+C<Clay_MinMemorySize()> for this UI's C<max_element_count> and
+C<max_measure_text_cache_word_count>, which is also the default. Dies with
 C<Clay::UI: 'memory_size' must be an integer E<gt>= Clay_MinMemorySize() (...)>.
 
 
@@ -849,12 +881,26 @@ Optional. How many Clay elements this UI's context holds: a positive
 integer, default 8192 (Clay's default). Every element widget and every
 text widget is one element. Clay keeps two slots for itself, so one
 frame fits C<max_element_count - 2> widgets (none for a count below 3).
-Clay's measure-text word cache gets twice this count (at least 32), as
-Clay's defaults do. Each Clay::UI has its own count, whatever context is
-current when it is constructed. A larger count needs more memory (see
+Clay also wraps at most this many text lines per frame, over all the
+text widgets it lays out; past that it silently stops wrapping. Each
+Clay::UI has its own count, whatever context is current when it is
+constructed. A larger count needs more memory (see C<memory_size>).
+Dies with C<Clay::UI: 'max_element_count' must be a positive integer>.
+Read it back with L</max_element_count>.
+
+
+=item max_measure_text_cache_word_count
+
+Optional. How many measured words Clay's text cache holds: an integer
+of at least 32, default twice C<max_element_count> (Clay's default).
+Clay measures every text it lays out word by word and keeps the words
+of the last few frames, visible or not, so a frame whose texts have
+more words than this makes C<render> die with
+C<Clay::UI: the texts laid out in one frame have more words than max_measure_text_cache_word_count (16384) allows; ...>
+(default error handler). A larger count needs more memory (see
 C<memory_size>). Dies with
-C<Clay::UI: 'max_element_count' must be a positive integer>. Read it
-back with L</max_element_count>.
+C<Clay::UI: 'max_measure_text_cache_word_count' must be an integer E<gt>= 32>.
+Read it back with L</max_measure_text_cache_word_count>.
 
 
 =item error_handler
@@ -930,6 +976,13 @@ Returns the root widget passed to L</new>. Read-only.
 
 Returns the C<max_element_count> passed to L</new> (8192 by default).
 Read-only.
+
+=head2 max_measure_text_cache_word_count
+
+	my $words = $ui->max_measure_text_cache_word_count;
+
+Returns the C<max_measure_text_cache_word_count> passed to L</new>
+(twice C<max_element_count> by default). Read-only.
 
 =head2 width
 
@@ -1075,6 +1128,13 @@ the same C<id>
 The tree has more widgets than C<max_element_count> allows (default
 error handler only):
 C<Clay::UI: the widget tree has more elements than max_element_count (8192) allows: ...>.
+
+=item *
+
+The texts laid out in the frame have more words than
+C<max_measure_text_cache_word_count> allows (default error handler
+only):
+C<Clay::UI: the texts laid out in one frame have more words than max_measure_text_cache_word_count (16384) allows; ...>.
 
 
 =item *
@@ -1223,13 +1283,22 @@ C<Clay::UI: ... is not a scroll container (it does not compose Clay::UI::Role::L
 Moves a scroll container to a scroll position (in the sense of
 C<position> under L</scroll_state>). Each axis is clamped to the range
 from C<0> down to C<viewport - content> (or C<0> when the content fits);
-an axis left out keeps its position. Returns the position set as a new
-hashref C<< { x => ..., y => ... } >>, or C<undef> when the last
-completed frame did not lay the container out (then nothing moves). The
+an axis left out keeps its position. Returns the position as Clay now
+holds it, a new hashref C<< { x => ..., y => ... } >> (Clay keeps
+single-precision floats, so a large position may come back rounded),
+or C<undef> when the last completed frame did not lay the container out
+(then nothing moves). The
 next C<render> shows the new position. The move counts as a change for
 L<Clay::UI::Revision>. It fires no C<OnScroll> (that event reports only the
 scrolling Clay does inside C<render>), and it stops momentum: a glide
-started by drag scrolling ends at the new position.
+started by drag scrolling ends at the new position. A position equal to
+the current one changes nothing.
+
+A container that composes L<Clay::UI::Role::Core::Preparable> is
+prepared before the next layout pass when its position changed (its
+C<request_prepare> is called), so a container that builds its children
+for the position it shows can follow a move made from code, or from a
+listener in the same frame.
 
 Dies with
 C<Clay::UI: scroll_to needs a position { x =E<gt> ..., y =E<gt> ... }>,
