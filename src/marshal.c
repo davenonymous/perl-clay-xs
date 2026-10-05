@@ -416,6 +416,15 @@ SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length)
     return sv;
 }
 
+/* The character offset of a slice in the string it was cut from: a text
+ * line's position in its element's text. Clay keeps the base pointer on
+ * every slice; a slice without one starts at 0. */
+static UV clay_string_slice_offset(pTHX_ const Clay_StringSlice *slice)
+{
+    if (!slice->baseChars || !slice->chars || slice->chars <= slice->baseChars) return 0;
+    return (UV) utf8_length((const U8 *) slice->baseChars, (const U8 *) slice->chars);
+}
+
 /* ===========================================================================
  * Struct schemas.
  *
@@ -1323,6 +1332,8 @@ static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
         hv_store_sv(aTHX_ hv, "stringContents",
                     clay_perl_utf8_sv(aTHX_ cmd->renderData.text.stringContents.chars,
                                       cmd->renderData.text.stringContents.length));
+        hv_store_uv(aTHX_ hv, "stringOffset",
+                    clay_string_slice_offset(aTHX_ &cmd->renderData.text.stringContents));
         hv_store_sv(aTHX_ hv, "textColor",
                     clay_color_to_sv(aTHX_ cmd->renderData.text.textColor));
         hv_store_uv(aTHX_ hv, "fontId",        cmd->renderData.text.fontId);

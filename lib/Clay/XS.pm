@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Exporter 5.57 'import';
 use XSLoader;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -3119,6 +3119,7 @@ Draw one line of text.
 
     renderData => {
         stringContents => $line,           # Perl character string
+        stringOffset   => $characters,     # where the line starts in the element's text
         textColor      => { r, g, b, a },
         fontId         => $font_id,
         fontSize       => $size,
@@ -3127,7 +3128,10 @@ Draw one line of text.
     }
 
 Clay emits one command per non-empty line of a text element.
-C<boundingBox> is the box of that line, already placed according to
+C<stringOffset> is the number of characters of the element's text
+before the line, so C<substr($text, $offset, length $line)> is the line;
+a renderer that styles ranges of the text finds the range of each line
+with it. C<boundingBox> is the box of that line, already placed according to
 C<textAlignment>. Draw C<stringContents> into it with the font
 C<fontId> at size C<fontSize> and with C<letterSpacing> units between
 characters, the same way the measure function measured it.

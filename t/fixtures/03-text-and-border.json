@@ -40,6 +40,7 @@
          "letterSpacing" :0,
          "lineHeight" :0,
          "stringContents" :"hi clay",
+         "stringOffset" :0,
          "textColor" :{
             "a" :255,
             "b" :255,

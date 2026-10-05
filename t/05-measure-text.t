@@ -151,4 +151,19 @@ subtest 'lineHeight boxes stay inside the element' => sub {
     is( [ map { [ $_->{boundingBox}{y}, $_->{boundingBox}{height} ] } @lines ], [ [0, 30], [30, 30] ], 'boxes at 0 and 30, each 30 tall' );
 };
 
+# stringOffset is where each wrapped line starts in the element's text,
+# counted in characters.
+subtest 'stringOffset locates every line in the text' => sub {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("root") );
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(30), height => sizing_fit() } } });
+        Clay__OpenTextElement("\x{e9}t\x{e9} chaud\nnuit froide", { fontSize => 10 });
+    Clay__CloseElement();
+    my @lines = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ Clay_EndLayout(0) };
+    is( [ map { [ $_->{renderData}{stringOffset}, $_->{renderData}{stringContents} ] } @lines ],
+        [ [ 0, "\x{e9}t\x{e9}" ], [ 4, 'chaud' ], [ 10, 'nuit' ], [ 15, 'froide' ] ],
+        'offsets count characters, not bytes, across wraps and newlines' );
+    is( text_frame("whole", { fontSize => 10 })->{renderData}{stringOffset}, 0, 'an unbroken text starts at 0' );
+};
+
 done_testing;

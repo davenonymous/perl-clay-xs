@@ -40,6 +40,7 @@
          "letterSpacing" :0,
          "lineHeight" :0,
          "stringContents" :"Report",
+         "stringOffset" :0,
          "textColor" :{
             "a" :255,
             "b" :0,
@@ -91,6 +92,7 @@
          "letterSpacing" :0,
          "lineHeight" :0,
          "stringContents" :"name",
+         "stringOffset" :0,
          "textColor" :{
             "a" :255,
             "b" :0,
@@ -116,6 +118,7 @@
          "letterSpacing" :0,
          "lineHeight" :0,
          "stringContents" :"value",
+         "stringOffset" :0,
          "textColor" :{
             "a" :255,
             "b" :0,
@@ -167,6 +170,7 @@
          "letterSpacing" :0,
          "lineHeight" :0,
          "stringContents" :42,
+         "stringOffset" :0,
          "textColor" :{
             "a" :255,
             "b" :0,
