@@ -19,3 +19,10 @@ references
 # by make; see Makefile.PL postamble). The pristine clay.h.orig is committed.
 /src/clay/clay.h
 /src/clay/clay.h.tmp*
+
+# make dist outputs and the backup ExtUtils::Manifest leaves behind.
+/Clay-UI-*/
+/Clay-UI-*.tar.gz
+/MANIFEST.SKIP.bak
+/docs.html
+/.claude/
