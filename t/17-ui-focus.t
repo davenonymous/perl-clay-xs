@@ -113,7 +113,7 @@ subtest 'an OnBlur listener cannot focus into the subtree being removed' => sub 
 	my $ui = make_ui($panel);
 	$ui->interaction->set_focused_widget($x);
 	$x->on('OnBlur', sub ($e) { $ui->interaction->set_focused_widget($y); return });
-	like( dies { $ui->root->remove_child('panel') }, qr/does not belong to this Clay::UI/,
+	like( dies { $ui->root->remove_child_with_id('panel') }, qr/does not belong to this Clay::UI/,
 		'the listener\'s attempt dies' );
 	is( $ui->interaction->get_focused_widget, undef, 'nothing is focused' );
 	is( $panel->parent, undef, 'the panel was removed all the same' );
@@ -474,7 +474,7 @@ subtest 'removing the focused widget blurs it' => sub {
 	$b->on('OnBlur', sub ($e) { push @log, 'b:blur'; return });
 
 	$ui->interaction->set_focused_widget($b);
-	$ui->root->remove_child('b');
+	$ui->root->remove_child_with_id('b');
 	is( \@log, ['b:blur'], 'OnBlur fired on removal' );
 	is( $ui->interaction->get_focused_widget, undef, 'nothing is focused' );
 	is( $b->is_focused, 0, 'the removed widget is not focused' );
@@ -487,14 +487,14 @@ subtest 'removing an ancestor of the focused widget blurs it' => sub {
 	$panel->add_child($deep);
 	my $ui = make_ui($panel);
 	$ui->interaction->set_focused_widget($deep);
-	$ui->root->remove_child('panel');
+	$ui->root->remove_child_with_id('panel');
 	is( $ui->interaction->get_focused_widget, undef, 'focus released with the subtree' );
 };
 
 subtest 'a removed widget cannot be focused' => sub {
 	my $c  = TestInput->new(id => 'c');
 	my $ui = make_ui($c);
-	$ui->root->remove_child('c');
+	$ui->root->remove_child_with_id('c');
 	like( dies { $ui->interaction->set_focused_widget($c) }, qr/does not belong to this Clay::UI/, 'focusing it dies' );
 };
 

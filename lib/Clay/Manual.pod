@@ -1351,7 +1351,8 @@ Widgets are created empty and connected with the methods of
 L<Clay::UI::Role::Core::Container>:
 
     $panel->add_child($title, $body);         # returns $panel, so calls chain
-    $panel->remove_child('body');             # by id
+    $panel->remove_child($body);              # the widget itself
+    $panel->remove_child_with_id('body');     # by id
     $panel->remove_children_with(sub { ($_->id // '') =~ /^tmp-/ });   # text widgets: id undef
     $panel->clear_children;
 

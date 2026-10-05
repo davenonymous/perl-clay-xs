@@ -13,6 +13,7 @@ sub same ($a, $b, $name) { is(refaddr($a), refaddr($b), $name) }
 use Object::Pad 0.800;
 use Clay::UI;
 use Clay::XS ();
+use Clay::UI::Revision qw(current_revision);
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Grid;
 use Clay::UI::Test::Text;
@@ -118,7 +119,7 @@ subtest 'a removed widget can be added back to the same parent' => sub {
 	my $kid = Clay::UI::Test::Box->new(id => 'k');
 	my $p   = Clay::UI::Test::Box->new;
 	$p->add_child($kid, Clay::UI::Test::Box->new(id => 'other'));
-	$p->remove_child('k');
+	$p->remove_child($kid);
 	is($kid->parent, undef, 'parent slot cleared by remove_child');
 	same($kid->root, $kid, 'the removed widget is the root of its subtree');
 	ok(lives { $p->add_child($kid) }, 're-adding lives');
@@ -140,6 +141,75 @@ subtest 'a removed widget can move to another parent' => sub {
 	$p2->remove_children_with(sub { $_->id eq 'k' });
 	ok(lives { $p1->add_child($kid) }, 'and it can move back after remove_children_with');
 	same($kid->parent, $p1, 'back at the first parent');
+};
+
+# -----------------------------------------------------------------------------
+# Children by identity: remove_child and has_child compare the widget
+# itself, so widgets without an id and text widgets are reachable.
+# -----------------------------------------------------------------------------
+
+subtest 'remove_child removes the given widgets by identity' => sub {
+	my $p     = Clay::UI::Test::Box->new;
+	my $plain = Clay::UI::Test::Box->new;
+	my $twin  = Clay::UI::Test::Box->new;
+	my $label = Clay::UI::Test::Text->new(text => 'label');
+	$p->add_child($plain, $twin, $label);
+	same($p->remove_child($plain, $label), $p, 'remove_child returns the widget');
+	is(scalar @{ $p->children }, 1, 'two of three children left');
+	same($p->children->[0], $twin, 'the one that was not named stays');
+	is([ $plain->parent, $label->parent ], [ undef, undef ], 'both are detached, the text widget too');
+};
+
+subtest 'remove_child ignores widgets that are not its children' => sub {
+	my $p         = Clay::UI::Test::Box->new;
+	my $other     = Clay::UI::Test::Box->new;
+	my $elsewhere = Clay::UI::Test::Box->new;
+	my $grandkid  = Clay::UI::Test::Box->new;
+	my $kid       = Clay::UI::Test::Box->new;
+	my $helper    = Clay::UI::Test::Box->new;
+	$other->add_child($elsewhere);
+	$kid->add_child($grandkid);
+	$p->add_child($kid);
+	$p->add_internal_children($helper);
+	my $before = current_revision();
+	$p->remove_child(Clay::UI::Test::Box->new, $elsewhere, $grandkid, $helper);
+	is(current_revision(), $before, 'nothing changed, so the revision stays');
+	same($elsewhere->parent, $other, 'a widget attached elsewhere keeps its parent');
+	same($grandkid->parent, $kid, 'a grandchild keeps its parent');
+	same($helper->parent, $p, 'an internal child stays');
+	is(scalar @{ $p->children }, 1, 'the child is still there');
+};
+
+subtest 'remove_child takes widgets only' => sub {
+	my $p   = Clay::UI::Test::Box->new;
+	my $kid = Clay::UI::Test::Box->new(id => 'kid');
+	$p->add_child($kid);
+	like(dies { $p->remove_child($kid, 'kid') },
+		qr/^Clay::UI: remove_child takes widgets, got 'kid'; remove a child by its id with remove_child_with_id at /,
+		'an id dies and names remove_child_with_id');
+	like(dies { $p->remove_child(undef) }, qr/^Clay::UI: remove_child takes widgets, got undef;/, 'undef dies');
+	like(dies { $p->remove_child({}) },    qr/^Clay::UI: remove_child takes widgets, got HASH;/,  'a plain reference dies');
+	same($kid->parent, $p, 'a dying call removes nothing');
+};
+
+subtest 'has_child answers by identity for direct children' => sub {
+	my $p        = Clay::UI::Test::Box->new;
+	my $kid      = Clay::UI::Test::Box->new;
+	my $label    = Clay::UI::Test::Text->new(text => 'label');
+	my $grandkid = Clay::UI::Test::Box->new;
+	my $helper   = Clay::UI::Test::Box->new;
+	my $other    = Clay::UI::Test::Box->new;
+	my $stranger = Clay::UI::Test::Box->new;
+	$kid->add_child($grandkid);
+	$other->add_child($stranger);
+	$p->add_child($kid, $label);
+	$p->add_internal_children($helper);
+	is([ map { $p->has_child($_) } $kid, $label ], [ 1, 1 ], 'a child and a text child');
+	is([ map { $p->has_child($_) } $grandkid, $helper, $stranger, Clay::UI::Test::Box->new ], [ 0, 0, 0, 0 ],
+		'not a grandchild, an internal child, a widget attached elsewhere or a loose widget');
+	$p->remove_child($kid);
+	is($p->has_child($kid), 0, 'not after its removal');
+	like(dies { $p->has_child('kid') }, qr/^Clay::UI: has_child takes a widget, got 'kid' at /, 'an id dies');
 };
 
 # -----------------------------------------------------------------------------
@@ -238,7 +308,7 @@ subtest 'a removed widget can become a Clay::UI root' => sub {
 	my $app   = Clay::UI::Test::Box->new(id => 'app');
 	my $panel = Clay::UI::Test::Box->new(id => 'panel');
 	$app->add_child($panel);
-	$app->remove_child('panel');
+	$app->remove_child_with_id('panel');
 	my $ui;
 	ok( lives { $ui = Clay::UI->new(root => $panel, width => 10, height => 10) }, 'Clay::UI->new lives' );
 	same( $panel->ui, $ui, 'the controller is stamped on it' );
@@ -292,7 +362,7 @@ subtest 'a removed subtree has no controller' => sub {
 	$root->add_child($branch);
 	my $ui = Clay::UI->new(root => $root, width => 100, height => 100);
 	same($leaf->ui, $ui, 'attached leaf reaches the controller');
-	$root->remove_child('branch');
+	$root->remove_child_with_id('branch');
 	is($branch->ui, undef, 'removed widget has no controller');
 	is($leaf->ui,   undef, 'nor do its descendants');
 };
@@ -307,7 +377,7 @@ subtest 'a dying OnBlur listener does not stop the detachment' => sub {
 	$ui->interaction->set_focused_widget($input);
 	$input->on('OnBlur', sub ($e) { die "blur listener bug\n" });
 
-	like( dies { $root->remove_child('panel') }, qr/^blur listener bug$/, 'remove_child dies with the listener error' );
+	like( dies { $root->remove_child_with_id('panel') }, qr/^blur listener bug$/, 'remove_child_with_id dies with the listener error' );
 	is( scalar @{ $root->children }, 0, 'the panel was removed' );
 	is( $panel->parent, undef, 'and detached' );
 	is( $input->ui, undef, 'its subtree has no controller' );

@@ -151,6 +151,10 @@ Append children.
 
 =item L<remove_child|Clay::UI::Role::Core::Container/remove_child>
 
+Remove the given children.
+
+=item L<remove_child_with_id|Clay::UI::Role::Core::Container/remove_child_with_id>
+
 Remove children by id.
 
 =item L<remove_children_with|Clay::UI::Role::Core::Container/remove_children_with>
@@ -168,6 +172,10 @@ The children, as a new arrayref.
 =item L<get_children_with|Clay::UI::Role::Core::Element/get_children_with>
 
 The children matching a test.
+
+=item L<has_child|Clay::UI::Role::Core::Element/has_child>
+
+Whether a widget is a child.
 
 =item L<add_internal_children|Clay::UI::Role::Core::Element/add_internal_children>, L<remove_internal_children|Clay::UI::Role::Core::Element/remove_internal_children>, L<internal_children|Clay::UI::Role::Core::Element/internal_children>, L<layout_children|Clay::UI::Role::Core::Element/layout_children>
 

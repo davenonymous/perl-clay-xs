@@ -191,6 +191,9 @@ through Clay::UI and replaces `userData` with widget class and id.
 - Children are changed only through `Element`'s validating primitives;
   the public mutators live in the `Container` role. A widget can be
   attached whenever it has no parent (removed ones can come back).
+  Removal is by identity (`remove_child(@widgets)`, which dies for
+  anything but widgets) or by id (`remove_child_with_id`); the identity
+  query is `Element`'s `has_child`.
   Internal children (`add_internal_children`) are a widget class's own
   helpers in the laid-out tree; `children` and the Container mutators
   never see them. Every tree walk (the walker, the focus order, the

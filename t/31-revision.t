@@ -65,6 +65,7 @@ my $text   = Clay::UI::Test::Text->new(text => 'hi');
 my $scroll = ScrollPanel->new(id => 'scroll');
 my $grid   = Clay::UI::Test::Grid->new(id => 'grid');
 my $hover  = HoverBox->new(id => 'hover');
+my $kid    = Clay::UI::Test::Box->new(id => 'other-kid');
 
 # [ name, write, read ] for a sample of the setters.
 my @setters = (
@@ -82,7 +83,9 @@ my @setters = (
 	[ 'add_state',        sub { $hover->add_state('selected') },                sub { $hover->has_state('selected') } ],
 	[ 'clear_states',     sub { $hover->clear_states },                         sub { $hover->states } ],
 	[ 'add_child',        sub { $box->add_child(Clay::UI::Test::Box->new(id => 'kid')) }, sub { $box->children } ],
-	[ 'remove_child',     sub { $box->remove_child('kid') },                    sub { $box->get_children_with(sub { 1 }) } ],
+	[ 'remove_child_with_id', sub { $box->remove_child_with_id('kid') },        sub { $box->get_children_with(sub { 1 }) } ],
+	[ 'add_child again',  sub { $box->add_child($kid) },                        sub { $box->has_child($kid) } ],
+	[ 'remove_child',     sub { $box->remove_child($kid) },                     sub { $box->children } ],
 );
 
 subtest 'widget setters bump the revision' => sub {

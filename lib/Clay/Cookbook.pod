@@ -600,7 +600,7 @@ Add a floating child when the pointer enters, remove it when it leaves:
     	return;
     });
     $help->on(OnHoverStopped => sub ($event) {
-    	$event->current_target->remove_child('help-tip');
+    	$event->current_target->remove_child($tooltip);
     	return;
     });
 

@@ -353,7 +353,7 @@ subtest 'cell_gap is mutable and rewrites existing rows' => sub {
 subtest 'Grid and its rows have no generic child mutators' => sub {
 	my $grid = Clay::UI::Test::Grid->new(id => 'closed');
 	$grid->append_row([ text_cell('a') ]);
-	for my $method (qw(add_child clear_children remove_child remove_children_with)) {
+	for my $method (qw(add_child clear_children remove_child remove_child_with_id remove_children_with)) {
 		ok( !$grid->can($method), "Grid cannot $method" );
 		ok( !$grid->children->[0]->can($method), "Grid::Row cannot $method" );
 	}

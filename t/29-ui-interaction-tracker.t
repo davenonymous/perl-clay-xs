@@ -178,7 +178,7 @@ subtest 'events an earlier listener made stale are dropped' => sub {
 	my $ui = make_ui($outer);
 	my @log;
 	log_events(\@log, $inner, qw(OnHoverStart OnHoverStopped OnPress));
-	$outer->on('OnHoverStart', sub ($e) { push @log, 'outer:OnHoverStart'; $outer->remove_child('inner'); return });
+	$outer->on('OnHoverStart', sub ($e) { push @log, 'outer:OnHoverStart'; $outer->remove_child_with_id('inner'); return });
 	$ui->interaction->update(over => [ $outer, $inner ], down => 1);
 	is( \@log, ['outer:OnHoverStart'], 'the removed widget gets neither its OnHoverStart, its OnHoverStopped nor its OnPress' );
 	is( [ $inner->is_hovered, $inner->parent ], [ 0, undef ], 'it is detached and not hovered' );
@@ -223,7 +223,7 @@ subtest 'a removed subtree leaves the interaction at once' => sub {
 	my @log;
 	log_events(\@log, $_, qw(OnHoverStopped OnRelease)) for $card, $button;
 	$ui->interaction->update(over => [ $card, $button ], down => 1);
-	$ui->root->remove_child('card');
+	$ui->root->remove_child_with_id('card');
 	is( [ sort @log ], [ 'btn:OnHoverStopped', 'card:OnHoverStopped' ], 'OnHoverStopped during the removal, no OnRelease' );
 	is( [ $button->is_hovered, $button->is_pressed, $ui->interaction->is_armed($button) ], [ 0, 0, 0 ],
 		'hover, press and arming dropped' );

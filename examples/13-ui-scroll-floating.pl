@@ -202,7 +202,7 @@ for my $row (@rows) {
 		my $left = $event->target;
 		log_line('  OnHoverStopped %s', $left->file_name);
 		$left->background_color($ROW_FILL);
-		$left->remove_child('tooltip');
+		$left->remove_child($tooltip);
 		return Clay::UI::Enum::Result->HANDLED;
 	});
 }

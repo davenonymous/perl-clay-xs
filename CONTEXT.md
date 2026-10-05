@@ -160,7 +160,7 @@ _Avoid_: clip element, scrollable
 **Internal child**:
 A widget a widget class attaches below itself with `add_internal_children`
 because it needs it in the laid-out tree (a floating scrollbar over a scroll
-container), as opposed to the children its user adds. `children` and the
-Container mutators never show or remove it; `layout_children` lists children
+container), as opposed to the children its user adds. `children`,
+`has_child` and the Container mutators never show or remove it; `layout_children` lists children
 and internal children, and every tree walk reads that.
 _Avoid_: hidden child, private child, helper widget (the role it plays, not the term)

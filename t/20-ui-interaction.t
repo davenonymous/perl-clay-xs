@@ -145,7 +145,7 @@ subtest 'a hover listener may change the tree' => sub {
 	my $hint = Clay::UI::Test::Box->new(id => 'hint', layout => fixed(10, 10));
 	my $box  = HoverBox->new(id => 'hb', layout => fixed(50, 50));
 	my $root = page($box, $hint);
-	$box->on('OnHoverStart', sub ($e) { $root->remove_child('hint'); return });
+	$box->on('OnHoverStart', sub ($e) { $root->remove_child_with_id('hint'); return });
 	my $ui = make_ui($root);
 	$ui->render;
 	pointer($ui, -10, -10);
@@ -175,8 +175,8 @@ subtest 'a removed hovered widget gets OnHoverStopped at once' => sub {
 	my $ui = make_ui($root);
 	$ui->render;
 	pointer($ui, 10, 10);
-	$root->remove_child('hb');
-	is( \@log, ['hb:OnHoverStopped'], 'hover stopped during remove_child' );
+	$root->remove_child_with_id('hb');
+	is( \@log, ['hb:OnHoverStopped'], 'hover stopped during remove_child_with_id' );
 	is( $box->is_hovered, 0, 'and is_hovered cleared' );
 	$ui->render;
 	is( \@log, ['hb:OnHoverStopped'], 'the next render fires nothing more' );
@@ -193,7 +193,7 @@ subtest 'a removed widget added to another parent renders and is hovered again' 
 	my $ui = make_ui($root);
 	$ui->render;
 	pointer($ui, 10, 10);
-	$root->remove_child('hb');
+	$root->remove_child_with_id('hb');
 	pointer($ui, 250, 10);
 	is( \@log, [ 'hb:OnHoverStart', 'hb:OnHoverStopped' ], 'hovered, then released by the removal' );
 

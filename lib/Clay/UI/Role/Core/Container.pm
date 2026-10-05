@@ -8,6 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::UI::Role::Core::Element;
+use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
@@ -27,7 +28,20 @@ role Clay::UI::Role::Core::Container :does(Clay::UI::Role::Core::Element) {
 		return $self;
 	}
 
-	method remove_child ($target_id) {
+	# Takes widgets, never ids: a string here is a caller who meant
+	# remove_child_with_id, and ignoring it would hide that mistake.
+	method remove_child (@kids) {
+		for my $kid (@kids) {
+			next if Clay::UI::Role::Core::Element::_is_widget($kid);
+			croak_ui "Clay::UI: remove_child takes widgets, got "
+				. ( ref($kid) || ( defined $kid ? "'$kid'" : 'undef' ) )
+				. "; remove a child by its id with remove_child_with_id";
+		}
+		$self->_detach_children(@kids);
+		return $self;
+	}
+
+	method remove_child_with_id ($target_id) {
 		$self->_detach_children(grep {
 			$_->DOES('Clay::UI::Role::Core::Element') && defined $_->id && $_->id eq $target_id
 		} @{ $self->children });
@@ -62,8 +76,11 @@ Clay::UI::Role::Core::Container - element widget role with public child mutators
 	my $header = My::Panel->new(id => 'header');
 	my $body   = My::Panel->new(id => 'body');
 
-	$panel->add_child($header)->add_child($body, My::Label->new(text => 'footer'));
-	$panel->remove_child('body');
+	my $footer = My::Label->new(text => 'footer');
+
+	$panel->add_child($header)->add_child($body, $footer);
+	$panel->remove_child($footer) if $panel->has_child($footer);
+	$panel->remove_child_with_id('body');
 	$panel->remove_children_with(sub { $_->isa('My::Label') });
 	$panel->clear_children;
 
@@ -120,9 +137,24 @@ Removes and detaches every child. Returns the widget.
 
 =head2 remove_child
 
-	$widget->remove_child($id);
+	$widget->remove_child($footer);
+	$widget->remove_child(@kids);
 
-Removes and detaches every direct child whose C<id> equals C<$id>
+Removes and detaches each given widget that is a direct child, compared
+by identity, so widgets without an id and text widgets are removed as
+well. A widget that is not a direct child (never attached, attached
+elsewhere, a grandchild or an internal child) is ignored and keeps its
+parent. Returns the widget. Dies, changing nothing, with
+C<Clay::UI: remove_child takes widgets, got ...> for anything but a
+widget; to remove by id use L</remove_child_with_id>. Ask
+L<Clay::UI::Role::Core::Element/has_child> whether a widget is a
+child.
+
+=head2 remove_child_with_id
+
+	$widget->remove_child_with_id('body');
+
+Removes and detaches every direct child whose C<id> equals the argument
 (string comparison). Children without an id and text widgets are never
 matched. An id no child has is ignored. Returns the widget.
 

@@ -7,7 +7,7 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 use Object::Pad::MOP::Class;
-use List::Util qw(uniq);
+use List::Util qw(any uniq);
 use Scalar::Util qw(blessed refaddr);
 no warnings 'experimental';
 
@@ -98,6 +98,12 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 
 	method get_children_with ($predicate) {
 		return grep { $predicate->($_) } @_children;
+	}
+
+	method has_child ($widget) {
+		croak_ui "Clay::UI: has_child takes a widget, got " . ( ref($widget) || ( defined $widget ? "'$widget'" : 'undef' ) )
+			unless _is_widget($widget);
+		return ( any { refaddr($_) == refaddr($widget) } @_children ) ? 1 : 0;
 	}
 
 	method internal_children () {
@@ -386,6 +392,17 @@ true, as a list (in scalar context: how many). C<$_> is set to the
 child as well, so both calling styles work. Does not look at
 grandchildren or internal children. Text widgets are passed too; their
 C<id> is undef.
+
+=head2 has_child
+
+	$panel->add_child($footer) unless $panel->has_child($footer);
+
+Returns 1 when the widget is one of the direct children (the very
+object, compared by identity), 0 otherwise: for a widget attached
+elsewhere, for a grandchild and for an internal child (see
+L</add_internal_children>). Dies with
+C<Clay::UI: has_child takes a widget, got ...> for anything but a
+widget, an id included.
 
 =head2 internal_children
 

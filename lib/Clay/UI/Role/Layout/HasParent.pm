@@ -87,7 +87,7 @@ Clay::UI::Role::Layout::HasParent - parent, root and UI of a Clay::UI widget
 	$child->root;      # $root
 	$child->ui;        # $ui
 
-	$root->remove_child('panel');
+	$root->remove_child($panel);
 	$child->root;      # $panel: the removed subtree stands alone
 	$child->ui;        # undef
 
@@ -141,7 +141,8 @@ C<Clay::UI: widget ... is still attached to a parent; remove it first>,
 whether the new parent is another widget or the same one again.
 
 
-Removing a widget (C<remove_child>, C<remove_children_with>,
+Removing a widget (C<remove_child>, C<remove_child_with_id>,
+C<remove_children_with>,
 C<clear_children>, a removed or replaced row or cell of a
 L<Clay::UI::Grid>, C<remove_internal_children>) detaches it:
 
