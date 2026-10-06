@@ -127,20 +127,13 @@ class Clay::UI :strict(params) {
 			croak_ui "Clay::UI: 'measure_text' must be a coderef";
 		}
 
-		# A failure frees the new context at once and makes the caller's
-		# context current again.
 		my $previous = Clay_GetCurrentContext();
 		my $ok = eval {
 			$_ctx = $self->_initialize_context;
 			Clay_SetMeasureTextFunction($measure_text);
 			1;
 		};
-		unless ($ok) {
-			my $error = $@;
-			undef $_ctx;
-			Clay_SetCurrentContext($previous) if defined $previous;
-			die $error;
-		}
+		$self->_abandon_construction($previous, $@) unless $ok;
 
 		# Events follow the tree order of the last completed frame.
 		$interaction = Clay::UI::Interaction->new(
@@ -148,6 +141,16 @@ class Clay::UI :strict(params) {
 			tree_order => sub (@widgets) { $_frame->in_tree_order(@widgets) },
 		);
 		$root->_set_ui_controller($self);
+		my $hook_error = $root->_announce_tree_change;
+		$self->_abandon_construction($previous, $hook_error) if defined $hook_error;
+	}
+
+	# A failed construction frees the new context at once, makes the
+	# caller's context current again and dies with $error.
+	method _abandon_construction ($previous, $error) {
+		undef $_ctx;
+		Clay_SetCurrentContext($previous) if defined $previous;
+		die $error;
 	}
 
 	# Creates this UI's context, sized for max_element_count, and leaves it
@@ -730,11 +733,18 @@ imports made at file scope are not visible inside the class block.
 Clay::UI accepts the keys of Clay's structs in snake_case
 (C<child_gap>, C<layout_direction>, C<background_color>) as well as in
 the camelCase spelling Clay::XS uses (C<childGap>, C<layoutDirection>).
-The layout pass converts every key to camelCase before it passes a
-widget's settings to Clay. Both spellings of the same key in one hash
-die:
+Widgets store every key in snake_case, so readers return snake_case
+whatever spelling was set:
 
-	Clay::UI: key 'child_gap' camelizes to 'childGap', which is already present in the same hash
+	my $box = My::Box->new(layout => { childGap => 4 });
+	$box->layout;    # { child_gap => 4 }
+
+Both spellings of the same key in one hash die where the value is set:
+
+	Clay::UI: key 'childGap' in 'layout' is 'child_gap' in snake_case, which is already present in the same hash
+
+The layout pass converts every key to camelCase before it passes a
+widget's settings to Clay.
 
 Widget attributes are validated where they are set: in the constructor
 and in the accessor that writes them, not later in C<render>. The rules
@@ -835,9 +845,13 @@ C<render> works normally.
 	);
 
 Creates a Clay::UI, its Clay context and its interaction tracker, and
-makes C<root> the root widget of this UI. The new context is current
-when C<new> returns. If C<new> dies, it frees the new context and makes
-the context that was current before current again.
+makes C<root> the root widget of this UI. Then every widget of the
+root's subtree gets its
+L<tree_changed|Clay::UI::Role::Layout::HasParent/tree_changed> call;
+C<new> dies with the first error of those hooks once all ran. The new
+context is current when C<new> returns. If C<new> dies, it frees the
+new context and makes the context that was current before current
+again; the root is then free to become the root of another Clay::UI.
 
 Unknown parameters die (C<Unrecognised parameters for Clay::UI constructor>).
 
@@ -1148,7 +1162,8 @@ validated when they are set, so this happens only when a widget class
 builds settings of its own: a C<Clay::XS::StructError> (see
 L<Clay::XS/STRUCT ERRORS>) such as
 C<Clay_ElementDeclaration.layout.padding.left: expected an integer in 0..65535, got '-3'>,
-a key collision (C<Clay::UI: key '...' camelizes to ...>), or
+a key collision between a widget class's own camelCase key and a
+stored snake_case one (C<Clay::UI: key '...' camelizes to ...>), or
 C<Clay::UI: widget ... set user_data in its config> (see L</NOTES>).
 
 

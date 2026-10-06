@@ -25,6 +25,36 @@ class FocusBox :strict(params)
 	:does(Clay::UI::Role::Interaction::Focusable)
 {}
 
+# tree_changed calls, as "label:parent id:ui or no-ui". A class cannot
+# override a method of a role it composes itself, so the hooks live in
+# subclasses.
+my @tree_log;
+
+sub log_tree_change ($label, $widget) {
+	my $parent = $widget->parent;
+	push @tree_log, join ':', $label, (defined $parent ? $parent->id : '-'), (defined $widget->ui ? 'ui' : 'no-ui');
+	return;
+}
+
+class HookBox :strict(params) :isa(FocusBox) {
+	field $die_with :writer = undef;
+
+	method tree_changed :override () {
+		$self->SUPER::tree_changed;
+		main::log_tree_change($self->id, $self);
+		die $die_with if defined $die_with;
+		return;
+	}
+}
+
+class HookText :strict(params) :isa(Clay::UI::Test::Text) {
+	method tree_changed :override () {
+		$self->SUPER::tree_changed;
+		main::log_tree_change($self->text, $self);
+		return;
+	}
+}
+
 # -----------------------------------------------------------------------------
 # Parent stamping: children attached via add_child get their parent slot
 # filled before any tree walk runs.
@@ -432,6 +462,105 @@ subtest 'second Clay::UI on the same root dies' => sub {
 	);
 	ref_is( Clay::XS::Clay_GetCurrentContext(), $current, 'the current Clay context is unchanged' );
 	ok( lives { $ui->render }, 'the first Clay::UI still renders' );
+};
+
+# -----------------------------------------------------------------------------
+# tree_changed: every widget of a subtree whose place changed is told, once
+# the change is complete.
+# -----------------------------------------------------------------------------
+
+sub hook_ui ($root) { return Clay::UI->new(root => $root, width => 100, height => 100) }
+
+subtest 'tree_changed runs on every widget of an attached subtree, in pre-order' => sub {
+	my $root = HookBox->new(id => 'root');
+	my $ui   = hook_ui($root);
+	my ($panel, $a, $b) = map { HookBox->new(id => $_) } qw(panel a b);
+	$a->add_child(HookText->new(text => 'text'));
+	$panel->add_child($a, $b);
+	@tree_log = ();
+	$root->add_child($panel);
+	is( \@tree_log, [ 'panel:root:ui', 'a:panel:ui', 'text:a:ui', 'b:panel:ui' ], 'once each, with parent and ui already set' );
+};
+
+subtest 'on removal tree_changed runs after OnBlur, with ui undef' => sub {
+	my $root  = HookBox->new(id => 'root');
+	my $panel = HookBox->new(id => 'panel');
+	my $input = HookBox->new(id => 'input');
+	$panel->add_child($input);
+	$root->add_child($panel);
+	my $ui = hook_ui($root);
+	$ui->interaction->set_focused_widget($input);
+	$input->on('OnBlur', sub ($e) { push @tree_log, 'OnBlur'; return });
+	@tree_log = ();
+	$root->remove_child($panel);
+	is( \@tree_log, [ 'OnBlur', 'panel:-:no-ui', 'input:panel:no-ui' ], 'the subtree has left when the hooks run' );
+};
+
+subtest 'tree_changed runs on internal children' => sub {
+	my $root   = HookBox->new(id => 'root');
+	my $ui     = hook_ui($root);
+	my $helper = HookBox->new(id => 'helper');
+	@tree_log = ();
+	$root->add_internal_children($helper);
+	$root->remove_internal_children($helper);
+	is( \@tree_log, [ 'helper:root:ui', 'helper:-:no-ui' ], 'when they are added and removed' );
+};
+
+subtest 'a new Clay::UI announces itself to the root\'s subtree' => sub {
+	my $root  = HookBox->new(id => 'root');
+	my $child = HookBox->new(id => 'child');
+	$root->add_child($child);
+	@tree_log = ();
+	my $ui = hook_ui($root);
+	is( \@tree_log, [ 'root:-:ui', 'child:root:ui' ], 'every widget, with ui already set' );
+};
+
+subtest 'a hook that dies while a Clay::UI is built fails the construction cleanly' => sub {
+	my $ui      = hook_ui(HookBox->new(id => 'other'));
+	my $current = Clay::XS::Clay_GetCurrentContext();
+	my $root    = HookBox->new(id => 'root');
+	my $child   = HookBox->new(id => 'child');
+	$root->add_child($child);
+	$root->set_die_with("root hook bug\n");
+	@tree_log = ();
+	like( dies { hook_ui($root) }, qr/^root hook bug$/, 'new dies with the hook error' );
+	is( \@tree_log, [ 'root:-:ui', 'child:root:ui' ], 'after every hook ran' );
+	ref_is( Clay::XS::Clay_GetCurrentContext(), $current, 'the context current before is current again' );
+	$root->set_die_with(undef);
+	ok( lives { hook_ui($root)->render }, 'the root can become the root of another Clay::UI' );
+};
+
+subtest 'reordering is no tree change' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'grid');
+	$grid->append_row([ HookBox->new(id => 'first') ]);
+	$grid->append_row([ HookBox->new(id => 'second') ]);
+	@tree_log = ();
+	$grid->reorder_rows([ 1, 0 ]);
+	is( \@tree_log, [], 'no tree_changed call' );
+};
+
+subtest 'every hook runs even if one dies' => sub {
+	my $root  = HookBox->new(id => 'root');
+	my $panel = HookBox->new(id => 'panel');
+	my ($bad, $worse, $good) = map { HookBox->new(id => $_) } qw(bad worse good);
+	$panel->add_child($bad, $worse, $good);
+	$bad->set_die_with("first hook bug\n");
+	$worse->set_die_with("second hook bug\n");
+	my $ui = hook_ui($root);
+	@tree_log = ();
+	like( dies { $root->add_child($panel) }, qr/^first hook bug$/, 'the first error is rethrown' );
+	is( \@tree_log, [ 'panel:root:ui', 'bad:panel:ui', 'worse:panel:ui', 'good:panel:ui' ], 'after every hook ran' );
+	same( $panel->parent, $root, 'and the change is complete' );
+
+	my $holder = HookBox->new(id => 'holder');
+	$holder->add_child(HookBox->new(id => 'leaf'));
+	$root->add_child($holder);
+	my $leaf = $holder->children->[0];
+	$ui->interaction->set_focused_widget($leaf);
+	$leaf->on('OnBlur', sub ($e) { die "blur listener bug\n" });
+	like( dies { $root->remove_child($panel, $holder) }, qr/^blur listener bug$/,
+		'a release listener error wins over the hook errors after it' );
+	is( [ $panel->parent, $holder->parent ], [ undef, undef ], 'both subtrees are detached' );
 };
 
 done_testing;

@@ -1,12 +1,15 @@
 /*
- * clay_perl_context.c - Per-Perl-context state, the per-frame string arena
- * and the element id intern table.
+ * clay_perl_context.c - Per-Perl-context state, the per-frame string arena,
+ * the element id intern table and the frame module.
  *
  * Each Clay::XS::Context Perl object owns one clay_perl_context. The
  * object is a reference to a read-only scalar carrying the context pointer
  * in private ext magic; copies (Storable::dclone) and forged objects lack
  * the magic and are rejected. DESTROY frees the context and clears the
  * magic pointer, so a second DESTROY is a no-op.
+ *
+ * The frame module (the last section) owns the frame state and decides
+ * when the arena chunks, the interned ids and the hover callbacks may go.
  */
 
 #include "clay_perl.h"
@@ -15,10 +18,6 @@
 #include <string.h>
 
 #define MIN_STRING_CHUNK_BYTES 4096
-
-/* The sweep at the start of a frame keeps the interned ids used by the
- * last this many completed frames (see clay_perl_context_begin_frame). */
-#define INTERNED_ID_KEEP_COMPLETED_FRAMES 2
 
 static MGVTBL clay_perl_context_vtbl = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -223,7 +222,7 @@ static bool buffer_set_hits(const buffer_set *set, const char *start, size_t len
  * layout, and when such an element stops being declared it keeps being
  * rendered, with its old text, until the exit transition finishes.
  *
- * Lifetime rule implemented by clay_perl_context_begin_frame:
+ * Lifetime rule, applied by the frame module at the start of every frame:
  *   - Chunks are never reallocated or freed while Clay may read them.
  *   - The previous frame's chunks stay alive for one more frame (an
  *     element starts exiting in the first frame it is no longer declared,
@@ -331,7 +330,7 @@ Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, con
  * debug view, and carried along with exiting elements) and
  * pointerOverIds. The intern table keeps one SV per id string; its buffer
  * never moves, and the SV's IV slot records the frame that last used it
- * (completed_frames at the time).
+ * (completed_frames at the time), the stamp the frame module sweeps by.
  * ------------------------------------------------------------------------ */
 
 Clay_String clay_perl_intern_id(pTHX_ clay_perl_context *self, const char *bytes, STRLEN len)
@@ -359,57 +358,257 @@ Clay_String clay_perl_intern_id(pTHX_ clay_perl_context *self, const char *bytes
     return s;
 }
 
-static bool id_is_pointer_over(Clay_ElementIdArray over, const char *chars)
-{
-    for (int32_t i = 0; i < over.length; i++) {
-        if (over.internalArray[i].stringId.chars == chars) return true;
-    }
-    return false;
-}
+/* ===========================================================================
+ * The frame module.
+ *
+ * Owns a context's frame state and every retention rule that follows from
+ * it. The XS wrappers of the frame and element functions call it; after
+ * clay_perl_context_new nothing else writes these fields (the wrapper
+ * guards only read them):
+ *
+ *   layout_state   COMPLETE --Clay_BeginLayout--> DECLARING
+ *                  DECLARING --Clay_EndLayout--> COMPLETE
+ *                  DECLARING --the next Clay_BeginLayout re-throws a held
+ *                              error--> ABANDONED
+ *                  ABANDONED --Clay_BeginLayout--> DECLARING
+ *   open_depth, open_element_configurable
+ *                  the open/close balance and whether the innermost open
+ *                  element may still be configured (only right after it
+ *                  was opened, before any child, as the C CLAY() macro
+ *                  does: Clay pushes the clip stack and floating roots per
+ *                  configuration but pops them once per element).
+ *   completed_frames
+ *                  frames that reached Clay_EndLayout; the stamp of the
+ *                  stamped registries.
+ * ======================================================================== */
 
-static void interned_ids_sweep(pTHX_ clay_perl_context *self, const buffer_set *exiting)
+/* ---------------------------------------------------------------------------
+ * Stamped registries.
+ *
+ * The interned ids and the hover callbacks are hashes whose entries carry
+ * a stamp: completed_frames when a frame last used them, so a stamp names
+ * the frame being declared. The sweep at the start of a frame keeps what
+ * the last N completed frames used: an entry stamped s survives while
+ * s >= completed_frames - N. N per registry:
+ *
+ *   interned ids     2: Clay copies an element id, with its string, into
+ *                    its persistent element hash map and the frame's
+ *                    id-string array; an element that stops being
+ *                    declared starts its exit transition in the next frame
+ *                    with the id of the frame before. Ids under the
+ *                    pointer and ids of exiting elements are kept while
+ *                    Clay holds them, whatever their stamp.
+ *   hover callbacks  1: Clay_SetPointerState dispatches the callbacks
+ *                    registered while the last completed frame was
+ *                    declared; Clay forgets them when the element is
+ *                    declared again.
+ *
+ * The stamps live where each registry keeps its data: in the IV slot of
+ * an interned id's own SV (whose buffer Clay points into), and as the
+ * third element of a hover entry [coderef, userdata, stamp] in
+ * src/callbacks.c.
+ * ------------------------------------------------------------------------ */
+
+#define INTERNED_ID_KEEP_COMPLETED_FRAMES 2
+#define HOVER_KEEP_COMPLETED_FRAMES       1
+
+/* The stamp of a registry value. */
+typedef uint32_t (*registry_stamp)(pTHX_ SV *value);
+
+/* True when a stale entry must stay anyway. */
+typedef bool (*registry_holds)(SV *value, const void *data);
+
+static void registry_sweep(pTHX_ HV *registry, uint32_t completed_frames, uint32_t keep_frames,
+                           registry_stamp stamp_of, registry_holds holds, const void *data)
 {
-    if (self->completed_frames < INTERNED_ID_KEEP_COMPLETED_FRAMES) return;
-    IV cutoff = (IV) (self->completed_frames - INTERNED_ID_KEEP_COMPLETED_FRAMES);
-    Clay_ElementIdArray over = Clay_GetPointerOverIds();
+    if (completed_frames < keep_frames) return;
+    uint32_t cutoff = completed_frames - keep_frames;
 
     /* Collect first, delete afterwards: deleting invalidates the iterator. */
-    AV *stale = newAV();
-    sv_2mortal((SV *) stale);
+    AV *stale = (AV *) sv_2mortal((SV *) newAV());
     HE *he;
-    hv_iterinit(self->interned_ids);
-    while ((he = hv_iternext(self->interned_ids)) != NULL) {
-        SV *entry = HeVAL(he);
-        if (SvIVX(entry) >= cutoff) continue;
-        if (id_is_pointer_over(over, SvPVX(entry))) continue;
-        if (buffer_set_hits(exiting, SvPVX(entry), 1)) continue;
+    hv_iterinit(registry);
+    while ((he = hv_iternext(registry)) != NULL) {
+        SV *value = HeVAL(he);
+        if (stamp_of(aTHX_ value) >= cutoff) continue;
+        if (holds && holds(value, data)) continue;
         av_push(stale, newSVhek(HeKEY_hek(he)));
     }
 
     SSize_t count = av_top_index(stale) + 1;
     for (SSize_t i = 0; i < count; i++) {
         SV **key = av_fetch(stale, i, 0);
-        (void) hv_delete_ent(self->interned_ids, *key, G_DISCARD, 0);
+        (void) hv_delete_ent(registry, *key, G_DISCARD, 0);
     }
 }
 
-/* ---------------------------------------------------------------------------
- * Frame start. Must run while this context is Clay's current context,
- * before Clay_BeginLayout discards the previous frame and before
- * layout_state moves on.
- * ------------------------------------------------------------------------ */
+static uint32_t interned_id_stamp(pTHX_ SV *value)
+{
+    PERL_UNUSED_CONTEXT;
+    return (uint32_t) SvIVX(value);
+}
 
-void clay_perl_context_begin_frame(pTHX_ clay_perl_context *self)
+/* What Clay holds on to beyond the keep window: the pointer-over ids of
+ * the last frame and the buffers of exiting elements. */
+typedef struct interned_id_holders {
+    Clay_ElementIdArray pointer_over;
+    const buffer_set   *exiting;
+} interned_id_holders;
+
+static bool interned_id_held(SV *value, const void *data)
+{
+    const interned_id_holders *holders = (const interned_id_holders *) data;
+    const char *chars = SvPVX(value);
+    for (int32_t i = 0; i < holders->pointer_over.length; i++) {
+        if (holders->pointer_over.internalArray[i].stringId.chars == chars) return true;
+    }
+    return buffer_set_hits(holders->exiting, chars, 1);
+}
+
+/* Must run while this context is Clay's current context, before
+ * Clay_BeginLayout discards the previous frame and while layout_state
+ * still tells whether that frame completed. After an unfinished frame
+ * the arena keeps every chunk and the id sweep waits until a frame
+ * completes. */
+static void sweep_retained(pTHX_ clay_perl_context *self)
 {
     if (self->layout_state != CLAY_PERL_LAYOUT_COMPLETE) {
         arena_begin_frame(&self->strings, NULL);
-        clay_perl_hover_registry_sweep(aTHX_ self);
-        return;
+    } else {
+        buffer_set exiting = exiting_buffers_collect();
+        interned_id_holders holders = { Clay_GetPointerOverIds(), &exiting };
+        arena_begin_frame(&self->strings, &exiting);
+        registry_sweep(aTHX_ self->interned_ids, self->completed_frames, INTERNED_ID_KEEP_COMPLETED_FRAMES,
+                       interned_id_stamp, interned_id_held, &holders);
+        buffer_set_free(&exiting);
+    }
+    registry_sweep(aTHX_ self->hover_callbacks, self->completed_frames, HOVER_KEEP_COMPLETED_FRAMES,
+                   clay_perl_hover_entry_stamp, NULL, NULL);
+}
+
+/* ---------------------------------------------------------------------------
+ * Frame transitions.
+ * ------------------------------------------------------------------------ */
+
+static void reset_open_elements(clay_perl_context *self)
+{
+    self->open_depth                = 0;
+    self->open_element_configurable = false;
+}
+
+void clay_perl_frame_begin(pTHX_ clay_perl_context *self)
+{
+    /* Taking the held error also resets Clay's measure cache when a failed
+     * measurement may have been cached, so it runs before the frame. */
+    SV *leftover = clay_perl_take_held_error(aTHX_ self, " (from the previous unfinished frame)");
+    if (leftover) {
+        if (self->layout_state == CLAY_PERL_LAYOUT_DECLARING) {
+            self->layout_state = CLAY_PERL_LAYOUT_ABANDONED;
+        }
+        reset_open_elements(self);
+        croak_sv(leftover);
+    }
+    sweep_retained(aTHX_ self);
+    Clay_BeginLayout();
+    self->layout_state = CLAY_PERL_LAYOUT_DECLARING;
+    reset_open_elements(self);
+}
+
+/* Croaks for elements left open at Clay_EndLayout, appending a held
+ * callback error message when one is held as well. A held exception
+ * object is re-thrown unchanged instead (the elements are closed either
+ * way). */
+static void croak_unbalanced(pTHX_ clay_perl_context *self, int32_t still_open)
+{
+    SV *held = clay_perl_take_held_error(aTHX_ self, NULL);
+    if (held && SvROK(held)) croak_sv(held);
+
+    SV *message = sv_2mortal(newSVpvf(
+        "%d element%s still open at Clay_EndLayout "
+        "(unbalanced Clay__OpenElement/Clay__CloseElement)",
+        (int) still_open, still_open == 1 ? "" : "s"));
+    if (held) {
+        sv_catpvs(message, "; callback error: ");
+        sv_catsv(message, held);
+    }
+    croak_sv(message);
+}
+
+Clay_RenderCommandArray clay_perl_frame_end(pTHX_ clay_perl_context *self, float delta_time)
+{
+    if (self->layout_state != CLAY_PERL_LAYOUT_DECLARING) {
+        croak("Clay_EndLayout: called without a matching Clay_BeginLayout");
+    }
+    /* Close what is still open, so Clay's state stays consistent. */
+    int32_t still_open = self->open_depth;
+    reset_open_elements(self);
+    for (int32_t i = 0; i < still_open; i++) {
+        Clay__CloseElement();
     }
 
-    buffer_set exiting = exiting_buffers_collect();
-    arena_begin_frame(&self->strings, &exiting);
-    interned_ids_sweep(aTHX_ self, &exiting);
-    buffer_set_free(&exiting);
-    clay_perl_hover_registry_sweep(aTHX_ self);
+    /* The transition trampolines find their handlers through this. */
+    clay_perl_context *outer_transition_ctx = clay_perl_active_transition_ctx;
+    clay_perl_active_transition_ctx = self;
+    Clay_RenderCommandArray commands = Clay_EndLayout(delta_time);
+    clay_perl_active_transition_ctx = outer_transition_ctx;
+
+    self->layout_state = CLAY_PERL_LAYOUT_COMPLETE;
+    self->completed_frames++;
+    if (still_open > 0) croak_unbalanced(aTHX_ self, still_open);
+    return commands;
+}
+
+/* ---------------------------------------------------------------------------
+ * Element bookkeeping.
+ * ------------------------------------------------------------------------ */
+
+void clay_perl_frame_element_opened(clay_perl_context *self)
+{
+    self->open_depth++;
+    self->open_element_configurable = true;
+}
+
+void clay_perl_frame_element_configured(pTHX_ clay_perl_context *self, const char *who)
+{
+    if (!self->open_element_configurable) {
+        croak("%s: the open element is already configured or has children; "
+              "configure an element once, right after opening it", who);
+    }
+    self->open_element_configurable = false;
+}
+
+void clay_perl_frame_text_element_opened(clay_perl_context *self)
+{
+    self->open_element_configurable = false;
+}
+
+void clay_perl_frame_element_closed(clay_perl_context *self)
+{
+    self->open_depth--;
+    self->open_element_configurable = false;
+}
+
+/* ---------------------------------------------------------------------------
+ * Statistics.
+ * ------------------------------------------------------------------------ */
+
+static UV chunk_count(const clay_perl_arena_chunk *chunk)
+{
+    UV count = 0;
+    for (; chunk; chunk = chunk->next) count++;
+    return count;
+}
+
+SV *clay_perl_frame_stats(pTHX_ const clay_perl_context *self)
+{
+    static const char *const layout_states[] = { "complete", "declaring", "abandoned" };
+    HV *stats = newHV();
+    (void) hv_stores(stats, "arena_chunks",
+                     newSVuv(chunk_count(self->strings.current) + chunk_count(self->strings.retained)));
+    (void) hv_stores(stats, "interned_ids",     newSVuv(HvUSEDKEYS(self->interned_ids)));
+    (void) hv_stores(stats, "hover_entries",    newSVuv(HvUSEDKEYS(self->hover_callbacks)));
+    (void) hv_stores(stats, "layout_state",     newSVpv(layout_states[self->layout_state], 0));
+    (void) hv_stores(stats, "open_depth",       newSViv(self->open_depth));
+    (void) hv_stores(stats, "completed_frames", newSVuv(self->completed_frames));
+    return newRV_noinc((SV *) stats);
 }

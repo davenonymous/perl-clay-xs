@@ -68,4 +68,63 @@ my $data = Clay_GetElementData( Clay_GetElementId("root") );
 ok( $data->{found}, 'GetElementData found the element' );
 is( $data->{boundingBox}{width}, 200, 'GetElementData width matches' );
 
+# -----------------------------------------------------------------------------
+# The frame module: frame state and what it retains, seen through
+# Clay::XS::_context_stats.
+# -----------------------------------------------------------------------------
+
+sub stats ($context) { Clay::XS::_context_stats($context) }
+
+subtest 'frame state' => sub {
+    my $context = Clay_Initialize(Clay_MinMemorySize(), [100, 100]);
+    Clay_SetMeasureTextFunction(sub { die "measure failed\n" });
+    is( stats($context), hash {
+        field layout_state => 'complete'; field open_depth => 0; field completed_frames => 0; etc;
+    }, 'a new context has completed no frame' );
+
+    Clay_BeginLayout();
+    Clay__OpenElement();
+    Clay__OpenTextElement('unmeasurable', {});
+    is( stats($context), hash { field layout_state => 'declaring'; field open_depth => 1; etc },
+        'a begun frame is declaring, with its open elements' );
+
+    like( dies { Clay_BeginLayout() }, qr/^measure failed \(from the previous unfinished frame\)/,
+        'the next Clay_BeginLayout re-throws the held error' );
+    is( stats($context), hash {
+        field layout_state => 'abandoned'; field open_depth => 0; field completed_frames => 0; etc;
+    }, 'and leaves the unfinished frame abandoned, with nothing open' );
+
+    Clay_SetMeasureTextFunction(sub { return [1, 1] });
+    Clay_BeginLayout();
+    Clay_EndLayout();
+    is( stats($context), hash { field layout_state => 'complete'; field completed_frames => 1; etc },
+        'a completed frame is counted' );
+};
+
+subtest 'interned element ids are kept while Clay may still read them' => sub {
+    my $context = Clay_Initialize(Clay_MinMemorySize(), [100, 100]);
+    my $frame = sub (@names) {
+        Clay_BeginLayout();
+        my $interned = stats($context)->{interned_ids};
+        for my $name (@names) {
+            Clay__OpenElementWithId(Clay_GetElementId($name));
+            Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(50), height => sizing_fixed(50) } } });
+            Clay__CloseElement();
+        }
+        Clay_EndLayout();
+        return $interned;
+    };
+    $frame->('kept', 'gone') for 1 .. 3;
+    is( $frame->('kept'), 2, 'an id is kept in the first frame without it' );
+    is( $frame->('kept'), 2, 'and in the second' );
+    is( $frame->('kept'), 1, 'and dropped when the third begins' );
+
+    $frame->('kept', 'hovered') for 1 .. 3;
+    Clay_SetPointerState([60, 10], 0);
+    ok( ( grep { $_->{stringId} eq 'hovered' } @{ Clay_GetPointerOverIds() } ), 'the pointer is over an element' );
+    is( [ map { $frame->('kept') } 1 .. 4 ], [ 2, 2, 2, 2 ], 'its id is kept while it is in the pointer-over list' );
+    Clay_SetPointerState([60, 10], 0);
+    is( $frame->('kept'), 1, 'and dropped once it is not' );
+};
+
 done_testing;

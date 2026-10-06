@@ -73,20 +73,60 @@ Clay::UI has no attribute for it.
     sizingGroup.height          sizingGroup                height_group (HasSizingGroup)
     userData                    userData                   reserved by Clay::UI
 
-Text element config keys (the hash passed to C<Clay__OpenTextElement>), see
-L</TEXT ELEMENT CONFIG>:
+Every struct C<check_struct> knows and its keys, in the order the
+struct error messages list them. The text element config (the hash
+passed to C<Clay__OpenTextElement>) is described in
+L</TEXT ELEMENT CONFIG>, C<Clay_TransitionCallbackArguments> in
+L</RETURNED HASHES>, the parts of a declaration in
+L</ELEMENT DECLARATION> and the rest in L</OTHER STRUCTS>. The
+C<enter> and C<exit> parts of a transition have no C type name of their
+own.
 
-    textColor  fontId  fontSize  letterSpacing  lineHeight  wrapMode
-    textAlignment  userData
+    Struct                              Keys
+    ----------------------------------  ---------------------------------------
+    Clay_ElementDeclaration             layout backgroundColor overlayColor
+                                        cornerRadius aspectRatio image floating
+                                        custom clip border transition
+                                        sizingGroup userData
+    Clay_LayoutConfig                   sizing padding childGap childAlignment
+                                        layoutDirection lineGap lineSizing
+    Clay_Sizing                         width height
+    Clay_SizingAxis                     min max type percent
+    Clay_Padding                        left right top bottom
+    Clay_ChildAlignment                 x y
+    Clay_Color                          r g b a
+    Clay_CornerRadius                   topLeft topRight bottomLeft bottomRight
+    Clay_AspectRatioElementConfig       aspectRatio
+    Clay_ImageElementConfig             imageData
+    Clay_FloatingElementConfig          offset expand parentId zIndex
+                                        attachPoints pointerCaptureMode
+                                        attachTo clipTo
+    Clay_FloatingAttachPoints           element parent
+    Clay_CustomElementConfig            customData
+    Clay_ClipElementConfig              horizontal vertical childOffset
+    Clay_BorderElementConfig            color width
+    Clay_BorderWidth                    left right top bottom betweenChildren
+    Clay_TransitionElementConfig        duration properties interactionHandling
+                                        enter exit
+    Clay_TransitionElementConfig.enter  trigger hasSetInitial
+    Clay_TransitionElementConfig.exit   trigger siblingOrdering hasSetFinal
+    Clay_SizingGroup                    width height
+    Clay_TextElementConfig              userData textColor fontId fontSize
+                                        letterSpacing lineHeight wrapMode
+                                        textAlignment
+    Clay_Vector2                        x y
+    Clay_Dimensions                     width height
+    Clay_BoundingBox                    x y width height
+    Clay_TransitionData                 boundingBox backgroundColor
+                                        overlayColor borderColor borderWidth
+    Clay_TransitionCallbackArguments    transitionState initial target current
+                                        elapsedTime duration properties
 
-Other structs, see L</OTHER STRUCTS> and L</RETURNED HASHES>:
+Hashes Clay::XS returns or passes to callbacks that no function takes,
+see L</RETURNED HASHES>:
 
-    Clay_Color  Clay_Vector2  Clay_Dimensions  Clay_BoundingBox
-    Clay_CornerRadius  Clay_Padding  Clay_BorderWidth  Clay_ChildAlignment
-    Clay_SizingAxis  Clay_Sizing  Clay_SizingGroup  Clay_FloatingAttachPoints
-    Clay_TransitionData  Clay_TransitionElementConfig  element id hash
-    Clay_ElementData  Clay_ScrollContainerData  Clay_PointerData
-    error hash  render command  transition callback arguments
+    element id hash  Clay_ElementData  Clay_ScrollContainerData
+    Clay_PointerData  error hash  render command
 
 =head1 DESCRIPTION
 
@@ -1771,10 +1811,12 @@ C<renderData> by C<commandType>:
 
 See L<Clay::XS/RENDER COMMANDS>.
 
-=head2 transition callback arguments
+=head2 Clay_TransitionCallbackArguments
 
 The transition handler installed with C<Clay_SetTransitionHandlers>
-receives, and C<Clay_EaseOut> takes:
+receives, and C<Clay_EaseOut> takes, a
+C<Clay_TransitionCallbackArguments> hash (C<check_struct> knows it under
+that name):
 
     {
         transitionState => CLAY_TRANSITION_STATE_...,   # IDLE 0, ENTERING 1,
@@ -1813,11 +1855,11 @@ it.
 Seconds since the transition started (the sum of the C<$delta_time>
 values given to C<Clay_EndLayout>).
 
-=item duration (transition callback arguments)
+=item duration (Clay_TransitionCallbackArguments)
 
 The element's transition L</duration> in seconds.
 
-=item properties (transition callback arguments)
+=item properties (Clay_TransitionCallbackArguments)
 
 The element's transition L</properties>: the bits of the properties
 being animated.

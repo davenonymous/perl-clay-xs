@@ -13,128 +13,17 @@ our $VERSION = '0.05';
 XSLoader::load(__PACKAGE__, $VERSION);
 
 # -----------------------------------------------------------------------------
-# Re-export every Clay_* / Clay__* / sizing_* / padding_* / border_* /
-# corner_radius_* / Clay_Set* / check_struct helper as its bare name,
-# plus the constants the BOOT block installed.
+# Every function in the XS wrapper guard table (one row per exported
+# function) and every constant BOOT installed, under its bare name. Both
+# lists come from the XS module, so this runs after XSLoader::load and
+# before any import.
 #
 # The export tag :all gives a caller a flat namespace identical to the
 # C header. Most users will want this. Use individual imports if you
 # need finer control.
 # -----------------------------------------------------------------------------
 
-our @EXPORT_OK = qw(
-    Clay_MinMemorySize
-    Clay_Initialize
-    Clay_GetCurrentContext
-    Clay_SetCurrentContext
-    Clay_SetLayoutDimensions
-    Clay_GetLayoutDimensions
-    Clay_BeginLayout
-    Clay_EndLayout
-
-    Clay__OpenElement
-    Clay__OpenElementWithId
-    Clay__CloseElement
-    Clay__ConfigureOpenElement
-    Clay__OpenTextElement
-    Clay__HashString
-    Clay__HashStringWithOffset
-
-    Clay_GetOpenElementId
-    Clay_GetElementId
-    Clay_GetElementIdWithIndex
-    Clay_GetElementData
-
-    Clay_SetMeasureTextFunction
-    Clay_ResetMeasureTextCache
-
-    Clay_SetPointerState
-    Clay_GetPointerState
-    Clay_Hovered
-    Clay_OnHover
-    Clay_PointerOver
-    Clay_GetPointerOverIds
-
-    Clay_UpdateScrollContainers
-    Clay_GetScrollOffset
-    Clay_GetScrollContainerData
-    Clay_SetQueryScrollOffsetFunction
-    Clay_SetExternalScrollHandlingEnabled
-
-    Clay_SetDebugModeEnabled
-    Clay_IsDebugModeEnabled
-    Clay_SetCullingEnabled
-    Clay_GetMaxElementCount
-    Clay_SetMaxElementCount
-    Clay_GetMaxMeasureTextCacheWordCount
-    Clay_SetMaxMeasureTextCacheWordCount
-    Clay_EaseOut
-    Clay_SetTransitionHandlers
-
-    sizing_fit sizing_grow sizing_fixed sizing_percent
-    padding_all border_all border_outside corner_radius_all
-    set_scroll_position
-    check_struct
-
-    CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM CLAY_LEFT_TO_RIGHT_WRAP CLAY_BACK_TO_FRONT
-    CLAY_LINE_SIZING_GROW CLAY_LINE_SIZING_FIT
-    CLAY_ALIGN_X_LEFT CLAY_ALIGN_X_RIGHT CLAY_ALIGN_X_CENTER
-    CLAY_ALIGN_Y_TOP CLAY_ALIGN_Y_BOTTOM CLAY_ALIGN_Y_CENTER
-    CLAY__SIZING_TYPE_FIT CLAY__SIZING_TYPE_GROW
-    CLAY__SIZING_TYPE_PERCENT CLAY__SIZING_TYPE_FIXED
-    CLAY_TEXT_WRAP_WORDS CLAY_TEXT_WRAP_NEWLINES CLAY_TEXT_WRAP_NONE
-    CLAY_TEXT_ALIGN_LEFT CLAY_TEXT_ALIGN_CENTER CLAY_TEXT_ALIGN_RIGHT
-    CLAY_ATTACH_POINT_LEFT_TOP CLAY_ATTACH_POINT_LEFT_CENTER
-    CLAY_ATTACH_POINT_LEFT_BOTTOM CLAY_ATTACH_POINT_CENTER_TOP
-    CLAY_ATTACH_POINT_CENTER_CENTER CLAY_ATTACH_POINT_CENTER_BOTTOM
-    CLAY_ATTACH_POINT_RIGHT_TOP CLAY_ATTACH_POINT_RIGHT_CENTER
-    CLAY_ATTACH_POINT_RIGHT_BOTTOM
-    CLAY_POINTER_CAPTURE_MODE_CAPTURE CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH
-    CLAY_ATTACH_TO_NONE CLAY_ATTACH_TO_PARENT
-    CLAY_ATTACH_TO_ELEMENT_WITH_ID CLAY_ATTACH_TO_ROOT
-    CLAY_CLIP_TO_NONE CLAY_CLIP_TO_ATTACHED_PARENT
-    CLAY_RENDER_COMMAND_TYPE_NONE CLAY_RENDER_COMMAND_TYPE_RECTANGLE
-    CLAY_RENDER_COMMAND_TYPE_BORDER CLAY_RENDER_COMMAND_TYPE_TEXT
-    CLAY_RENDER_COMMAND_TYPE_IMAGE
-    CLAY_RENDER_COMMAND_TYPE_SCISSOR_START CLAY_RENDER_COMMAND_TYPE_SCISSOR_END
-    CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_START
-    CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_END
-    CLAY_RENDER_COMMAND_TYPE_CUSTOM
-    CLAY_POINTER_DATA_PRESSED_THIS_FRAME CLAY_POINTER_DATA_PRESSED
-    CLAY_POINTER_DATA_RELEASED_THIS_FRAME CLAY_POINTER_DATA_RELEASED
-    CLAY_TRANSITION_STATE_IDLE CLAY_TRANSITION_STATE_ENTERING
-    CLAY_TRANSITION_STATE_TRANSITIONING CLAY_TRANSITION_STATE_EXITING
-    CLAY_TRANSITION_PROPERTY_NONE CLAY_TRANSITION_PROPERTY_X
-    CLAY_TRANSITION_PROPERTY_Y CLAY_TRANSITION_PROPERTY_POSITION
-    CLAY_TRANSITION_PROPERTY_WIDTH CLAY_TRANSITION_PROPERTY_HEIGHT
-    CLAY_TRANSITION_PROPERTY_DIMENSIONS CLAY_TRANSITION_PROPERTY_BOUNDING_BOX
-    CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR
-    CLAY_TRANSITION_PROPERTY_OVERLAY_COLOR
-    CLAY_TRANSITION_PROPERTY_CORNER_RADIUS
-    CLAY_TRANSITION_PROPERTY_BORDER_COLOR
-    CLAY_TRANSITION_PROPERTY_BORDER_WIDTH
-    CLAY_TRANSITION_PROPERTY_BORDER
-    CLAY_TRANSITION_ENTER_SKIP_ON_FIRST_PARENT_FRAME
-    CLAY_TRANSITION_ENTER_TRIGGER_ON_FIRST_PARENT_FRAME
-    CLAY_TRANSITION_EXIT_SKIP_WHEN_PARENT_EXITS
-    CLAY_TRANSITION_EXIT_TRIGGER_WHEN_PARENT_EXITS
-    CLAY_TRANSITION_DISABLE_INTERACTIONS_WHILE_TRANSITIONING_POSITION
-    CLAY_TRANSITION_ALLOW_INTERACTIONS_WHILE_TRANSITIONING_POSITION
-    CLAY_EXIT_TRANSITION_ORDERING_UNDERNEATH_SIBLINGS
-    CLAY_EXIT_TRANSITION_ORDERING_NATURAL_ORDER
-    CLAY_EXIT_TRANSITION_ORDERING_ABOVE_SIBLINGS
-    CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED
-    CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED
-    CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED
-    CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED
-    CLAY_ERROR_TYPE_DUPLICATE_ID
-    CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND
-    CLAY_ERROR_TYPE_PERCENTAGE_OVER_1
-    CLAY_ERROR_TYPE_INTERNAL_ERROR
-    CLAY_ERROR_TYPE_UNBALANCED_OPEN_CLOSE
-    CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED
-    CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE
-);
+our @EXPORT_OK = ((sort keys %{ _wrapper_guards() }), _constant_names());
 
 our %EXPORT_TAGS = (
     all => [ @EXPORT_OK ],
@@ -1526,12 +1415,13 @@ Computes one step of Clay's built-in ease-out curve.
     my $result = Clay_EaseOut(\%args);
     # { complete => 0, current => { boundingBox => {...}, backgroundColor => {...}, ... } }
 
-C<%args> has the shape a transition handler receives (see
+C<%args> has the shape a transition handler receives, a
+L<Clay::XS::Structs/Clay_TransitionCallbackArguments> hash (see also
 L</CALLBACKS>): C<initial>, C<target> and C<current> transition data,
 C<elapsedTime> and C<duration> in seconds, C<properties> (an OR of
 L</Transition properties>) and C<transitionState>. Missing numbers mean
-0, missing transition data means all zero, and a missing C<current>
-starts from C<initial>.
+0, missing transition data means all zero, and a missing (or undef)
+C<current> starts from C<initial>. Unknown keys are ignored.
 
 Returns C<< { complete => 1|0, current => \%eased } >>:
 
@@ -1558,9 +1448,10 @@ A transition handler can use it directly:
         return $step->{complete};
     });
 
-Croaks C<Clay_EaseOut: expected hash reference>, plain strings such as
-C<Clay_EaseOut: duration: expected a finite number, got ...> for bad
-numbers, and L</STRUCT ERRORS> objects for bad transition data.
+Croaks a L</STRUCT ERRORS> object whose path starts at
+C<Clay_EaseOut: args> when C<\%args> is not a hash reference or a value
+in it is out of range, for example
+C<Clay_EaseOut: args.duration: expected a finite number, got 'soon'>.
 
 I<Context:> none. I<Frame:> any time. I<In a callback:> allowed.
 I<Held errors:> never.
@@ -2772,7 +2663,8 @@ them during C<Clay_EndLayout>.
 
 =item *
 
-C<%args> holds these keys:
+C<%args> is a L<Clay::XS::Structs/Clay_TransitionCallbackArguments>
+hash with these keys:
 
 =over 4
 

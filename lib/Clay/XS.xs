@@ -12,7 +12,8 @@
  *
  * Boundary marshalling lives in src/marshal.c; trampolines for
  * function-pointer callbacks live in src/callbacks.c; the context, its
- * string arena and the id intern table live in src/clay_perl_context.c.
+ * string arena, the id intern table and the frame module live in
+ * src/clay_perl_context.c.
  *
  * Memory ownership notes are in src/clay_perl.h. The cliffs notes are:
  *
@@ -29,12 +30,13 @@
  *     destroyed or foreign context croaks instead of crashing inside
  *     Clay, and refuses mutating calls from inside a callback.
  *
- *   - Open/close balance is tracked per context: closing or configuring
- *     with nothing open croaks, an element is configured at most once,
- *     right after it is opened, and Clay_EndLayout closes any element
- *     left open (so Clay's state stays consistent), then croaks. The
- *     frame state (clay_perl_layout_state) keeps the functions that walk
- *     Clay's layout tree away from a half-built one.
+ *   - The frame module (clay_perl_frame_*) tracks the frame state and
+ *     the open/close balance per context: closing or configuring with
+ *     nothing open croaks (wrapper guard), an element is configured at
+ *     most once, right after it is opened, and Clay_EndLayout closes any
+ *     element left open (so Clay's state stays consistent), then croaks.
+ *     The frame state (clay_perl_layout_state) keeps the functions that
+ *     walk Clay's layout tree away from a half-built one.
  *
  *   - Exceptions thrown by Perl callbacks while Clay runs are held
  *     (src/callbacks.c) and re-thrown by wrapper_leave once Clay has
@@ -44,25 +46,36 @@
  */
 
 #include "src/clay_perl.h"
+#include "src/clay_perl_enums.h"
 
 #include <float.h>
 #include <string.h>
 
 /* ===========================================================================
- * BOOT helper: install integer constants under Clay::XS::.
+ * Constants: every member of every group in src/clay_perl_enums.h, in
+ * declaration order. BOOT installs them as constant subs under Clay::XS::,
+ * and Clay::XS::_constant_names returns their names for @EXPORT_OK.
  * ======================================================================== */
 
-static void install_iv_const(pTHX_ const char *name, IV value)
-{
-    newCONSTSUB(gv_stashpvs("Clay::XS", GV_ADD), name, newSViv(value));
-}
+typedef struct {
+    const char *name;
+    IV          value;
+} clay_perl_constant;
+
+#define CLAY_PERL_CONSTANT(member) { #member, (IV) (member) },
+#define CLAY_PERL_GROUP_CONSTANTS(group) CLAY_PERL_ENUM_##group(CLAY_PERL_CONSTANT)
+static const clay_perl_constant all_constants[] = {
+    CLAY_PERL_ENUMS(CLAY_PERL_GROUP_CONSTANTS, CLAY_PERL_GROUP_CONSTANTS)
+};
 
 /* ===========================================================================
  * Wrapper guards.
  *
- * Every Clay::XS function has one descriptor in CLAY_PERL_WRAPPERS below;
- * wrapper_enter and wrapper_leave apply it, and Clay::XS::_wrapper_guards
- * returns the whole table (t/19 and the POD are checked against it).
+ * Every exported Clay::XS function has one descriptor in
+ * CLAY_PERL_WRAPPERS below; wrapper_enter and wrapper_leave apply it, and
+ * Clay::XS::_wrapper_guards returns the whole table. lib/Clay/XS.pm builds
+ * @EXPORT_OK from its names, and t/19 checks the POD against it. The
+ * internal XSUBs (names starting with _) are not exported and have none.
  *
  *   context  CURRENT:  croaks unless clay_perl_current_ctx (which mirrors
  *                      Clay's process-wide current context) is set, usable
@@ -218,21 +231,6 @@ static void require_frame(pTHX_ const clay_perl_wrapper *w, clay_perl_context *c
     }
 }
 
-/* Element declaration bookkeeping: an element may be configured only
- * right after it was opened, before any child, as the C CLAY() macro
- * does. */
-static void element_opened(clay_perl_context *ctx)
-{
-    ctx->open_depth++;
-    ctx->open_element_configurable = true;
-}
-
-static void element_closed(clay_perl_context *ctx)
-{
-    ctx->open_depth--;
-    ctx->open_element_configurable = false;
-}
-
 /* Applies a descriptor before the wrapper's work; returns the context it
  * acquired (NULL for NONE, and for OPTIONAL without a current context). */
 static clay_perl_context *wrapper_enter(pTHX_ const clay_perl_wrapper *w)
@@ -348,30 +346,6 @@ static Clay_String borrowed_id_string(pTHX_ SV *sv, const char *func)
 }
 
 /* ===========================================================================
- * Clay_EndLayout helpers.
- * ======================================================================== */
-
-/* Croaks for elements left open at Clay_EndLayout, appending a held
- * callback error message when one is held as well. A held exception
- * object is re-thrown unchanged instead (the elements are closed either
- * way). */
-static void croak_unbalanced(pTHX_ clay_perl_context *ctx, int32_t still_open)
-{
-    SV *held = clay_perl_take_held_error(aTHX_ ctx, NULL);
-    if (held && SvROK(held)) croak_sv(held);
-
-    SV *message = sv_2mortal(newSVpvf(
-        "%d element%s still open at Clay_EndLayout "
-        "(unbalanced Clay__OpenElement/Clay__CloseElement)",
-        (int) still_open, still_open == 1 ? "" : "s"));
-    if (held) {
-        sv_catpvs(message, "; callback error: ");
-        sv_catsv(message, held);
-    }
-    croak_sv(message);
-}
-
-/* ===========================================================================
  * Scroll position writes.
  *
  * A position written by set_scroll_position shows only in the next frame,
@@ -389,121 +363,11 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
-    /* Layout direction. */
-    install_iv_const(aTHX_ "CLAY_LEFT_TO_RIGHT", CLAY_LEFT_TO_RIGHT);
-    install_iv_const(aTHX_ "CLAY_TOP_TO_BOTTOM", CLAY_TOP_TO_BOTTOM);
-    install_iv_const(aTHX_ "CLAY_LEFT_TO_RIGHT_WRAP", CLAY_LEFT_TO_RIGHT_WRAP);
-    install_iv_const(aTHX_ "CLAY_BACK_TO_FRONT", CLAY_BACK_TO_FRONT);
-
-    /* Line sizing of wrap containers. */
-    install_iv_const(aTHX_ "CLAY_LINE_SIZING_GROW", CLAY_LINE_SIZING_GROW);
-    install_iv_const(aTHX_ "CLAY_LINE_SIZING_FIT",  CLAY_LINE_SIZING_FIT);
-
-    /* Alignment. */
-    install_iv_const(aTHX_ "CLAY_ALIGN_X_LEFT",   CLAY_ALIGN_X_LEFT);
-    install_iv_const(aTHX_ "CLAY_ALIGN_X_RIGHT",  CLAY_ALIGN_X_RIGHT);
-    install_iv_const(aTHX_ "CLAY_ALIGN_X_CENTER", CLAY_ALIGN_X_CENTER);
-    install_iv_const(aTHX_ "CLAY_ALIGN_Y_TOP",    CLAY_ALIGN_Y_TOP);
-    install_iv_const(aTHX_ "CLAY_ALIGN_Y_BOTTOM", CLAY_ALIGN_Y_BOTTOM);
-    install_iv_const(aTHX_ "CLAY_ALIGN_Y_CENTER", CLAY_ALIGN_Y_CENTER);
-
-    /* Sizing type. */
-    install_iv_const(aTHX_ "CLAY__SIZING_TYPE_FIT",     CLAY__SIZING_TYPE_FIT);
-    install_iv_const(aTHX_ "CLAY__SIZING_TYPE_GROW",    CLAY__SIZING_TYPE_GROW);
-    install_iv_const(aTHX_ "CLAY__SIZING_TYPE_PERCENT", CLAY__SIZING_TYPE_PERCENT);
-    install_iv_const(aTHX_ "CLAY__SIZING_TYPE_FIXED",   CLAY__SIZING_TYPE_FIXED);
-
-    /* Text wrap. */
-    install_iv_const(aTHX_ "CLAY_TEXT_WRAP_WORDS",    CLAY_TEXT_WRAP_WORDS);
-    install_iv_const(aTHX_ "CLAY_TEXT_WRAP_NEWLINES", CLAY_TEXT_WRAP_NEWLINES);
-    install_iv_const(aTHX_ "CLAY_TEXT_WRAP_NONE",     CLAY_TEXT_WRAP_NONE);
-    install_iv_const(aTHX_ "CLAY_TEXT_ALIGN_LEFT",    CLAY_TEXT_ALIGN_LEFT);
-    install_iv_const(aTHX_ "CLAY_TEXT_ALIGN_CENTER",  CLAY_TEXT_ALIGN_CENTER);
-    install_iv_const(aTHX_ "CLAY_TEXT_ALIGN_RIGHT",   CLAY_TEXT_ALIGN_RIGHT);
-
-    /* Floating attach points. */
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_LEFT_TOP",      CLAY_ATTACH_POINT_LEFT_TOP);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_LEFT_CENTER",   CLAY_ATTACH_POINT_LEFT_CENTER);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_LEFT_BOTTOM",   CLAY_ATTACH_POINT_LEFT_BOTTOM);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_CENTER_TOP",    CLAY_ATTACH_POINT_CENTER_TOP);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_CENTER_CENTER", CLAY_ATTACH_POINT_CENTER_CENTER);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_CENTER_BOTTOM", CLAY_ATTACH_POINT_CENTER_BOTTOM);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_RIGHT_TOP",     CLAY_ATTACH_POINT_RIGHT_TOP);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_RIGHT_CENTER",  CLAY_ATTACH_POINT_RIGHT_CENTER);
-    install_iv_const(aTHX_ "CLAY_ATTACH_POINT_RIGHT_BOTTOM",  CLAY_ATTACH_POINT_RIGHT_BOTTOM);
-
-    install_iv_const(aTHX_ "CLAY_POINTER_CAPTURE_MODE_CAPTURE",     CLAY_POINTER_CAPTURE_MODE_CAPTURE);
-    install_iv_const(aTHX_ "CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH", CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH);
-
-    install_iv_const(aTHX_ "CLAY_ATTACH_TO_NONE",            CLAY_ATTACH_TO_NONE);
-    install_iv_const(aTHX_ "CLAY_ATTACH_TO_PARENT",          CLAY_ATTACH_TO_PARENT);
-    install_iv_const(aTHX_ "CLAY_ATTACH_TO_ELEMENT_WITH_ID", CLAY_ATTACH_TO_ELEMENT_WITH_ID);
-    install_iv_const(aTHX_ "CLAY_ATTACH_TO_ROOT",            CLAY_ATTACH_TO_ROOT);
-
-    install_iv_const(aTHX_ "CLAY_CLIP_TO_NONE",            CLAY_CLIP_TO_NONE);
-    install_iv_const(aTHX_ "CLAY_CLIP_TO_ATTACHED_PARENT", CLAY_CLIP_TO_ATTACHED_PARENT);
-
-    /* Render command types. */
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_NONE",                CLAY_RENDER_COMMAND_TYPE_NONE);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_RECTANGLE",           CLAY_RENDER_COMMAND_TYPE_RECTANGLE);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_BORDER",              CLAY_RENDER_COMMAND_TYPE_BORDER);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_TEXT",                CLAY_RENDER_COMMAND_TYPE_TEXT);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_IMAGE",               CLAY_RENDER_COMMAND_TYPE_IMAGE);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_SCISSOR_START",       CLAY_RENDER_COMMAND_TYPE_SCISSOR_START);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_SCISSOR_END",         CLAY_RENDER_COMMAND_TYPE_SCISSOR_END);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_START", CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_START);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_END",   CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_END);
-    install_iv_const(aTHX_ "CLAY_RENDER_COMMAND_TYPE_CUSTOM",              CLAY_RENDER_COMMAND_TYPE_CUSTOM);
-
-    /* Pointer state. */
-    install_iv_const(aTHX_ "CLAY_POINTER_DATA_PRESSED_THIS_FRAME",  CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
-    install_iv_const(aTHX_ "CLAY_POINTER_DATA_PRESSED",             CLAY_POINTER_DATA_PRESSED);
-    install_iv_const(aTHX_ "CLAY_POINTER_DATA_RELEASED_THIS_FRAME", CLAY_POINTER_DATA_RELEASED_THIS_FRAME);
-    install_iv_const(aTHX_ "CLAY_POINTER_DATA_RELEASED",            CLAY_POINTER_DATA_RELEASED);
-
-    /* Transitions. */
-    install_iv_const(aTHX_ "CLAY_TRANSITION_STATE_IDLE",          CLAY_TRANSITION_STATE_IDLE);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_STATE_ENTERING",      CLAY_TRANSITION_STATE_ENTERING);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_STATE_TRANSITIONING", CLAY_TRANSITION_STATE_TRANSITIONING);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_STATE_EXITING",       CLAY_TRANSITION_STATE_EXITING);
-
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_NONE",             CLAY_TRANSITION_PROPERTY_NONE);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_X",                CLAY_TRANSITION_PROPERTY_X);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_Y",                CLAY_TRANSITION_PROPERTY_Y);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_POSITION",         CLAY_TRANSITION_PROPERTY_POSITION);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_WIDTH",            CLAY_TRANSITION_PROPERTY_WIDTH);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_HEIGHT",           CLAY_TRANSITION_PROPERTY_HEIGHT);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_DIMENSIONS",       CLAY_TRANSITION_PROPERTY_DIMENSIONS);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_BOUNDING_BOX",     CLAY_TRANSITION_PROPERTY_BOUNDING_BOX);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR", CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_OVERLAY_COLOR",    CLAY_TRANSITION_PROPERTY_OVERLAY_COLOR);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_CORNER_RADIUS",    CLAY_TRANSITION_PROPERTY_CORNER_RADIUS);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_BORDER_COLOR",     CLAY_TRANSITION_PROPERTY_BORDER_COLOR);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_BORDER_WIDTH",     CLAY_TRANSITION_PROPERTY_BORDER_WIDTH);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_PROPERTY_BORDER",           CLAY_TRANSITION_PROPERTY_BORDER);
-
-    install_iv_const(aTHX_ "CLAY_TRANSITION_ENTER_SKIP_ON_FIRST_PARENT_FRAME",    CLAY_TRANSITION_ENTER_SKIP_ON_FIRST_PARENT_FRAME);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_ENTER_TRIGGER_ON_FIRST_PARENT_FRAME", CLAY_TRANSITION_ENTER_TRIGGER_ON_FIRST_PARENT_FRAME);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_EXIT_SKIP_WHEN_PARENT_EXITS",         CLAY_TRANSITION_EXIT_SKIP_WHEN_PARENT_EXITS);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_EXIT_TRIGGER_WHEN_PARENT_EXITS",      CLAY_TRANSITION_EXIT_TRIGGER_WHEN_PARENT_EXITS);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_DISABLE_INTERACTIONS_WHILE_TRANSITIONING_POSITION", CLAY_TRANSITION_DISABLE_INTERACTIONS_WHILE_TRANSITIONING_POSITION);
-    install_iv_const(aTHX_ "CLAY_TRANSITION_ALLOW_INTERACTIONS_WHILE_TRANSITIONING_POSITION",   CLAY_TRANSITION_ALLOW_INTERACTIONS_WHILE_TRANSITIONING_POSITION);
-    install_iv_const(aTHX_ "CLAY_EXIT_TRANSITION_ORDERING_UNDERNEATH_SIBLINGS", CLAY_EXIT_TRANSITION_ORDERING_UNDERNEATH_SIBLINGS);
-    install_iv_const(aTHX_ "CLAY_EXIT_TRANSITION_ORDERING_NATURAL_ORDER",       CLAY_EXIT_TRANSITION_ORDERING_NATURAL_ORDER);
-    install_iv_const(aTHX_ "CLAY_EXIT_TRANSITION_ORDERING_ABOVE_SIBLINGS",      CLAY_EXIT_TRANSITION_ORDERING_ABOVE_SIBLINGS);
-
-    /* Error types. */
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED", CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED",                CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED",             CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED",     CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_DUPLICATE_ID",                           CLAY_ERROR_TYPE_DUPLICATE_ID);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND",    CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_PERCENTAGE_OVER_1",                      CLAY_ERROR_TYPE_PERCENTAGE_OVER_1);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_INTERNAL_ERROR",                         CLAY_ERROR_TYPE_INTERNAL_ERROR);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_UNBALANCED_OPEN_CLOSE",                  CLAY_ERROR_TYPE_UNBALANCED_OPEN_CLOSE);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED",             CLAY_ERROR_TYPE_HASH_MAP_CAPACITY_EXCEEDED);
-    install_iv_const(aTHX_ "CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE",                     CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE);
+    HV *stash = gv_stashpvs("Clay::XS", GV_ADD);
+    size_t i;
+    for (i = 0; i < sizeof(all_constants) / sizeof(all_constants[0]); i++) {
+        newCONSTSUB(stash, all_constants[i].name, newSViv(all_constants[i].value));
+    }
 }
 
 # =============================================================================
@@ -654,56 +518,21 @@ void
 xs_Clay_BeginLayout()
     PREINIT:
         clay_perl_context *ctx;
-        SV *leftover;
     CODE:
         ctx = wrapper_enter(aTHX_ &GUARD_Clay_BeginLayout);
-        leftover = clay_perl_take_held_error(aTHX_ ctx, " (from the previous unfinished frame)");
-        if (leftover) {
-            if (ctx->layout_state == CLAY_PERL_LAYOUT_DECLARING) {
-                ctx->layout_state = CLAY_PERL_LAYOUT_ABANDONED;
-            }
-            ctx->open_depth                = 0;
-            ctx->open_element_configurable = false;
-            croak_sv(leftover);
-        }
-        clay_perl_context_begin_frame(aTHX_ ctx);
-        Clay_BeginLayout();
-        ctx->layout_state              = CLAY_PERL_LAYOUT_DECLARING;
-        ctx->open_depth                = 0;
-        ctx->open_element_configurable = false;
+        clay_perl_frame_begin(aTHX_ ctx);
 
 SV *
 xs_Clay_EndLayout(delta_time_sv = &PL_sv_undef)
         SV *delta_time_sv
     PREINIT:
         clay_perl_context *ctx;
-        clay_perl_context *outer_transition_ctx;
         Clay_RenderCommandArray cmds;
         float delta_time;
-        int32_t still_open;
     CODE:
-        ctx = wrapper_enter(aTHX_ &GUARD_Clay_EndLayout);
-        if (ctx->layout_state != CLAY_PERL_LAYOUT_DECLARING) {
-            croak("Clay_EndLayout: called without a matching Clay_BeginLayout");
-        }
+        ctx        = wrapper_enter(aTHX_ &GUARD_Clay_EndLayout);
         delta_time = (float) clay_perl_parse_float_or(aTHX_ delta_time_sv, "Clay_EndLayout: deltaTime", 0.0);
-        still_open = ctx->open_depth;
-        ctx->open_depth                = 0;
-        ctx->open_element_configurable = false;
-        for (int32_t i = 0; i < still_open; i++) {
-            Clay__CloseElement();
-        }
-
-        outer_transition_ctx = clay_perl_active_transition_ctx;
-        clay_perl_active_transition_ctx = ctx;
-        cmds = Clay_EndLayout(delta_time);
-        clay_perl_active_transition_ctx = outer_transition_ctx;
-        ctx->layout_state = CLAY_PERL_LAYOUT_COMPLETE;
-        ctx->completed_frames++;
-
-        if (still_open > 0) {
-            croak_unbalanced(aTHX_ ctx, still_open);
-        }
+        cmds       = clay_perl_frame_end(aTHX_ ctx, delta_time);
         wrapper_leave(aTHX_ &GUARD_Clay_EndLayout, ctx);
         RETVAL = clay_render_command_array_to_sv(aTHX_ &cmds);
     OUTPUT:
@@ -711,7 +540,8 @@ xs_Clay_EndLayout(delta_time_sv = &PL_sv_undef)
 
 # =============================================================================
 # Element open/close. These never re-throw held callback errors; see the
-# file header.
+# file header. Each one parses its arguments, updates the frame module's
+# bookkeeping and calls Clay.
 # =============================================================================
 
 void
@@ -720,8 +550,8 @@ xs_Clay__OpenElement()
         clay_perl_context *ctx;
     CODE:
         ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenElement);
+        clay_perl_frame_element_opened(ctx);
         Clay__OpenElement();
-        element_opened(ctx);
 
 void
 xs_Clay__OpenElementWithId(id_sv)
@@ -729,22 +559,11 @@ xs_Clay__OpenElementWithId(id_sv)
     PREINIT:
         clay_perl_context *ctx;
         Clay_ElementId id;
-        SV **string_slot;
-        STRLEN len;
-        const char *bytes;
     CODE:
         ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenElementWithId);
-        id = clay_element_id_from_sv(aTHX_ id_sv, "Clay__OpenElementWithId: element id");
-        string_slot = hv_fetchs((HV *) SvRV(id_sv), "stringId", 0);
-        if (string_slot && *string_slot) {
-            SvGETMAGIC(*string_slot);
-            if (SvOK(*string_slot)) {
-                bytes = SvPVutf8_nomg(*string_slot, len);
-                id.stringId = clay_perl_intern_id(aTHX_ ctx, bytes, len);
-            }
-        }
+        id  = clay_element_id_from_sv_interned(aTHX_ ctx, id_sv, "Clay__OpenElementWithId: element id");
+        clay_perl_frame_element_opened(ctx);
         Clay__OpenElementWithId(id);
-        element_opened(ctx);
 
 void
 xs_Clay__CloseElement()
@@ -752,8 +571,8 @@ xs_Clay__CloseElement()
         clay_perl_context *ctx;
     CODE:
         ctx = wrapper_enter(aTHX_ &GUARD_Clay__CloseElement);
+        clay_perl_frame_element_closed(ctx);
         Clay__CloseElement();
-        element_closed(ctx);
 
 void
 xs_Clay__ConfigureOpenElement(decl_sv)
@@ -762,16 +581,10 @@ xs_Clay__ConfigureOpenElement(decl_sv)
         clay_perl_context *ctx;
         Clay_ElementDeclaration decl;
     CODE:
-        ctx = wrapper_enter(aTHX_ &GUARD_Clay__ConfigureOpenElement);
-        /* Clay pushes the clip stack and floating roots per configuration
-         * but pops them once per element. */
-        if (!ctx->open_element_configurable) {
-            croak("Clay__ConfigureOpenElement: the open element is already configured or has children; "
-                  "configure an element once, right after opening it");
-        }
+        ctx  = wrapper_enter(aTHX_ &GUARD_Clay__ConfigureOpenElement);
         decl = clay_element_declaration_from_sv(aTHX_ decl_sv);
+        clay_perl_frame_element_configured(aTHX_ ctx, "Clay__ConfigureOpenElement");
         Clay__ConfigureOpenElement(decl);
-        ctx->open_element_configurable = false;
 
 void
 xs_Clay__OpenTextElement(text_sv, config_sv = &PL_sv_undef)
@@ -782,11 +595,11 @@ xs_Clay__OpenTextElement(text_sv, config_sv = &PL_sv_undef)
         Clay_String text;
         Clay_TextElementConfig config;
     CODE:
-        ctx = wrapper_enter(aTHX_ &GUARD_Clay__OpenTextElement);
+        ctx    = wrapper_enter(aTHX_ &GUARD_Clay__OpenTextElement);
         config = clay_text_element_config_from_sv(aTHX_ config_sv);
-        text = clay_perl_arena_copy_text(aTHX_ ctx, text_sv, "Clay__OpenTextElement");
+        text   = clay_perl_arena_copy_text(aTHX_ ctx, text_sv, "Clay__OpenTextElement");
+        clay_perl_frame_text_element_opened(ctx);
         Clay__OpenTextElement(text, config);
-        ctx->open_element_configurable = false;
 
 # =============================================================================
 # Element ids. Hashing needs no context.
@@ -1203,52 +1016,15 @@ xs_Clay_EaseOut(args_sv)
         SV *args_sv
     PREINIT:
         Clay_TransitionCallbackArguments args;
-        Clay_TransitionData zero;
-        Clay_TransitionData current_state;
-        HV *hv;
+        Clay_TransitionData current;
         HV *result_hv;
-        SV **slot;
         bool complete;
     CODE:
-        SvGETMAGIC(args_sv);
-        if (!SvROK(args_sv) || SvTYPE(SvRV(args_sv)) != SVt_PVHV) {
-            croak("Clay_EaseOut: expected hash reference");
-        }
-        hv = (HV *) SvRV(args_sv);
-        memset(&args, 0, sizeof(args));
-        memset(&zero, 0, sizeof(zero));
-
-        slot = hv_fetchs(hv, "transitionState", 0);
-        args.transitionState = (Clay_TransitionState) clay_perl_parse_uint_or(
-            aTHX_ slot ? *slot : &PL_sv_undef, "Clay_EaseOut: transitionState", CLAY_TRANSITION_STATE_EXITING, 0);
-        slot = hv_fetchs(hv, "elapsedTime", 0);
-        args.elapsedTime = (float) clay_perl_parse_float_or(
-            aTHX_ slot ? *slot : &PL_sv_undef, "Clay_EaseOut: elapsedTime", 0.0);
-        slot = hv_fetchs(hv, "duration", 0);
-        args.duration = (float) clay_perl_parse_float_or(
-            aTHX_ slot ? *slot : &PL_sv_undef, "Clay_EaseOut: duration", 0.0);
-        slot = hv_fetchs(hv, "properties", 0);
-        args.properties = (Clay_TransitionProperty) clay_perl_parse_uint_or(
-            aTHX_ slot ? *slot : &PL_sv_undef, "Clay_EaseOut: properties",
-            CLAY_TRANSITION_PROPERTY_BOUNDING_BOX | CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR
-            | CLAY_TRANSITION_PROPERTY_OVERLAY_COLOR | CLAY_TRANSITION_PROPERTY_CORNER_RADIUS
-            | CLAY_TRANSITION_PROPERTY_BORDER, 0);
-
-        slot = hv_fetchs(hv, "initial", 0);
-        args.initial = clay_transition_data_from_sv(aTHX_ slot ? *slot : NULL, zero, "Clay_EaseOut: initial");
-        slot = hv_fetchs(hv, "target", 0);
-        args.target  = clay_transition_data_from_sv(aTHX_ slot ? *slot : NULL, zero, "Clay_EaseOut: target");
-        slot = hv_fetchs(hv, "current", 0);
-        current_state = slot
-                      ? clay_transition_data_from_sv(aTHX_ *slot, zero, "Clay_EaseOut: current")
-                      : args.initial;
-        args.current = &current_state;
-
-        complete = Clay_EaseOut(args);
-
+        args      = clay_transition_arguments_from_sv(aTHX_ args_sv, "Clay_EaseOut: args", &current);
+        complete  = Clay_EaseOut(args);
         result_hv = newHV();
         (void) hv_stores(result_hv, "complete", newSVuv(complete ? 1 : 0));
-        (void) hv_stores(result_hv, "current", clay_transition_data_to_sv(aTHX_ current_state));
+        (void) hv_stores(result_hv, "current", clay_transition_data_to_sv(aTHX_ current));
         RETVAL = newRV_noinc((SV *) result_hv);
     OUTPUT:
         RETVAL
@@ -1464,6 +1240,33 @@ xs__wrapper_guards()
         RETVAL
 
 # =============================================================================
+# Internal: the names of the constants BOOT installed, in declaration order,
+# for @EXPORT_OK.
+# =============================================================================
+
+void
+xs__constant_names()
+    PREINIT:
+        size_t i;
+    PPCODE:
+        EXTEND(SP, (SSize_t) (sizeof(all_constants) / sizeof(all_constants[0])));
+        for (i = 0; i < sizeof(all_constants) / sizeof(all_constants[0]); i++) {
+            mPUSHs(newSVpv(all_constants[i].name, 0));
+        }
+
+# =============================================================================
+# Internal: every struct schema, for the tests (see clay_perl_struct_schemas
+# in src/clay_perl.h for the shape).
+# =============================================================================
+
+SV *
+xs__struct_schemas()
+    CODE:
+        RETVAL = clay_perl_struct_schemas(aTHX);
+    OUTPUT:
+        RETVAL
+
+# =============================================================================
 # Internal: how often set_scroll_position wrote a position, for
 # Clay::UI::Revision.
 # =============================================================================
@@ -1488,21 +1291,15 @@ xs__transition_handler_calls()
         RETVAL
 
 # =============================================================================
-# Internal: how many string-arena chunks a context holds, for the tests of
-# the arena's retention rule.
+# Internal: a context's frame state and the sizes of what the frame module
+# retains, for the tests (see clay_perl_frame_stats in src/clay_perl.h).
 # =============================================================================
 
-UV
-xs__string_arena_chunk_count(ctx_sv)
+SV *
+xs__context_stats(ctx_sv)
         SV *ctx_sv
-    PREINIT:
-        clay_perl_context *ctx;
-        const clay_perl_arena_chunk *chunk;
     CODE:
-        ctx    = clay_perl_context_from_sv(aTHX_ ctx_sv);
-        RETVAL = 0;
-        for (chunk = ctx->strings.current; chunk; chunk = chunk->next) RETVAL++;
-        for (chunk = ctx->strings.retained; chunk; chunk = chunk->next) RETVAL++;
+        RETVAL = clay_perl_frame_stats(aTHX_ clay_perl_context_from_sv(aTHX_ ctx_sv));
     OUTPUT:
         RETVAL
 

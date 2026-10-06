@@ -18,6 +18,12 @@ sub check_error ($type, $value, $root = undef) {
 	return $error;
 }
 
+my $SCHEMAS = Clay::XS::_struct_schemas();
+
+sub field_names ($type) {
+	return map { $_->{name} } @{ $SCHEMAS->{$type} };
+}
+
 subtest 'valid values pass' => sub {
 	my @valid = (
 		[ Clay_Color             => [ 1, 2, 3, 4 ] ],
@@ -35,6 +41,10 @@ subtest 'valid values pass' => sub {
 			backgroundColor => [ 0, 0, 0, 255 ],
 			clip => { vertical => 1, childOffset => [ 0, -10 ] },
 			transition => { duration => 0.2, enter => { hasSetInitial => 1 } },
+		} ],
+		[ Clay_TransitionCallbackArguments => {
+			transitionState => CLAY_TRANSITION_STATE_EXITING, elapsedTime => 0.1, duration => 0.2,
+			current => { backgroundColor => [ 1, 2, 3, 4 ] },
 		} ],
 		[ Clay_Padding => undef ],
 	);
@@ -78,11 +88,12 @@ subtest 'shape errors carry the schema hint' => sub {
 };
 
 subtest 'unknown keys are rejected at every level' => sub {
+	my @known = field_names('Clay_LayoutConfig');
 	my $error = check_error('Clay_LayoutConfig', { childGapp => 1, zz => 2 });
-	like( "$error", qr/^Clay_LayoutConfig: expected only the keys sizing, padding, childGap, childAlignment, layoutDirection, lineGap, lineSizing, got the unknown keys 'childGapp', 'zz'/,
+	like( "$error", qr/^Clay_LayoutConfig: expected only the keys \Q${\join(', ', @known)}\E, got the unknown keys 'childGapp', 'zz'/,
 		'unknown keys listed, sorted' );
 	is( $error->unknown_keys, [ 'childGapp', 'zz' ], 'unknown_keys reader' );
-	is( $error->known_keys, [qw(sizing padding childGap childAlignment layoutDirection lineGap lineSizing)], 'known_keys reader' );
+	is( $error->known_keys, \@known, 'known_keys reader lists the schema fields in order' );
 
 	like( check_error('Clay_ElementDeclaration', { border => { width => { lft => 1 } } }),
 		qr/^Clay_ElementDeclaration\.border\.width: expected only the keys left, right, top, bottom, betweenChildren, got the unknown key 'lft'/,
@@ -134,6 +145,40 @@ subtest 'the error object' => sub {
 	is( [ $located->file, $located->line ], [ __FILE__, $line ], 'file and line of the caller' );
 	like( "$located", qr/ at \Q${\__FILE__}\E line $line\.\n\z/, 'stringifies with the location' );
 	is( check_error('Clay_Padding', { left => -5 })->path, [ 'Clay_Padding', 'left' ], 'default root is the type name' );
+};
+
+subtest 'Clay::XS::Structs documents every schema field' => sub {
+	my $file = $INC{'Clay/XS.pm'} =~ s/\.pm\z/\/Structs.pod/r;
+	open my $fh, '<', $file or die "cannot read $file: $!";
+	my $pod = do { local $/; <$fh> };
+
+	# Words of the =head and =item lines, e.g. "sizing.width" gives
+	# sizing and width.
+	my %headed;
+	for my $heading ($pod =~ /^=(?:head\d|item)\s+(.*)$/mg) {
+		$headed{$_} = 1 for split /[^\w]+/, $heading =~ s/C<([^>]*)>/$1/gr;
+	}
+
+	# The struct table of the QUICK INDEX: a struct name, then its keys,
+	# continued on lines indented to the key column.
+	my ($index) = $pod =~ /^=head1 QUICK INDEX\n(.*?)^=head1/ms;
+	my (%index_keys, $struct);
+	for my $line (split /\n/, $index) {
+		if ($line =~ /^    (Clay_[\w.]+)\s+(.*)/) {
+			$struct = $1;
+			$index_keys{$struct} = [ split ' ', $2 ];
+		} elsif (defined $struct && $line =~ /^ {20,}(\S.*)/) {
+			push @{ $index_keys{$struct} }, split ' ', $1;
+		} else {
+			undef $struct;
+		}
+	}
+
+	for my $type (sort keys %$SCHEMAS) {
+		my @fields = field_names($type);
+		is( [ grep { !$headed{$_} } @fields ], [], "$type: every field has a heading or item" );
+		is( $index_keys{$type}, \@fields, "$type: the QUICK INDEX lists its keys in schema order" );
+	}
 };
 
 subtest 'unknown type names' => sub {

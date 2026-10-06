@@ -10,6 +10,7 @@ use Object::Pad 0.800;
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Emitter;
 use Clay::UI::Role::Style::HasStates;
+use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
@@ -44,6 +45,16 @@ role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasPar
 	# does (a radio button whose group takes it) overrides this.
 	method accepts_focus () {
 		return 1;
+	}
+
+	# For a class whose accepts_focus answer depends on its own state: call
+	# after that state changed. A widget that can no longer take focus loses
+	# it at once.
+	method focus_eligibility_changed () {
+		my $ui = $self->ui;
+		$ui->interaction->release_ineligible($self) if defined $ui;
+		bump_revision();
+		return $self;
 	}
 
 	sub _focus_flag ($value) {
@@ -187,6 +198,38 @@ Focusable:
 		:does(Clay::UI::Role::Interaction::Focusable) {}
 	class My::GroupedRadioButton :strict(params) :isa(My::RadioButton) {
 		method accepts_focus :override () { return 0 }
+	}
+
+When the answer depends on the widget's own state (a rating that
+takes no focus while it is read-only), the setter of that state calls
+L</focus_eligibility_changed>.
+
+=head2 focus_eligibility_changed
+
+	$self->focus_eligibility_changed;
+
+For a class whose L</accepts_focus> answer depends on its own state:
+call it from the setter of that state, after the state changed. A
+focused widget that can no longer take the focus loses it at once and
+gets C<OnBlur> before this returns (see
+L<Clay::UI::Interaction/release_ineligible>); a widget outside a
+L<Clay::UI> is left alone. Bumps the revision
+(L<Clay::UI::Revision>), since such state usually changes how the
+widget looks. Returns the widget.
+
+	class My::Rating :strict(params)
+		:does(Clay::UI::Box)
+		:does(Clay::UI::Role::Interaction::Focusable) {}
+	class My::ReadOnlyRating :strict(params) :isa(My::Rating) {
+		field $read_only = 0;
+
+		method accepts_focus :override () { return !$read_only }
+
+		method read_only ($value) {
+			$read_only = $value ? 1 : 0;
+			$self->focus_eligibility_changed;
+			return $self;
+		}
 	}
 
 =head2 is_focused

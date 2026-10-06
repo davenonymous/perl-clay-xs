@@ -45,9 +45,9 @@
  *
  * Clay forgets an element's hover function whenever the element is
  * declared again (Clay__AddHashMapItem clears onHoverFunction), so hover
- * callbacks must be registered every frame. The registry sweep in
- * clay_perl_hover_registry_sweep only reclaims entries no frame can reach
- * any more.
+ * callbacks must be registered every frame. The frame module
+ * (src/clay_perl_context.c) sweeps the entries no frame can reach any
+ * more, by their stamp.
  */
 
 #include "clay_perl.h"
@@ -315,12 +315,9 @@ void clay_perl_callbacks_free(pTHX_ clay_perl_context *ctx)
  * The hover registry.
  * ------------------------------------------------------------------------ */
 
-/* The sweep at the start of a frame keeps the hover entries registered by
- * the last this many completed frames: Clay_SetPointerState dispatches
- * the hover callbacks registered while declaring the last completed
- * frame. Same convention as INTERNED_ID_KEEP_COMPLETED_FRAMES. */
-#define HOVER_KEEP_COMPLETED_FRAMES 1
-
+/* Each entry is [coderef, userdata, stamp]; the stamp is completed_frames
+ * when the callback was registered (see the frame module's stamped
+ * registries). */
 static void make_id_key(uint32_t id, char buf[16])
 {
     snprintf(buf, 16, "%u", (unsigned) id);
@@ -339,30 +336,10 @@ void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
     (void) hv_store(ctx->hover_callbacks, key, (I32) strlen(key), newRV_noinc((SV *) entry), 0);
 }
 
-void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx)
+uint32_t clay_perl_hover_entry_stamp(pTHX_ SV *entry)
 {
-    if (ctx->completed_frames < HOVER_KEEP_COMPLETED_FRAMES) return;
-    uint32_t cutoff = ctx->completed_frames - HOVER_KEEP_COMPLETED_FRAMES;
-
-    /* Collect first, delete afterwards: deleting invalidates the iterator. */
-    HV *hv = ctx->hover_callbacks;
-    AV *stale = newAV();
-    sv_2mortal((SV *) stale);
-    HE *he;
-    hv_iterinit(hv);
-    while ((he = hv_iternext(hv)) != NULL) {
-        AV *entry = (AV *) SvRV(HeVAL(he));
-        SV **gen_slot = av_fetch(entry, 2, 0);
-        if ((uint32_t) SvUV(*gen_slot) < cutoff) {
-            av_push(stale, newSVhek(HeKEY_hek(he)));
-        }
-    }
-
-    SSize_t count = av_top_index(stale) + 1;
-    for (SSize_t i = 0; i < count; i++) {
-        SV **key = av_fetch(stale, i, 0);
-        (void) hv_delete_ent(hv, *key, G_DISCARD, 0);
-    }
+    SV **stamp = av_fetch((AV *) SvRV(entry), 2, 0);
+    return (uint32_t) SvUV(*stamp);
 }
 
 /* ---------------------------------------------------------------------------
@@ -541,16 +518,7 @@ void clay_perl_on_hover_trampoline(Clay_ElementId element_id,
 
 static int transition_handler_args(pTHX_ const void *data, SV **args)
 {
-    const Clay_TransitionCallbackArguments *call = (const Clay_TransitionCallbackArguments *) data;
-    HV *args_hv = newHV();
-    (void) hv_stores(args_hv, "transitionState", newSViv((IV) call->transitionState));
-    (void) hv_stores(args_hv, "initial",         clay_transition_data_to_sv(aTHX_ call->initial));
-    (void) hv_stores(args_hv, "target",          clay_transition_data_to_sv(aTHX_ call->target));
-    (void) hv_stores(args_hv, "current",         clay_transition_data_to_sv(aTHX_ *call->current));
-    (void) hv_stores(args_hv, "elapsedTime",     newSVnv(call->elapsedTime));
-    (void) hv_stores(args_hv, "duration",        newSVnv(call->duration));
-    (void) hv_stores(args_hv, "properties",      newSVuv((UV) call->properties));
-    args[0] = sv_2mortal(newRV_noinc((SV *) args_hv));
+    args[0] = sv_2mortal(clay_transition_arguments_to_sv(aTHX_ (const Clay_TransitionCallbackArguments *) data));
     return 1;
 }
 

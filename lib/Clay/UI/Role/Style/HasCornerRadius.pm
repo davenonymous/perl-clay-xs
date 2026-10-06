@@ -104,7 +104,8 @@ declaration. Reading returns the number.
 =item a hash
 
 Any of the keys C<top_left>, C<top_right>, C<bottom_left> and
-C<bottom_right> (or Clay's camelCase); a key left out is 0.
+C<bottom_right> (or Clay's camelCase; reading returns snake_case); a
+key left out is 0.
 
 =back
 

@@ -71,6 +71,9 @@ is( $handler_args[0]{target}{backgroundColor}, { r => 0, g => 255, b => 0, a => 
     'it received the new colour as target' );
 is( $handler_args[0]{properties}, CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR,
     'and the configured properties' );
+is( [ sort keys %{ $handler_args[0] } ],
+    [ sort map { $_->{name} } @{ Clay::XS::_struct_schemas()->{Clay_TransitionCallbackArguments} } ],
+    'its argument hash has exactly the keys of the Clay_TransitionCallbackArguments schema' );
 
 # Test removal: install null handlers; subsequent frames must still work.
 Clay_SetTransitionHandlers(undef, undef, undef, undef);
@@ -122,10 +125,15 @@ is( $colour->{current}{backgroundColor}, { r => 31.875, g => 0, b => 223.125, a 
 is( $colour->{current}{borderWidth}{left}, 14, 'borderWidth eases (left)' );
 is( $colour->{current}{borderWidth}{top},   1, 'borderWidth eases (top)' );
 
-like( dies { Clay_EaseOut({ initial => [1, 2, 3] }) }, qr/Clay_EaseOut: initial: expected a hash reference/,
+like( dies { Clay_EaseOut({ initial => [1, 2, 3] }) }, qr/^Clay_EaseOut: args\.initial: expected a hash reference/,
     'a non-hash initial croaks' );
-like( dies { Clay_EaseOut({ current => 'oops' }) }, qr/Clay_EaseOut: current: expected a hash reference/,
+like( dies { Clay_EaseOut({ current => 'oops' }) }, qr/^Clay_EaseOut: args\.current: expected a hash reference/,
     'a non-hash current croaks' );
+like( dies { Clay_EaseOut(undef) }, qr/^Clay_EaseOut: args: expected a hash reference, got undef/,
+    'undef arguments croak' );
+my $bad_state = dies { Clay_EaseOut({ transitionState => CLAY_TRANSITION_STATE_EXITING + 1 }) };
+isa_ok( $bad_state, 'Clay::XS::StructError' );
+is( $bad_state->path, [ 'Clay_EaseOut: args', 'transitionState' ], 'a bad field croaks a struct error naming it' );
 
 # -----------------------------------------------------------------------------
 # An element playing its exit transition keeps rendering its own text while
@@ -197,7 +205,7 @@ subtest 'memory stays bounded while exit transitions keep running' => sub {
         Clay__CloseElement();
         Clay_EndLayout(0.016);
     }
-    my $chunks = Clay::XS::_string_arena_chunk_count($ctx);
+    my $chunks = Clay::XS::_context_stats($ctx)->{arena_chunks};
     ok( $chunks <= 16, "a new exiting toast every frame keeps $chunks text chunks, not one per frame" );
     Clay_SetTransitionHandlers();
 };

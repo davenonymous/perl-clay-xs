@@ -474,6 +474,16 @@ subtest 'a layout with padding keeps rows stacked and row_gap' => sub {
 	is( [ $at{b1}{x}, $at{b1}{y} ], [ 8, 8 + $LINE_H + 4 ], 'rows are stacked with row_gap between them' );
 };
 
+subtest 'a camelCase layout key overrides the default it spells' => sub {
+	@errors = ();
+	my $grid = Clay::UI::Test::Grid->new(id => 'camel', layout => { childGap => 3 });
+	$grid->append_row([ text_cell('a1') ]);
+	$grid->append_row([ text_cell('b1') ]);
+	my $at = text_boxes(make_ui($grid));
+	is( scalar(@errors), 0, 'no Clay errors' );
+	is( $at->{b1}{y} - $at->{a1}{y}, $LINE_H + 3, 'the gap between the rows is 3' );
+};
+
 # -----------------------------------------------------------------------------
 # Grid ids: height ids are recycled, the grid id is released on free, and
 # consumers may define DESTROY.
@@ -616,6 +626,24 @@ subtest 'reorder_rows moves rows without detaching them' => sub {
 		like( dies { $grid->reorder_rows($bad) }, qr/new child order must be an array reference of the indices 0\.\.2/, 'a bad order dies' );
 	}
 	is( [ map { refaddr $_ } @{ $grid->children } ], [ map { refaddr $_ } @rows[ 2, 0, 1 ] ], 'and changes nothing' );
+};
+
+subtest 'a moved spanning row keeps its span and height id' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'order-span');
+	$grid->append_spanning_row(text_cell('heading'));
+	$grid->append_row([ text_cell('a1'), text_cell('a2') ]);
+	my $heading_height = $grid->cell_wrappers->[0][0]->height_group;
+	my $row_height     = $grid->cell_wrappers->[1][0]->height_group;
+
+	$grid->reorder_rows([ 1, 0 ]);
+	ok( $grid->is_spanning_row(1), 'the spanning row is found at its new index' );
+	ok( !$grid->is_spanning_row(0), 'the normal row at its new one' );
+	like( dies { $grid->set_cell(1, 0, text_cell('x')) }, qr/row 1 spans all columns/, 'set_cell refuses the moved spanning row' );
+	$grid->set_cell(0, 2, text_cell('a3'));
+	is( $grid->cell_wrappers->[0][2]->height_group, $row_height, 'set_cell on the moved normal row uses its height id' );
+	$grid->replace_row(1, [ text_cell('b1') ]);
+	is( $grid->cell_wrappers->[1][0]->height_group, $heading_height, 'replacing the moved spanning row keeps its height id' );
+	ok( !$grid->is_spanning_row(1), 'and it no longer spans' );
 };
 
 subtest 'clear_rows removes every row' => sub {

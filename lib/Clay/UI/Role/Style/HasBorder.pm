@@ -154,7 +154,8 @@ The width of that outer side.
 
 =item between_children
 
-C<between_children> (camelCase C<betweenChildren>) draws a line of that
+C<between_children> (camelCase C<betweenChildren>, read back as
+C<between_children>) draws a line of that
 width between neighbouring children, in the middle of the
 C<child_gap>. These lines are emitted as rectangles and only when the
 colour's alpha is greater than 0.

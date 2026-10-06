@@ -10,7 +10,8 @@ its C names, and `Clay::UI` builds a widget layer on top of it.
 **Struct schema**:
 The per-struct table in `Clay::XS` that lists a Clay struct's fields, their
 C kinds, ranges and nested schemas. It is the single source of truth for which
-hash keys a Clay struct accepts and which values are valid.
+hash keys a Clay struct accepts, which values are valid and which keys a
+returned struct has.
 _Avoid_: key table, field list, marshal keys
 
 **Parse mode**:
@@ -23,6 +24,12 @@ Validating a Perl hash against a struct schema without building anything for
 Clay. It is strict about unknown keys and array lengths. It is public
 (`check_struct`), and Clay::UI uses it to validate attributes where they are set.
 _Avoid_: dry run, validate-only marshal
+
+**Write mode**:
+Turning a Clay struct into a Perl hash through its struct schema, with the
+keys parse mode reads. Every struct Clay::XS returns or passes to a callback
+that has a schema is written this way.
+_Avoid_: serialize, to_sv mirror
 
 **Struct error**:
 The exception object (`Clay::XS::StructError`) that both parse mode and check
@@ -125,7 +132,21 @@ What `can_focus` reads: the widget's users want it focusable (the
 tracker's `can_take_focus` adds that the widget belongs to the UI.
 _Avoid_: focusable flag (the flag is only the users' wish)
 
+**Focus scope**:
+A subtree of the UI that a focus query is limited to, given as
+`within => $widget` to the tracker's `focusables`, `default_next_focus` and
+`default_previous_focus`: the widget and everything below it in layout
+pre-order, internal children included. Stepping wraps around inside it.
+_Avoid_: focus trap (what a modal dialog builds from it), focus group
+
 ### Frames
+
+**Frame module**:
+The part of `Clay::XS` that owns a context's frame state (complete,
+declaring, abandoned), its open/close bookkeeping and the count of completed
+frames, and decides from them how long text copies, interned element ids
+and hover callbacks are kept. The frame and element functions only call it.
+_Avoid_: frame manager, lifecycle code
 
 **Frame registry**:
 What one frame laid out (`Clay::UI::_FrameRegistry`): widgets by render-command
@@ -156,6 +177,13 @@ A widget composing HasScroll. Only scroll containers get Clay's scroll offset
 injected while they are walked, and only they receive OnScroll. A widget that
 writes a `clip` slice without HasScroll is clipped but does not scroll.
 _Avoid_: clip element, scrollable
+
+**Tree change**:
+A change of a widget's place in a tree: the top of its subtree got a
+parent, lost it, or became the root of a Clay::UI. Clay::UI announces it
+to every widget of the subtree through the `tree_changed` hook, after the
+change is complete. Reordering children is not a tree change.
+_Avoid_: reparenting, attach event, membership change
 
 **Internal child**:
 A widget a widget class attaches below itself with `add_internal_children`

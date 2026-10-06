@@ -6,7 +6,7 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
-use Scalar::Util qw(blessed weaken);
+use Scalar::Util qw(blessed refaddr weaken);
 use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
@@ -40,6 +40,16 @@ role Clay::UI::Role::Layout::HasParent {
 		return $node;
 	}
 
+	# True when $widget is this widget or below it.
+	method contains ($widget) {
+		croak_ui "Clay::UI: contains takes a widget, got " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+			unless blessed $widget && $widget->DOES('Clay::UI::Role::Layout::HasParent');
+		for (my $node = $widget; defined $node; $node = $node->parent) {
+			return 1 if refaddr($node) == refaddr($self);
+		}
+		return 0;
+	}
+
 	method _set_ui_controller ($ui) {
 		croak_ui "Clay::UI: ui controller must be a Clay::UI instance"
 			unless blessed($ui) && $ui->isa('Clay::UI');
@@ -55,6 +65,25 @@ role Clay::UI::Role::Layout::HasParent {
 	method ui () {
 		my $top = $self->root;
 		return $top->_local_ui_controller;
+	}
+
+	# Called on every widget of a subtree whose place in a tree changed,
+	# once the change is complete. Widget classes override it.
+	method tree_changed () {
+		return;
+	}
+
+	# Calls tree_changed on this widget and every widget below it, in
+	# layout pre-order. Every hook runs even if one dies; returns the
+	# first error, or undef.
+	method _announce_tree_change () {
+		my @subtree = ($self, $self->DOES('Clay::UI::Role::Core::Element') ? $self->descendants : ());
+		my $first_error;
+		for my $widget (@subtree) {
+			local $@;
+			eval { $widget->tree_changed; 1 } or $first_error //= $@ || 'unknown tree_changed error';
+		}
+		return $first_error;
 	}
 }
 
@@ -86,6 +115,7 @@ Clay::UI::Role::Layout::HasParent - parent, root and UI of a Clay::UI widget
 	$child->parent;    # $panel
 	$child->root;      # $root
 	$child->ui;        # $ui
+	$panel->contains($child);    # 1
 
 	$root->remove_child($panel);
 	$child->root;      # $panel: the removed subtree stands alone
@@ -94,7 +124,8 @@ Clay::UI::Role::Layout::HasParent - parent, root and UI of a Clay::UI widget
 =head1 DESCRIPTION
 
 C<Clay::UI::Role::Layout::HasParent> gives every widget its way up the
-tree: C<parent>, C<root> and C<ui>. L<Clay::UI::Role::Core::Element>
+tree: C<parent>, C<root>, C<ui> and C<contains>, and the hook
+C<tree_changed> that tells a widget its place in a tree changed. L<Clay::UI::Role::Core::Element>
 and L<Clay::UI::Role::Core::TextNode> compose it, so every element
 widget and every text widget has these methods.
 
@@ -131,6 +162,77 @@ created with C<< Clay::UI->new(root => $root) >> for the widget's
 C<root>. Returns undef when the widget is not part of a UI: not yet
 attached to one, removed from it, or the UI has been freed (the
 reference to the UI is weak).
+
+=head2 contains
+
+	if ($panel->contains($widget)) { ... }
+
+Returns 1 when C<$widget> is this widget or below it (it walks up from
+C<$widget> through C<parent>, so internal children count), 0
+otherwise. Works for element and text widgets on both sides. Dies with
+C<Clay::UI: contains takes a widget, got ...> for anything else. For
+the list of widgets below an element, see
+L<Clay::UI::Role::Core::Element/descendants>.
+
+=head2 tree_changed
+
+	class My::Box :strict(params) :does(Clay::UI::Box) {}
+	class My::Panel :strict(params) :isa(My::Box) {
+		method tree_changed :override () {
+			$self->SUPER::tree_changed;
+			say 'now in ', (defined $self->ui ? 'a UI' : 'no UI');
+			return;
+		}
+	}
+
+A hook for widget classes that must react when their place in a tree
+changes, for example to rebuild what depends on the UI they are in.
+It does nothing here; you never call it yourself. Clay::UI calls it on
+B<every> widget of a subtree (the subtree's own widget first, then the
+others in layout pre-order, internal children included, see
+L<Clay::UI::Role::Core::Element/descendants>) when the subtree's top
+widget:
+
+=over 4
+
+=item *
+
+gets a parent: C<add_child>, C<insert_children>, a row or cell a
+L<Clay::UI::Grid> adds, C<add_internal_children>;
+
+=item *
+
+loses its parent: every removal listed under L</ATTACHING AND REMOVING>;
+
+=item *
+
+becomes the root of a L<Clay::UI> (C<< Clay::UI->new(root => ...) >>).
+
+=back
+
+It runs once the change is complete: the parent slots are set or
+cleared, and for a removal the leaving subtree's hover and focus are
+released (its C<OnHoverStopped> and C<OnBlur> listeners have run), so
+C<parent> and C<ui> answer the new place: C<ui> is undef in a removed
+subtree. A call that moves several subtrees (replacing a row, say)
+completes every move before the first hook runs. Reordering children
+(L<Clay::UI::Grid/reorder_rows>) changes no place and calls nothing.
+
+Every hook runs even if one dies; the method that changed the tree
+then dies with the first error, the tree already changed. When a
+release listener died as well, its error (the earlier one) is the one
+rethrown and hook errors are dropped, as later listener errors are.
+For a subclass of Clay::UI, the hooks of the root's subtree run while
+C<< Clay::UI->new >> is still building the UI, before the subclass's
+own ADJUST blocks: a hook must not rely on what those set up.
+
+Override it in a subclass with C<:override> and call
+C<< $self->SUPER::tree_changed >>: an Object::Pad class cannot override
+a method of a role it composes itself, so the override goes into a
+subclass of the class that composes the role (as in the example, and
+as for L<Clay::UI::Role::Interaction::Focusable/accepts_focus>).
+C<_set_parent> and C<_detach_parent>, which set and clear the parent
+slot, are private to Clay::UI; do not override them.
 
 =head1 ATTACHING AND REMOVING
 

@@ -90,7 +90,8 @@ L<Clay::UI::Grid::Row> compose it.
 	$widget->layout({});                    # back to Clay's defaults
 
 A constructor parameter and a read/write accessor. The value is a
-hashref with any of these keys (snake_case, or Clay's camelCase):
+hashref with any of these keys (snake_case, or Clay's camelCase; the
+reader returns snake_case):
 
 =over 4
 

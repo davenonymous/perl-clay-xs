@@ -91,7 +91,7 @@ L<Clay::UI::Box> composes this role.
 
 A constructor parameter and a read/write accessor. The value is undef
 (not floating) or a hashref with any of these keys (snake_case, or
-Clay's camelCase):
+Clay's camelCase; the reader returns snake_case):
 
 =over 4
 

@@ -15,14 +15,14 @@ role Clay::UI::Role::Interaction::HasFocusOrder :does(Clay::UI::Role::Layout::Ha
 	method get_next_focus;
 	method get_previous_focus;
 
-	method default_next_focus () {
+	method default_next_focus (%args) {
 		my $ui = $self->ui;
-		return defined $ui ? $ui->interaction->default_next_focus : undef;
+		return defined $ui ? $ui->interaction->default_next_focus(%args) : undef;
 	}
 
-	method default_previous_focus () {
+	method default_previous_focus (%args) {
 		my $ui = $self->ui;
-		return defined $ui ? $ui->interaction->default_previous_focus : undef;
+		return defined $ui ? $ui->interaction->default_previous_focus(%args) : undef;
 	}
 }
 
@@ -155,6 +155,7 @@ C<undef>; the mirror of L</get_next_focus>.
 =head2 default_next_focus
 
 	return $self->default_next_focus;
+	return $self->default_next_focus(within => $self);
 
 Returns the widget the default order would focus next from the
 currently focused widget, ignoring every HasFocusOrder (see
@@ -163,9 +164,19 @@ widget can take the focus or this widget does not belong to a
 Clay::UI. Use it for partial overrides: handle the special case, and
 return C<< $self->default_next_focus >> for everything else.
 
+The arguments go to the tracker as they are. With
+C<< within => $widget >> (a focus scope, see
+L<Clay::UI::Interaction/Focus scopes>) the order is limited to that
+subtree and wraps around inside it, which is how a modal dialog keeps
+Tab inside itself:
+
+	method get_next_focus ()     { return $self->default_next_focus(within => $self) }
+	method get_previous_focus () { return $self->default_previous_focus(within => $self) }
+
 =head2 default_previous_focus
 
 	return $self->default_previous_focus;
+	return $self->default_previous_focus(within => $self);
 
 The mirror of L</default_next_focus>.
 

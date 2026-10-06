@@ -181,6 +181,10 @@ Whether a widget is a child.
 
 Helpers a widget class lays out next to its user's children.
 
+=item L<descendants|Clay::UI::Role::Core::Element/descendants>
+
+Every widget below this one, in layout pre-order.
+
 =back
 
 =head2 Tree
@@ -198,6 +202,15 @@ The topmost widget above this one.
 =item L<ui|Clay::UI::Role::Layout::HasParent/ui>
 
 The L<Clay::UI> this widget is part of.
+
+=item L<contains|Clay::UI::Role::Layout::HasParent/contains>
+
+Whether a widget is this one or below it.
+
+=item L<tree_changed|Clay::UI::Role::Layout::HasParent/tree_changed>
+
+The hook a subclass overrides to react when the widget joins or
+leaves a tree.
 
 =back
 

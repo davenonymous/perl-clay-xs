@@ -654,6 +654,23 @@ pointer; nothing below it receives hover or press events:
     $backdrop->add_child($dialog);
     $root->add_child($backdrop);    # remove it again to close the dialog
 
+To keep Tab inside the dialog, make the dialog a widget that steps the
+focus within its own subtree (a focus scope, see
+L<Clay::UI::Interaction/Focus scopes>), build C<$dialog> from it, and
+move the focus into the dialog when it opens:
+
+    use Clay::UI::Role::Interaction::HasFocusOrder;
+    class My::Dialog :strict(params)
+    	:does(Clay::UI::Box)
+    	:does(Clay::UI::Role::Interaction::HasFocusOrder)
+    {
+    	method get_next_focus ()     { return $self->default_next_focus(within => $self) }
+    	method get_previous_focus () { return $self->default_previous_focus(within => $self) }
+    }
+
+    my $first = $ui->interaction->default_next_focus(within => $dialog);
+    $ui->interaction->set_focused_widget($first) if defined $first;
+
 =head2 Let an event reach the parent widget
 
 OnPress, OnRelease, OnScroll, OnFocus and OnBlur travel to the parent

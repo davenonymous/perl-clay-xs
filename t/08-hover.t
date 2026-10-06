@@ -114,4 +114,25 @@ subtest 'hover callbacks that are not re-registered are released' => sub {
     is( $kept_calls, 1, 'the callback registered every frame still fires' );
 };
 
+subtest 'hover entries are kept for one frame after their last registration' => sub {
+    my $frame = sub ($register) {
+        Clay_BeginLayout();
+        my $entries = Clay::XS::_context_stats($ctx)->{hover_entries};
+        Clay__OpenElementWithId( Clay_GetElementId("window-kept") );
+        Clay_OnHover(sub { }, undef);
+        Clay__CloseElement();
+        if ($register) {
+            Clay__OpenElementWithId( Clay_GetElementId("window-dropped") );
+            Clay_OnHover(sub { }, undef);
+            Clay__CloseElement();
+        }
+        Clay_EndLayout(0);
+        return $entries;
+    };
+    $frame->(1) for 1 .. 3;
+    my $kept = Clay::XS::_context_stats($ctx)->{hover_entries};
+    is( $frame->(0), $kept,     'an entry is kept in the first frame without it' );
+    is( $frame->(0), $kept - 1, 'and dropped when the second begins' );
+};
+
 done_testing;

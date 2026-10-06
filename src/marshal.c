@@ -7,20 +7,24 @@
  *
  * The design choices baked into this file:
  *
- *   - Every input struct is described once, by a struct schema: a table
- *     of its fields (C name, offset, kind, range or enum maximum, nested
- *     schema). One engine walks a Perl value against a schema, so the
- *     field list, the ranges and the error paths of a struct live in one
- *     place. Fields use exact C names (backgroundColor, layoutDirection,
- *     etc.) so users can read clay.h verbatim and translate to Perl hash
- *     keys.
+ *   - Every struct a function takes is described once, by a struct
+ *     schema: a table of its fields (C name, offset, kind, range or enum
+ *     maximum, nested schema). One engine walks a Perl value against a
+ *     schema, so the field list, the ranges and the error paths of a
+ *     struct live in one place. Fields use exact C names
+ *     (backgroundColor, layoutDirection, etc.) so users can read clay.h
+ *     verbatim and translate to Perl hash keys.
  *
- *   - The engine runs in two modes. Parse mode builds the struct for a
+ *   - The engine runs in three modes. Parse mode builds the struct for a
  *     Clay call; it runs for every element in every frame and ignores
  *     unknown keys. Check mode (check_struct) walks the same tables into
  *     a scratch struct and is strict: unknown keys, wrong array lengths
  *     and references used as booleans croak, and shape errors carry the
- *     schema's hint.
+ *     schema's hint. Write mode builds the hash of a struct Clay::XS
+ *     returns or passes to a callback, with the keys parse mode reads.
+ *     Structs that only come out of Clay (element data, scroll container
+ *     data, pointer data, render commands, element ids) are written by
+ *     hand below.
  *
  *   - Compact types (Color, Vector2, Dimensions) accept either an
  *     arrayref or a hashref; CornerRadius and AspectRatio also accept a
@@ -45,6 +49,7 @@
  */
 
 #include "clay_perl.h"
+#include "clay_perl_enums.h"
 
 #include <float.h>
 #include <math.h>
@@ -429,11 +434,14 @@ static UV clay_string_slice_offset(pTHX_ const Clay_StringSlice *slice)
  * Struct schemas.
  *
  * A schema lists a struct's fields; the engine below walks a Perl value
- * against it. Each field names its C member, where it lives in the struct
- * and how its value is read. Integers carry their range (enums run
- * 0..maximum) and are stored at the member's size. A custom field has its
- * own reader; a schema may also replace the whole hash walk (a union) or
- * finish a parsed struct (fields that are not in the hash).
+ * against it (parse and check mode) or builds one from a struct (write
+ * mode). Each field names its C member, where it lives in the struct and
+ * how its value is read and written. Integers carry their range and are
+ * stored at the member's size; enums run 0..CLAY_PERL_ENUM_MAX and flags
+ * 0..CLAY_PERL_FLAGS_ALL of their group (src/clay_perl_enums.h). A custom
+ * field has its own reader and writer; a schema may also replace the
+ * whole hash walk in both directions (a union) or finish a parsed struct
+ * (fields that are not in the hash).
  * ======================================================================== */
 
 typedef enum {
@@ -452,14 +460,18 @@ typedef struct struct_schema struct_schema;
 typedef void (*field_reader)(pTHX_ SV *sv, void *slot, const marshal_label *what,
                              const char *field, bool strict);
 
+/* Returns the member at slot as a new Perl value. */
+typedef SV *(*field_writer)(pTHX_ const void *slot);
+
 typedef struct schema_field {
     const char *name;
     size_t offset;
     size_t size;
     field_kind kind;
-    NV min, max;                  /* FIELD_INTEGER */
-    const struct_schema *nested;  /* FIELD_STRUCT */
+    NV min, max;                  /* FIELD_INTEGER, FIELD_FLOAT_IN */
+    const struct_schema *nested;  /* FIELD_STRUCT; a FIELD_CUSTOM holding a struct */
     field_reader read;            /* FIELD_CUSTOM */
+    field_writer write;           /* FIELD_CUSTOM */
 } schema_field;
 
 enum {
@@ -475,6 +487,7 @@ struct struct_schema {
     size_t field_count;
     unsigned shapes;
     void (*read_hash)(pTHX_ HV *hv, void *out, const marshal_label *what, bool strict);
+    void (*write_hash)(pTHX_ HV *hv, const void *in);
     void (*finish)(void *out);
     const char *hint;
 };
@@ -483,34 +496,36 @@ struct struct_schema {
 #define MEMBER_SIZE(type, member) sizeof(((type *) 0)->member)
 
 #define F_FLOAT(type, member) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT, 0, 0, NULL, NULL }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT, 0, 0, NULL, NULL, NULL }
 #define F_FLOAT_IN(type, member, lo, hi) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT_IN, (lo), (hi), NULL, NULL }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_FLOAT_IN, (lo), (hi), NULL, NULL, NULL }
 #define F_NON_NEGATIVE(type, member) F_FLOAT_IN(type, member, 0, FLT_MAX)
 #define F_INT(type, member, lo, hi) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_INTEGER, (lo), (hi), NULL, NULL }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_INTEGER, (lo), (hi), NULL, NULL, NULL }
 #define F_U16(type, member)       F_INT(type, member, 0, UINT16_MAX)
 #define F_U32(type, member)       F_INT(type, member, 0, (NV) UINT32_MAX)
 #define F_ENUM(type, member, max) F_INT(type, member, 0, (max))
+/* Any OR of a flags group's members: their bits fill 0..all. */
+#define F_FLAGS(type, member, all) F_INT(type, member, 0, (all))
 #define F_BOOL(type, member) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_BOOL, 0, 0, NULL, NULL }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_BOOL, 0, 0, NULL, NULL, NULL }
 #define F_POINTER(type, member) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_POINTER, 0, 0, NULL, NULL }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_POINTER, 0, 0, NULL, NULL, NULL }
 #define F_STRUCT(type, member, schema) \
-    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_STRUCT, 0, 0, &(schema), NULL }
-#define F_CUSTOM(name, type, member, reader) \
-    { (name), offsetof(type, member), MEMBER_SIZE(type, member), FIELD_CUSTOM, 0, 0, NULL, (reader) }
+    { #member, offsetof(type, member), MEMBER_SIZE(type, member), FIELD_STRUCT, 0, 0, &(schema), NULL, NULL }
+#define F_CUSTOM(name, type, member, reader, writer) \
+    { (name), offsetof(type, member), MEMBER_SIZE(type, member), FIELD_CUSTOM, 0, 0, NULL, (reader), (writer) }
 
 /* Members of an anonymous struct nested in `type` (transition enter and
  * exit), with offsets relative to that inner struct. */
 #define INNER_OFFSET(type, inner, member) (offsetof(type, inner.member) - offsetof(type, inner))
 #define F_INNER_ENUM(type, inner, member, max) \
-    { #member, INNER_OFFSET(type, inner, member), MEMBER_SIZE(type, inner.member), FIELD_INTEGER, 0, (max), NULL, NULL }
-#define F_INNER_CUSTOM(name, type, inner, member, reader) \
-    { (name), INNER_OFFSET(type, inner, member), MEMBER_SIZE(type, inner.member), FIELD_CUSTOM, 0, 0, NULL, (reader) }
+    { #member, INNER_OFFSET(type, inner, member), MEMBER_SIZE(type, inner.member), FIELD_INTEGER, 0, (max), NULL, NULL, NULL }
+#define F_INNER_CUSTOM(name, type, inner, member, reader, writer) \
+    { (name), INNER_OFFSET(type, inner, member), MEMBER_SIZE(type, inner.member), FIELD_CUSTOM, 0, 0, NULL, (reader), (writer) }
 
-#define SCHEMA(c_name, type, fields, shapes, read_hash, finish, hint) \
-    { (c_name), sizeof(type), (fields), FIELD_COUNT(fields), (shapes), (read_hash), (finish), (hint) }
+#define SCHEMA(c_name, type, fields, shapes, read_hash, write_hash, finish, hint) \
+    { (c_name), sizeof(type), (fields), FIELD_COUNT(fields), (shapes), (read_hash), (write_hash), (finish), (hint) }
 
 /* ===========================================================================
  * The schema engine.
@@ -701,12 +716,68 @@ static void read_struct(pTHX_ const struct_schema *schema, SV *sv, void *out,
     if (SvOK(sv)) read_defined_struct(aTHX_ schema, sv, out, what, strict);
 }
 
+/* Write mode: the struct at *in as a new hash reference with one key per
+ * field. Floats become NVs, integers IVs (signed fields) or UVs, booleans
+ * 0 or 1, opaque pointers their address as a UV and nested structs hash
+ * references. */
+static SV *schema_write(pTHX_ const struct_schema *schema, const void *in);
+
+static SV *integer_sv(pTHX_ const schema_field *field, const void *slot)
+{
+    switch (field->size) {
+    case sizeof(uint8_t):
+        return newSVuv(*(const uint8_t *) slot);
+    case sizeof(uint16_t):
+        if (field->min < 0) return newSViv(*(const int16_t *) slot);
+        return newSVuv(*(const uint16_t *) slot);
+    case sizeof(uint32_t):
+        return newSVuv(*(const uint32_t *) slot);
+    }
+    croak("marshal.c: field '%s' has unsupported integer size %d", field->name, (int) field->size);
+}
+
+static SV *write_field(pTHX_ const schema_field *field, const char *base)
+{
+    const void *slot = base + field->offset;
+    switch (field->kind) {
+    case FIELD_FLOAT:
+    case FIELD_FLOAT_IN:
+        return newSVnv(*(const float *) slot);
+    case FIELD_INTEGER:
+        return integer_sv(aTHX_ field, slot);
+    case FIELD_BOOL:
+        return newSVuv(*(const bool *) slot ? 1 : 0);
+    case FIELD_POINTER:
+        return newSVuv(PTR2UV(*(void *const *) slot));
+    case FIELD_STRUCT:
+        return schema_write(aTHX_ field->nested, slot);
+    case FIELD_CUSTOM:
+        return field->write(aTHX_ slot);
+    }
+    croak("marshal.c: field '%s' has unknown kind %d", field->name, (int) field->kind);
+}
+
+static SV *schema_write(pTHX_ const struct_schema *schema, const void *in)
+{
+    HV *hv = newHV();
+    if (schema->write_hash) {
+        schema->write_hash(aTHX_ hv, in);
+        return newRV_noinc((SV *) hv);
+    }
+    for (size_t i = 0; i < schema->field_count; i++) {
+        const schema_field *field = &schema->fields[i];
+        hv_store_sv(aTHX_ hv, field->name, write_field(aTHX_ field, (const char *) in));
+    }
+    return newRV_noinc((SV *) hv);
+}
+
 /* ===========================================================================
  * Custom fields and hash readers.
  * ======================================================================== */
 
 /* floating.parentId: a numeric element id or an element-id hashref as
- * returned by Clay_GetElementId (its {id} is used). */
+ * returned by Clay_GetElementId (its {id} is used); written as the
+ * number. */
 static void read_parent_id(pTHX_ SV *sv, void *slot, const marshal_label *what,
                            const char *field, bool strict)
 {
@@ -719,23 +790,33 @@ static void read_parent_id(pTHX_ SV *sv, void *slot, const marshal_label *what,
     *(uint32_t *) slot = (uint32_t) field_integer(aTHX_ sv, what, field, 0, (NV) UINT32_MAX);
 }
 
+static SV *write_parent_id(pTHX_ const void *slot)
+{
+    return newSVuv(*(const uint32_t *) slot);
+}
+
 /* The `hasSetInitial` / `hasSetFinal` booleans install the trampolines
  * for those slots; a set exit trampoline is what gives an element an exit
- * transition. */
+ * transition. Written as 1 when the slot holds a function. */
+typedef Clay_TransitionData (*transition_state_function)(Clay_TransitionData, Clay_TransitionProperty);
+
 static void read_has_set_initial(pTHX_ SV *sv, void *slot, const marshal_label *what,
                                  const char *field, bool strict)
 {
     if (!field_bool(aTHX_ sv, what, field, strict)) return;
-    *(Clay_TransitionData (**)(Clay_TransitionData, Clay_TransitionProperty)) slot
-        = clay_perl_transition_set_initial_trampoline;
+    *(transition_state_function *) slot = clay_perl_transition_set_initial_trampoline;
 }
 
 static void read_has_set_final(pTHX_ SV *sv, void *slot, const marshal_label *what,
                                const char *field, bool strict)
 {
     if (!field_bool(aTHX_ sv, what, field, strict)) return;
-    *(Clay_TransitionData (**)(Clay_TransitionData, Clay_TransitionProperty)) slot
-        = clay_perl_transition_set_final_trampoline;
+    *(transition_state_function *) slot = clay_perl_transition_set_final_trampoline;
+}
+
+static SV *write_has_state_function(pTHX_ const void *slot)
+{
+    return newSVuv(*(const transition_state_function *) slot ? 1 : 0);
 }
 
 /* Clay runs an element's transitions only while it has a C handler. The
@@ -759,26 +840,26 @@ static const schema_field color_fields[] = {
     F_FLOAT_IN(Clay_Color, b, 0, 255), F_FLOAT_IN(Clay_Color, a, 0, 255),
 };
 static const struct_schema color_schema =
-    SCHEMA("Clay_Color", Clay_Color, color_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL);
+    SCHEMA("Clay_Color", Clay_Color, color_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL, NULL);
 
 static const schema_field vector2_fields[] = {
     F_FLOAT(Clay_Vector2, x), F_FLOAT(Clay_Vector2, y),
 };
 static const struct_schema vector2_schema =
-    SCHEMA("Clay_Vector2", Clay_Vector2, vector2_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL);
+    SCHEMA("Clay_Vector2", Clay_Vector2, vector2_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL, NULL);
 
 static const schema_field dimensions_fields[] = {
     F_FLOAT(Clay_Dimensions, width), F_FLOAT(Clay_Dimensions, height),
 };
 static const struct_schema dimensions_schema =
-    SCHEMA("Clay_Dimensions", Clay_Dimensions, dimensions_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL);
+    SCHEMA("Clay_Dimensions", Clay_Dimensions, dimensions_fields, SHAPE_HASH | SHAPE_ARRAY, NULL, NULL, NULL, NULL);
 
 static const schema_field bounding_box_fields[] = {
     F_FLOAT(Clay_BoundingBox, x), F_FLOAT(Clay_BoundingBox, y),
     F_FLOAT(Clay_BoundingBox, width), F_FLOAT(Clay_BoundingBox, height),
 };
 static const struct_schema bounding_box_schema =
-    SCHEMA("Clay_BoundingBox", Clay_BoundingBox, bounding_box_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_BoundingBox", Clay_BoundingBox, bounding_box_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* Also accepts a number (applied to all four corners), like the C
  * CLAY_CORNER_RADIUS(r) macro. */
@@ -787,14 +868,14 @@ static const schema_field corner_radius_fields[] = {
     F_NON_NEGATIVE(Clay_CornerRadius, bottomLeft), F_NON_NEGATIVE(Clay_CornerRadius, bottomRight),
 };
 static const struct_schema corner_radius_schema =
-    SCHEMA("Clay_CornerRadius", Clay_CornerRadius, corner_radius_fields, SHAPE_HASH | SHAPE_NUMBER, NULL, NULL, NULL);
+    SCHEMA("Clay_CornerRadius", Clay_CornerRadius, corner_radius_fields, SHAPE_HASH | SHAPE_NUMBER, NULL, NULL, NULL, NULL);
 
 static const schema_field padding_fields[] = {
     F_U16(Clay_Padding, left), F_U16(Clay_Padding, right),
     F_U16(Clay_Padding, top),  F_U16(Clay_Padding, bottom),
 };
 static const struct_schema padding_schema =
-    SCHEMA("Clay_Padding", Clay_Padding, padding_fields, SHAPE_HASH, NULL, NULL, "padding_all(N) builds one");
+    SCHEMA("Clay_Padding", Clay_Padding, padding_fields, SHAPE_HASH, NULL, NULL, NULL, "padding_all(N) builds one");
 
 static const schema_field border_width_fields[] = {
     F_U16(Clay_BorderWidth, left), F_U16(Clay_BorderWidth, right),
@@ -802,25 +883,25 @@ static const schema_field border_width_fields[] = {
     F_U16(Clay_BorderWidth, betweenChildren),
 };
 static const struct_schema border_width_schema =
-    SCHEMA("Clay_BorderWidth", Clay_BorderWidth, border_width_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_BorderWidth", Clay_BorderWidth, border_width_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field child_alignment_fields[] = {
-    F_ENUM(Clay_ChildAlignment, x, CLAY_ALIGN_X_CENTER),
-    F_ENUM(Clay_ChildAlignment, y, CLAY_ALIGN_Y_CENTER),
+    F_ENUM(Clay_ChildAlignment, x, CLAY_PERL_ENUM_MAX(LayoutAlignmentX)),
+    F_ENUM(Clay_ChildAlignment, y, CLAY_PERL_ENUM_MAX(LayoutAlignmentY)),
 };
 static const struct_schema child_alignment_schema =
-    SCHEMA("Clay_ChildAlignment", Clay_ChildAlignment, child_alignment_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_ChildAlignment", Clay_ChildAlignment, child_alignment_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* { type, min, max } for fit/grow/fixed (union member minMax) or
  * { type, percent } for percent. The order matters: the keys of a
  * min/max axis are fields 0..2, those of a percent axis fields 2..3. */
-/* min, max and percent share a union, so the hash reader below stores
- * them; their entries only name the keys. */
+/* min, max and percent share a union, so the hash reader and writer
+ * below handle them; their entries only name the keys. */
 static const schema_field sizing_axis_fields[] = {
-    { "min",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL },
-    { "max",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL },
-    F_ENUM(Clay_SizingAxis, type, CLAY__SIZING_TYPE_FIXED),
-    { "percent", 0, 0, FIELD_FLOAT_IN, 0, 1, NULL, NULL },
+    { "min",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL, NULL },
+    { "max",     0, 0, FIELD_FLOAT, 0, 0, NULL, NULL, NULL },
+    F_ENUM(Clay_SizingAxis, type, CLAY_PERL_ENUM_MAX(SizingType)),
+    { "percent", 0, 0, FIELD_FLOAT_IN, 0, 1, NULL, NULL, NULL },
 };
 
 static const char sizing_axis_hint[] = "sizing_fit, sizing_grow, sizing_fixed or sizing_percent build one";
@@ -832,7 +913,7 @@ static void read_sizing_axis(pTHX_ HV *hv, void *out, const marshal_label *what,
     Clay_SizingAxis *axis = (Clay_SizingAxis *) out;
     SV *type = fetch_defined(aTHX_ hv, "type");
     axis->type = type
-        ? (Clay__SizingType) field_integer(aTHX_ type, what, "type", 0, CLAY__SIZING_TYPE_FIXED)
+        ? (Clay__SizingType) field_integer(aTHX_ type, what, "type", 0, CLAY_PERL_ENUM_MAX(SizingType))
         : CLAY__SIZING_TYPE_FIT;
 
     if (axis->type == CLAY__SIZING_TYPE_PERCENT) {
@@ -848,27 +929,40 @@ static void read_sizing_axis(pTHX_ HV *hv, void *out, const marshal_label *what,
     axis->size.minMax.max = max ? field_maximum(aTHX_ max, what, "max") : 0.0f;
 }
 
+static void write_sizing_axis(pTHX_ HV *hv, const void *in)
+{
+    const Clay_SizingAxis *axis = (const Clay_SizingAxis *) in;
+    hv_store_iv(aTHX_ hv, "type", (IV) axis->type);
+    if (axis->type == CLAY__SIZING_TYPE_PERCENT) {
+        hv_store_nv(aTHX_ hv, "percent", axis->size.percent);
+        return;
+    }
+    hv_store_nv(aTHX_ hv, "min", axis->size.minMax.min);
+    hv_store_nv(aTHX_ hv, "max", axis->size.minMax.max);
+}
+
 static const struct_schema sizing_axis_schema =
-    SCHEMA("Clay_SizingAxis", Clay_SizingAxis, sizing_axis_fields, SHAPE_HASH, read_sizing_axis, NULL, sizing_axis_hint);
+    SCHEMA("Clay_SizingAxis", Clay_SizingAxis, sizing_axis_fields, SHAPE_HASH, read_sizing_axis, write_sizing_axis,
+           NULL, sizing_axis_hint);
 
 static const schema_field sizing_fields[] = {
     F_STRUCT(Clay_Sizing, width,  sizing_axis_schema),
     F_STRUCT(Clay_Sizing, height, sizing_axis_schema),
 };
 static const struct_schema sizing_schema =
-    SCHEMA("Clay_Sizing", Clay_Sizing, sizing_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_Sizing", Clay_Sizing, sizing_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field layout_config_fields[] = {
     F_STRUCT(Clay_LayoutConfig, sizing,         sizing_schema),
     F_STRUCT(Clay_LayoutConfig, padding,        padding_schema),
     F_U16   (Clay_LayoutConfig, childGap),
     F_STRUCT(Clay_LayoutConfig, childAlignment, child_alignment_schema),
-    F_ENUM  (Clay_LayoutConfig, layoutDirection, CLAY_BACK_TO_FRONT),
+    F_ENUM  (Clay_LayoutConfig, layoutDirection, CLAY_PERL_ENUM_MAX(LayoutDirection)),
     F_U16   (Clay_LayoutConfig, lineGap),
-    F_ENUM  (Clay_LayoutConfig, lineSizing, CLAY_LINE_SIZING_FIT),
+    F_ENUM  (Clay_LayoutConfig, lineSizing, CLAY_PERL_ENUM_MAX(LineSizing)),
 };
 static const struct_schema layout_config_schema =
-    SCHEMA("Clay_LayoutConfig", Clay_LayoutConfig, layout_config_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_LayoutConfig", Clay_LayoutConfig, layout_config_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* userData is held as an opaque pointer-sized integer (no SV refcount is
  * taken); render commands carry it back unchanged. */
@@ -879,30 +973,30 @@ static const schema_field text_element_config_fields[] = {
     F_U16    (Clay_TextElementConfig, fontSize),
     F_U16    (Clay_TextElementConfig, letterSpacing),
     F_U16    (Clay_TextElementConfig, lineHeight),
-    F_ENUM   (Clay_TextElementConfig, wrapMode,      CLAY_TEXT_WRAP_NONE),
-    F_ENUM   (Clay_TextElementConfig, textAlignment, CLAY_TEXT_ALIGN_RIGHT),
+    F_ENUM   (Clay_TextElementConfig, wrapMode,      CLAY_PERL_ENUM_MAX(TextWrapMode)),
+    F_ENUM   (Clay_TextElementConfig, textAlignment, CLAY_PERL_ENUM_MAX(TextAlignment)),
 };
 static const struct_schema text_element_config_schema =
-    SCHEMA("Clay_TextElementConfig", Clay_TextElementConfig, text_element_config_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_TextElementConfig", Clay_TextElementConfig, text_element_config_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field aspect_ratio_fields[] = {
     F_FLOAT(Clay_AspectRatioElementConfig, aspectRatio),
 };
 static const struct_schema aspect_ratio_schema =
     SCHEMA("Clay_AspectRatioElementConfig", Clay_AspectRatioElementConfig, aspect_ratio_fields,
-           SHAPE_HASH | SHAPE_NUMBER, NULL, NULL, NULL);
+           SHAPE_HASH | SHAPE_NUMBER, NULL, NULL, NULL, NULL);
 
 static const schema_field image_fields[] = {
     F_POINTER(Clay_ImageElementConfig, imageData),
 };
 static const struct_schema image_schema =
-    SCHEMA("Clay_ImageElementConfig", Clay_ImageElementConfig, image_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_ImageElementConfig", Clay_ImageElementConfig, image_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field custom_fields[] = {
     F_POINTER(Clay_CustomElementConfig, customData),
 };
 static const struct_schema custom_schema =
-    SCHEMA("Clay_CustomElementConfig", Clay_CustomElementConfig, custom_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_CustomElementConfig", Clay_CustomElementConfig, custom_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field clip_fields[] = {
     F_BOOL  (Clay_ClipElementConfig, horizontal),
@@ -910,34 +1004,34 @@ static const schema_field clip_fields[] = {
     F_STRUCT(Clay_ClipElementConfig, childOffset, vector2_schema),
 };
 static const struct_schema clip_schema =
-    SCHEMA("Clay_ClipElementConfig", Clay_ClipElementConfig, clip_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_ClipElementConfig", Clay_ClipElementConfig, clip_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field border_fields[] = {
     F_STRUCT(Clay_BorderElementConfig, color, color_schema),
     F_STRUCT(Clay_BorderElementConfig, width, border_width_schema),
 };
 static const struct_schema border_schema =
-    SCHEMA("Clay_BorderElementConfig", Clay_BorderElementConfig, border_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_BorderElementConfig", Clay_BorderElementConfig, border_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field attach_points_fields[] = {
-    F_ENUM(Clay_FloatingAttachPoints, element, CLAY_ATTACH_POINT_RIGHT_BOTTOM),
-    F_ENUM(Clay_FloatingAttachPoints, parent,  CLAY_ATTACH_POINT_RIGHT_BOTTOM),
+    F_ENUM(Clay_FloatingAttachPoints, element, CLAY_PERL_ENUM_MAX(FloatingAttachPointType)),
+    F_ENUM(Clay_FloatingAttachPoints, parent,  CLAY_PERL_ENUM_MAX(FloatingAttachPointType)),
 };
 static const struct_schema attach_points_schema =
-    SCHEMA("Clay_FloatingAttachPoints", Clay_FloatingAttachPoints, attach_points_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_FloatingAttachPoints", Clay_FloatingAttachPoints, attach_points_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field floating_fields[] = {
     F_STRUCT(Clay_FloatingElementConfig, offset, vector2_schema),
     F_STRUCT(Clay_FloatingElementConfig, expand, dimensions_schema),
-    F_CUSTOM("parentId", Clay_FloatingElementConfig, parentId, read_parent_id),
+    F_CUSTOM("parentId", Clay_FloatingElementConfig, parentId, read_parent_id, write_parent_id),
     F_INT   (Clay_FloatingElementConfig, zIndex, INT16_MIN, INT16_MAX),
     F_STRUCT(Clay_FloatingElementConfig, attachPoints, attach_points_schema),
-    F_ENUM  (Clay_FloatingElementConfig, pointerCaptureMode, CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH),
-    F_ENUM  (Clay_FloatingElementConfig, attachTo, CLAY_ATTACH_TO_ROOT),
-    F_ENUM  (Clay_FloatingElementConfig, clipTo,   CLAY_CLIP_TO_ATTACHED_PARENT),
+    F_ENUM  (Clay_FloatingElementConfig, pointerCaptureMode, CLAY_PERL_ENUM_MAX(PointerCaptureMode)),
+    F_ENUM  (Clay_FloatingElementConfig, attachTo, CLAY_PERL_ENUM_MAX(FloatingAttachToElement)),
+    F_ENUM  (Clay_FloatingElementConfig, clipTo,   CLAY_PERL_ENUM_MAX(FloatingClipToElement)),
 };
 static const struct_schema floating_schema =
-    SCHEMA("Clay_FloatingElementConfig", Clay_FloatingElementConfig, floating_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_FloatingElementConfig", Clay_FloatingElementConfig, floating_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* Transition data: clay_transition_data_from_sv starts from a base and
  * overrides the keys present, so a partial hash only changes what it
@@ -950,13 +1044,43 @@ static const schema_field transition_data_fields[] = {
     F_STRUCT(Clay_TransitionData, borderWidth,     border_width_schema),
 };
 static const struct_schema transition_data_schema =
-    SCHEMA("Clay_TransitionData", Clay_TransitionData, transition_data_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_TransitionData", Clay_TransitionData, transition_data_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
-/* Every property flag OR-ed together. */
-#define ALL_TRANSITION_PROPERTIES \
-    (CLAY_TRANSITION_PROPERTY_BOUNDING_BOX | CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR \
-     | CLAY_TRANSITION_PROPERTY_OVERLAY_COLOR | CLAY_TRANSITION_PROPERTY_CORNER_RADIUS \
-     | CLAY_TRANSITION_PROPERTY_BORDER)
+/* Clay_TransitionCallbackArguments.current points at the transition data
+ * the handler updates. In parse mode it points at the caller's buffer
+ * (clay_transition_arguments_from_sv), which a given value fills like a
+ * nested struct; check mode only checks the value. Written as the data it
+ * points at. */
+static void read_current_transition_data(pTHX_ SV *sv, void *slot, const marshal_label *what,
+                                         const char *field, bool strict)
+{
+    Clay_TransitionData checked;
+    Clay_TransitionData *current = strict ? &checked : *(Clay_TransitionData **) slot;
+    memset(current, 0, sizeof(*current));
+    read_defined_struct(aTHX_ &transition_data_schema, sv, current, NESTED_LABEL(what, field), strict);
+}
+
+static SV *write_current_transition_data(pTHX_ const void *slot)
+{
+    const Clay_TransitionData *current = *(Clay_TransitionData *const *) slot;
+    return current ? schema_write(aTHX_ &transition_data_schema, current) : newSV(0);
+}
+
+/* What a transition handler receives and Clay_EaseOut takes. */
+static const schema_field transition_arguments_fields[] = {
+    F_ENUM  (Clay_TransitionCallbackArguments, transitionState, CLAY_PERL_ENUM_MAX(TransitionState)),
+    F_STRUCT(Clay_TransitionCallbackArguments, initial, transition_data_schema),
+    F_STRUCT(Clay_TransitionCallbackArguments, target,  transition_data_schema),
+    { "current", offsetof(Clay_TransitionCallbackArguments, current),
+      MEMBER_SIZE(Clay_TransitionCallbackArguments, current), FIELD_CUSTOM, 0, 0,
+      &transition_data_schema, read_current_transition_data, write_current_transition_data },
+    F_FLOAT (Clay_TransitionCallbackArguments, elapsedTime),
+    F_FLOAT (Clay_TransitionCallbackArguments, duration),
+    F_FLAGS (Clay_TransitionCallbackArguments, properties, CLAY_PERL_FLAGS_ALL(TransitionProperty)),
+};
+static const struct_schema transition_arguments_schema =
+    SCHEMA("Clay_TransitionCallbackArguments", Clay_TransitionCallbackArguments, transition_arguments_fields,
+           SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* The Perl side describes a transition as:
  *
@@ -973,42 +1097,43 @@ static const struct_schema transition_data_schema =
  * clay.h, so their schemas have no C type name and check_struct cannot
  * name them. */
 static const schema_field transition_enter_fields[] = {
-    F_INNER_ENUM(Clay_TransitionElementConfig, enter, trigger, CLAY_TRANSITION_ENTER_TRIGGER_ON_FIRST_PARENT_FRAME),
-    F_INNER_CUSTOM("hasSetInitial", Clay_TransitionElementConfig, enter, setInitialState, read_has_set_initial),
+    F_INNER_ENUM(Clay_TransitionElementConfig, enter, trigger, CLAY_PERL_ENUM_MAX(TransitionEnterTriggerType)),
+    F_INNER_CUSTOM("hasSetInitial", Clay_TransitionElementConfig, enter, setInitialState,
+                   read_has_set_initial, write_has_state_function),
 };
 static const struct_schema transition_enter_schema = {
     NULL, MEMBER_SIZE(Clay_TransitionElementConfig, enter), transition_enter_fields,
-    FIELD_COUNT(transition_enter_fields), SHAPE_HASH, NULL, NULL, NULL
+    FIELD_COUNT(transition_enter_fields), SHAPE_HASH, NULL, NULL, NULL, NULL
 };
 
 static const schema_field transition_exit_fields[] = {
-    F_INNER_ENUM(Clay_TransitionElementConfig, exit, trigger, CLAY_TRANSITION_EXIT_TRIGGER_WHEN_PARENT_EXITS),
-    F_INNER_ENUM(Clay_TransitionElementConfig, exit, siblingOrdering, CLAY_EXIT_TRANSITION_ORDERING_ABOVE_SIBLINGS),
-    F_INNER_CUSTOM("hasSetFinal", Clay_TransitionElementConfig, exit, setFinalState, read_has_set_final),
+    F_INNER_ENUM(Clay_TransitionElementConfig, exit, trigger, CLAY_PERL_ENUM_MAX(TransitionExitTriggerType)),
+    F_INNER_ENUM(Clay_TransitionElementConfig, exit, siblingOrdering, CLAY_PERL_ENUM_MAX(ExitTransitionSiblingOrdering)),
+    F_INNER_CUSTOM("hasSetFinal", Clay_TransitionElementConfig, exit, setFinalState,
+                   read_has_set_final, write_has_state_function),
 };
 static const struct_schema transition_exit_schema = {
     NULL, MEMBER_SIZE(Clay_TransitionElementConfig, exit), transition_exit_fields,
-    FIELD_COUNT(transition_exit_fields), SHAPE_HASH, NULL, NULL, NULL
+    FIELD_COUNT(transition_exit_fields), SHAPE_HASH, NULL, NULL, NULL, NULL
 };
 
 static const schema_field transition_config_fields[] = {
     F_FLOAT (Clay_TransitionElementConfig, duration),
-    F_ENUM  (Clay_TransitionElementConfig, properties, ALL_TRANSITION_PROPERTIES),
-    F_ENUM  (Clay_TransitionElementConfig, interactionHandling,
-             CLAY_TRANSITION_ALLOW_INTERACTIONS_WHILE_TRANSITIONING_POSITION),
+    F_FLAGS (Clay_TransitionElementConfig, properties, CLAY_PERL_FLAGS_ALL(TransitionProperty)),
+    F_ENUM  (Clay_TransitionElementConfig, interactionHandling, CLAY_PERL_ENUM_MAX(TransitionInteractionHandlingType)),
     F_STRUCT(Clay_TransitionElementConfig, enter, transition_enter_schema),
     F_STRUCT(Clay_TransitionElementConfig, exit,  transition_exit_schema),
 };
 static const struct_schema transition_config_schema =
     SCHEMA("Clay_TransitionElementConfig", Clay_TransitionElementConfig, transition_config_fields,
-           SHAPE_HASH, NULL, finish_transition_config, NULL);
+           SHAPE_HASH, NULL, NULL, finish_transition_config, NULL);
 
 /* {width => N, height => M}; either may be omitted. */
 static const schema_field sizing_group_fields[] = {
     F_U32(Clay_SizingGroup, width), F_U32(Clay_SizingGroup, height),
 };
 static const struct_schema sizing_group_schema =
-    SCHEMA("Clay_SizingGroup", Clay_SizingGroup, sizing_group_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_SizingGroup", Clay_SizingGroup, sizing_group_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 static const schema_field element_declaration_fields[] = {
     F_STRUCT (Clay_ElementDeclaration, layout,          layout_config_schema),
@@ -1026,7 +1151,7 @@ static const schema_field element_declaration_fields[] = {
     F_POINTER(Clay_ElementDeclaration, userData),
 };
 static const struct_schema element_declaration_schema =
-    SCHEMA("Clay_ElementDeclaration", Clay_ElementDeclaration, element_declaration_fields, SHAPE_HASH, NULL, NULL, NULL);
+    SCHEMA("Clay_ElementDeclaration", Clay_ElementDeclaration, element_declaration_fields, SHAPE_HASH, NULL, NULL, NULL, NULL);
 
 /* Every schema check_struct can name. */
 static const struct_schema *const named_schemas[] = {
@@ -1034,16 +1159,16 @@ static const struct_schema *const named_schemas[] = {
     &corner_radius_schema, &padding_schema, &border_width_schema, &child_alignment_schema,
     &sizing_axis_schema, &sizing_schema, &layout_config_schema, &text_element_config_schema,
     &aspect_ratio_schema, &image_schema, &custom_schema, &clip_schema, &border_schema,
-    &attach_points_schema, &floating_schema, &transition_data_schema, &transition_config_schema,
-    &sizing_group_schema, &element_declaration_schema,
+    &attach_points_schema, &floating_schema, &transition_data_schema, &transition_arguments_schema,
+    &transition_config_schema, &sizing_group_schema, &element_declaration_schema,
 };
 
 /* Large enough for any named struct: every one is either part of an
  * element declaration or one of these. */
 typedef union check_scratch {
-    Clay_ElementDeclaration declaration;
-    Clay_TextElementConfig  text;
-    Clay_TransitionData     transition;
+    Clay_ElementDeclaration          declaration;
+    Clay_TextElementConfig           text;
+    Clay_TransitionCallbackArguments transition_arguments;
 } check_scratch;
 
 /* ===========================================================================
@@ -1093,6 +1218,23 @@ Clay_TransitionData clay_transition_data_from_sv(pTHX_ SV *sv, Clay_TransitionDa
     return base;
 }
 
+Clay_TransitionCallbackArguments clay_transition_arguments_from_sv(pTHX_ SV *sv, const char *what,
+                                                                   Clay_TransitionData *current)
+{
+    const marshal_label *label = ROOT_LABEL(what);
+    SvGETMAGIC(sv);
+    if (!SvROK(sv) || SvTYPE(SvRV(sv)) != SVt_PVHV) {
+        croak_bad_value(aTHX_ label, NULL, shape_description(transition_arguments_schema.shapes), sv);
+    }
+    Clay_TransitionCallbackArguments args;
+    memset(&args, 0, sizeof(args));
+    args.current = current;
+    read_defined_struct(aTHX_ &transition_arguments_schema, sv, &args, label, false);
+    /* A missing current starts from initial (read by now). */
+    if (!fetch_defined(aTHX_ (HV *) SvRV(sv), "current")) *current = args.initial;
+    return args;
+}
+
 void clay_perl_check_struct(pTHX_ const char *type, SV *value, const char *root)
 {
     const struct_schema *schema = NULL;
@@ -1110,12 +1252,59 @@ void clay_perl_check_struct(pTHX_ const char *type, SV *value, const char *root)
 }
 
 /* ===========================================================================
+ * Schema description (Clay::XS::_struct_schemas).
+ * ======================================================================== */
+
+static const char *const field_kind_names[] = {
+    "float", "float_in", "integer", "bool", "pointer", "struct", "custom"
+};
+
+/* Adds the schema and every schema nested in it to all, unless all has
+ * one under that name already. */
+static void describe_schema(pTHX_ HV *all, const struct_schema *schema, const char *name)
+{
+    if (hv_exists(all, name, (I32) strlen(name))) return;
+    AV *fields = newAV();
+    (void) hv_store(all, name, (I32) strlen(name), newRV_noinc((SV *) fields), 0);
+
+    for (size_t i = 0; i < schema->field_count; i++) {
+        const schema_field *field = &schema->fields[i];
+        bool ranged = field->kind == FIELD_INTEGER || field->kind == FIELD_FLOAT_IN;
+        HV *description = newHV();
+        hv_store_sv(aTHX_ description, "name", newSVpv(field->name, 0));
+        hv_store_sv(aTHX_ description, "kind", newSVpv(field_kind_names[field->kind], 0));
+        hv_store_sv(aTHX_ description, "min",  ranged ? newSVnv(field->min) : newSV(0));
+        hv_store_sv(aTHX_ description, "max",  ranged ? newSVnv(field->max) : newSV(0));
+        if (field->nested) {
+            SV *nested_name = field->nested->c_name
+                ? newSVpv(field->nested->c_name, 0)
+                : newSVpvf("%s.%s", name, field->name);
+            describe_schema(aTHX_ all, field->nested, SvPV_nolen(nested_name));
+            hv_store_sv(aTHX_ description, "nested", nested_name);
+        } else {
+            hv_store_sv(aTHX_ description, "nested", newSV(0));
+        }
+        av_push(fields, newRV_noinc((SV *) description));
+    }
+}
+
+SV *clay_perl_struct_schemas(pTHX)
+{
+    HV *all = newHV();
+    for (size_t i = 0; i < FIELD_COUNT(named_schemas); i++) {
+        describe_schema(aTHX_ all, named_schemas[i], named_schemas[i]->c_name);
+    }
+    return newRV_noinc((SV *) all);
+}
+
+/* ===========================================================================
  * Clay_ElementId - {id, offset, baseId, stringId}.
  * ======================================================================== */
 
 /* Element ids are always required: an undef id is a bug in the caller
- * (typically a lookup that found nothing), never "no id". */
-Clay_ElementId clay_element_id_from_sv(pTHX_ SV *sv, const char *what)
+ * (typically a lookup that found nothing), never "no id". Returns the
+ * numbers; the hash is returned through *hv_out. */
+static Clay_ElementId read_element_id(pTHX_ SV *sv, const char *what, HV **hv_out)
 {
     const marshal_label *label = ROOT_LABEL(what);
     SvGETMAGIC(sv);
@@ -1131,116 +1320,86 @@ Clay_ElementId clay_element_id_from_sv(pTHX_ SV *sv, const char *what)
         SV *value = fetch_defined(aTHX_ hv, keys[i]);
         if (value) *values[i] = (uint32_t) field_integer(aTHX_ value, label, keys[i], 0, (NV) UINT32_MAX);
     }
+    *hv_out = hv;
+    return id;
+}
+
+Clay_ElementId clay_element_id_from_sv(pTHX_ SV *sv, const char *what)
+{
+    HV *hv;
+    return read_element_id(aTHX_ sv, what, &hv);
+}
+
+Clay_ElementId clay_element_id_from_sv_interned(pTHX_ clay_perl_context *ctx, SV *sv, const char *what)
+{
+    HV *hv;
+    Clay_ElementId id = read_element_id(aTHX_ sv, what, &hv);
+    SV *string_id = fetch_defined(aTHX_ hv, "stringId");
+    if (string_id) {
+        STRLEN length;
+        const char *bytes = SvPVutf8_nomg(string_id, length);
+        id.stringId = clay_perl_intern_id(aTHX_ ctx, bytes, length);
+    }
     return id;
 }
 
 /* ===========================================================================
- * Struct output (*_to_sv).
+ * Struct output (*_to_sv): write mode for the structs with a schema.
  * ======================================================================== */
 
 SV *clay_color_to_sv(pTHX_ Clay_Color value)
 {
-    HV *hv = newHV();
-    hv_store_nv(aTHX_ hv, "r", value.r);
-    hv_store_nv(aTHX_ hv, "g", value.g);
-    hv_store_nv(aTHX_ hv, "b", value.b);
-    hv_store_nv(aTHX_ hv, "a", value.a);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &color_schema, &value);
 }
 
 SV *clay_vector2_to_sv(pTHX_ Clay_Vector2 value)
 {
-    HV *hv = newHV();
-    hv_store_nv(aTHX_ hv, "x", value.x);
-    hv_store_nv(aTHX_ hv, "y", value.y);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &vector2_schema, &value);
 }
 
 SV *clay_dimensions_to_sv(pTHX_ Clay_Dimensions value)
 {
-    HV *hv = newHV();
-    hv_store_nv(aTHX_ hv, "width",  value.width);
-    hv_store_nv(aTHX_ hv, "height", value.height);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &dimensions_schema, &value);
 }
 
 SV *clay_bounding_box_to_sv(pTHX_ Clay_BoundingBox value)
 {
-    HV *hv = newHV();
-    hv_store_nv(aTHX_ hv, "x",      value.x);
-    hv_store_nv(aTHX_ hv, "y",      value.y);
-    hv_store_nv(aTHX_ hv, "width",  value.width);
-    hv_store_nv(aTHX_ hv, "height", value.height);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &bounding_box_schema, &value);
 }
 
 SV *clay_corner_radius_to_sv(pTHX_ Clay_CornerRadius value)
 {
-    HV *hv = newHV();
-    hv_store_nv(aTHX_ hv, "topLeft",     value.topLeft);
-    hv_store_nv(aTHX_ hv, "topRight",    value.topRight);
-    hv_store_nv(aTHX_ hv, "bottomLeft",  value.bottomLeft);
-    hv_store_nv(aTHX_ hv, "bottomRight", value.bottomRight);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &corner_radius_schema, &value);
 }
 
 SV *clay_padding_to_sv(pTHX_ Clay_Padding value)
 {
-    HV *hv = newHV();
-    hv_store_uv(aTHX_ hv, "left",   value.left);
-    hv_store_uv(aTHX_ hv, "right",  value.right);
-    hv_store_uv(aTHX_ hv, "top",    value.top);
-    hv_store_uv(aTHX_ hv, "bottom", value.bottom);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &padding_schema, &value);
 }
 
 SV *clay_border_width_to_sv(pTHX_ Clay_BorderWidth value)
 {
-    HV *hv = newHV();
-    hv_store_uv(aTHX_ hv, "left",            value.left);
-    hv_store_uv(aTHX_ hv, "right",           value.right);
-    hv_store_uv(aTHX_ hv, "top",             value.top);
-    hv_store_uv(aTHX_ hv, "bottom",          value.bottom);
-    hv_store_uv(aTHX_ hv, "betweenChildren", value.betweenChildren);
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &border_width_schema, &value);
 }
 
 SV *clay_sizing_axis_to_sv(pTHX_ Clay_SizingAxis value)
 {
-    HV *hv = newHV();
-    hv_store_iv(aTHX_ hv, "type", (IV) value.type);
-    if (value.type == CLAY__SIZING_TYPE_PERCENT) {
-        hv_store_nv(aTHX_ hv, "percent", value.size.percent);
-    } else {
-        hv_store_nv(aTHX_ hv, "min", value.size.minMax.min);
-        hv_store_nv(aTHX_ hv, "max", value.size.minMax.max);
-    }
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &sizing_axis_schema, &value);
 }
 
 SV *clay_text_element_config_to_sv(pTHX_ Clay_TextElementConfig value)
 {
-    HV *hv = newHV();
-    hv_store_sv(aTHX_ hv, "textColor",     clay_color_to_sv(aTHX_ value.textColor));
-    hv_store_uv(aTHX_ hv, "fontId",        value.fontId);
-    hv_store_uv(aTHX_ hv, "fontSize",      value.fontSize);
-    hv_store_uv(aTHX_ hv, "letterSpacing", value.letterSpacing);
-    hv_store_uv(aTHX_ hv, "lineHeight",    value.lineHeight);
-    hv_store_iv(aTHX_ hv, "wrapMode",      (IV) value.wrapMode);
-    hv_store_iv(aTHX_ hv, "textAlignment", (IV) value.textAlignment);
-    hv_store_uv(aTHX_ hv, "userData",      PTR2UV(value.userData));
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &text_element_config_schema, &value);
 }
 
 SV *clay_transition_data_to_sv(pTHX_ Clay_TransitionData data)
 {
-    HV *hv = newHV();
-    hv_store_sv(aTHX_ hv, "boundingBox",     clay_bounding_box_to_sv(aTHX_ data.boundingBox));
-    hv_store_sv(aTHX_ hv, "backgroundColor", clay_color_to_sv(aTHX_ data.backgroundColor));
-    hv_store_sv(aTHX_ hv, "overlayColor",    clay_color_to_sv(aTHX_ data.overlayColor));
-    hv_store_sv(aTHX_ hv, "borderColor",     clay_color_to_sv(aTHX_ data.borderColor));
-    hv_store_sv(aTHX_ hv, "borderWidth",     clay_border_width_to_sv(aTHX_ data.borderWidth));
-    return newRV_noinc((SV *) hv);
+    return schema_write(aTHX_ &transition_data_schema, &data);
+}
+
+SV *clay_transition_arguments_to_sv(pTHX_ const Clay_TransitionCallbackArguments *args)
+{
+    return schema_write(aTHX_ &transition_arguments_schema, args);
 }
 
 SV *clay_element_id_to_sv(pTHX_ Clay_ElementId id)
@@ -1290,11 +1449,7 @@ SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data)
     hv_store_sv(aTHX_ hv, "contentDimensions",
                 clay_dimensions_to_sv(aTHX_ data.contentDimensions));
 
-    HV *config_hv = newHV();
-    hv_store_bool(aTHX_ config_hv, "horizontal", data.config.horizontal);
-    hv_store_bool(aTHX_ config_hv, "vertical",   data.config.vertical);
-    hv_store_sv  (aTHX_ config_hv, "childOffset", clay_vector2_to_sv(aTHX_ data.config.childOffset));
-    hv_store_sv(aTHX_ hv, "config", newRV_noinc((SV *) config_hv));
+    hv_store_sv(aTHX_ hv, "config", schema_write(aTHX_ &clip_schema, &data.config));
 
     hv_store_bool(aTHX_ hv, "found", data.found);
     return newRV_noinc((SV *) hv);

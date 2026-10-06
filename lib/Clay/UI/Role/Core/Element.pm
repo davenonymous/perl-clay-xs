@@ -62,6 +62,17 @@ sub _validate_attachment ($anchor, @kids) {
 	return;
 }
 
+# Announces the tree change to the subtrees below @tops (see HasParent's
+# tree_changed): every hook runs; returns the first error, or undef.
+sub _announce_tree_changes (@tops) {
+	my $first_error;
+	for my $top (@tops) {
+		my $error = $top->_announce_tree_change;
+		$first_error //= $error;
+	}
+	return $first_error;
+}
+
 # True when $order is an array reference holding each of 0..$count-1
 # exactly once.
 sub _is_permutation ($order, $count) {
@@ -117,6 +128,22 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return [ @_children, @_internal_children ];
 	}
 
+	# Every widget below this one in layout pre-order: each child or
+	# internal child followed by its own subtree. Every walk of a subtree
+	# in Clay::UI goes through here.
+	method descendants () {
+		my @below;
+		my @stack = @{ $self->layout_children };
+		while (@stack) {
+			my $node = shift @stack;
+			croak_ui "Clay::UI: tree node is not a blessed widget (got " . (ref($node) || 'non-ref') . ")"
+				unless blessed $node;
+			push @below, $node;
+			unshift @stack, @{ $node->layout_children } if $node->DOES('Clay::UI::Role::Core::Element');
+		}
+		return @below;
+	}
+
 	# Internal children belong to the widget class, not to its user: a
 	# helper the widget needs in the laid-out tree (a floating scrollbar,
 	# a popup) that children and the Container mutators never show or
@@ -127,6 +154,8 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		push @_internal_children, @kids;
 		$_->_set_parent($self) for @kids;
 		bump_revision();
+		my $error = _announce_tree_changes(@kids);
+		die $error if defined $error;
 		return $self;
 	}
 
@@ -136,7 +165,8 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return $self unless @removed;
 		@_internal_children = grep { !$leaving{ refaddr($_) } } @_internal_children;
 		bump_revision();
-		$self->_release_children(@removed);
+		my $error = $self->_release_children(@removed);
+		die $error if defined $error;
 		return $self;
 	}
 
@@ -162,8 +192,9 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	# ---------------------------------------------------------------------
 	# Child-list primitives. Every change to the children goes through
 	# _splice_children or _detach_children: new children are validated as a
-	# whole before anything is written, removed children are detached, and
-	# the revision (Clay::UI::Revision) is bumped.
+	# whole before anything is written, removed children are detached, the
+	# revision (Clay::UI::Revision) is bumped, and every widget of an added
+	# or removed subtree gets its tree_changed call once all that is done.
 	# Clay::UI::Role::Core::Container and Clay::UI::Grid build their public
 	# mutators on these.
 	# ---------------------------------------------------------------------
@@ -184,7 +215,10 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		my @removed = splice @_children, $offset, $length, @kids;
 		$_->_set_parent($self) for @kids;
 		bump_revision();
-		$self->_release_children(@removed);
+		my $release_error = $self->_release_children(@removed);
+		my $hook_error    = _announce_tree_changes(@kids);
+		my $error         = $release_error // $hook_error;
+		die $error if defined $error;
 		return @removed;
 	}
 
@@ -206,18 +240,21 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return unless @removed;
 		@_children = grep { !$leaving{ refaddr($_) } } @_children;
 		bump_revision();
-		$self->_release_children(@removed);
+		my $error = $self->_release_children(@removed);
+		die $error if defined $error;
 		return;
 	}
 
 	# Runs after the child list has changed: tells the interaction tracker
 	# (hover and focus inside the leaving subtrees are released, with
 	# OnHoverStopped / OnBlur bubbling through the still-intact parent
-	# slots), then clears each child's parent slot. The
-	# children are detached even if a listener dies; its error is
-	# rethrown once they are.
+	# slots), clears each child's parent slot, then announces the change
+	# to the leaving subtrees (tree_changed). The children are detached
+	# and every hook runs even if a listener or a hook dies; returns the
+	# first error (a listener's before a hook's), or undef, for the
+	# caller to rethrow once its own work is done.
 	method _release_children (@kids) {
-		return unless @kids;
+		return undef unless @kids;
 		my $ui = $self->ui;
 		my $listener_error;
 		if (defined $ui) {
@@ -226,8 +263,8 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 				or $listener_error = $@ || 'unknown listener error';
 		}
 		$_->_detach_parent for @kids;
-		die $listener_error if defined $listener_error;
-		return;
+		my $hook_error = _announce_tree_changes(@kids);
+		return $listener_error // $hook_error;
 	}
 }
 
@@ -308,7 +345,8 @@ their own.
 
 It also composes L<Clay::UI::Role::Layout::HasSizingGroup> (the
 C<width_group> and C<height_group> attributes),
-L<Clay::UI::Role::Layout::HasParent> (C<parent>, C<root>, C<ui>) and
+L<Clay::UI::Role::Layout::HasParent> (C<parent>, C<root>, C<ui>,
+C<contains>, C<tree_changed>) and
 L<Clay::UI::Role::Events::Listener> (C<on>).
 
 Element has no public method that changes the children. Widgets that
@@ -419,6 +457,19 @@ children: everything a frame lays out directly below this widget. The
 layout pass, the focus order of L<Clay::UI::Interaction> and the
 registry that maps render commands back to widgets read this list.
 Widget users want L</children>.
+
+=head2 descendants
+
+	my @below = $widget->descendants;
+
+Returns every widget below this one, not the widget itself, as a list
+in layout pre-order: each entry of L</layout_children> followed by its
+own subtree. Internal children and the widgets below them are
+included, so this is the order in which a frame declares the subtree
+and the default focus order walks it. Element widgets and text
+widgets are listed alike. To ask whether one widget is below another,
+use L<Clay::UI::Role::Layout::HasParent/contains>, which walks up
+instead.
 
 =head2 add_internal_children
 
@@ -599,8 +650,10 @@ names (C<contribute_background> before C<contribute_layout>).
 
 =item *
 
-Keys may be snake_case or camelCase; the layout pass converts them.
-Do not use both spellings of one key.
+Write keys in snake_case, the spelling every stored slice and reader
+uses (an attribute set with camelCase keys reads back in snake_case).
+camelCase works too, since the layout pass converts every key, but do
+not use both spellings of one key: merged slices then collide.
 
 =item *
 
@@ -751,13 +804,20 @@ Every change bumps the revision (L<Clay::UI::Revision>). Widgets that
 decide their children themselves may also reorder them
 (L<Clay::UI::Grid/reorder_rows>); reordering detaches nothing.
 
+Once a change is complete, every widget of each added or removed
+subtree gets a call of its
+L<tree_changed|Clay::UI::Role::Layout::HasParent/tree_changed> hook,
+the subtree's own widget first, then the others in L</descendants>
+order. Every hook runs; the change method then dies with the first
+error.
+
 A removed child is detached: its C<parent> becomes undef and its
 subtree is no longer part of the UI until it is attached again. Hover,
 press and focus inside the subtree are released first: a hovered
 widget gets C<OnHoverStopped>, the focused widget gets C<OnBlur> (see
 L<Clay::UI::Interaction>). A listener of those events that dies does
-not stop the removal: the call completes and then dies with the
-listener's error.
+not stop the removal: the call completes (the C<tree_changed> hooks
+included) and then dies with the listener's error.
 
 =head1 SEE ALSO
 

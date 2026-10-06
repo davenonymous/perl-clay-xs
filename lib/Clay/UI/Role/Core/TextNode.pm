@@ -81,8 +81,9 @@ both to C<Clay__OpenTextElement>, instead of the open / configure /
 close calls it makes for element widgets.
 
 TextNode also composes L<Clay::UI::Role::Layout::HasParent> (C<parent>,
-C<root>, C<ui>) and L<Clay::UI::Role::Events::Listener> (C<on>). A text
-widget has no C<id>, no children and no sizing groups.
+C<root>, C<ui>, C<contains>, C<tree_changed>) and
+L<Clay::UI::Role::Events::Listener> (C<on>). A text widget has no
+C<id>, no children and no sizing groups.
 
 =head1 REQUIRED METHODS
 

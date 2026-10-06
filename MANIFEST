@@ -95,6 +95,7 @@ src/clay_impl.c
 src/clay_impl_helpers.h
 src/clay_perl.h
 src/clay_perl_context.c
+src/clay_perl_enums.h
 src/marshal.c
 t/00-load.t
 t/01-types.t

@@ -1267,6 +1267,25 @@ C<OnBlur> on the old and C<OnFocus> on the new widget. Clicking does not
 move the focus by itself; call C<set_focused_widget> from an C<OnPress>
 listener if you want that. See L<Clay::UI::Interaction/FOCUS>.
 
+The tracker also answers questions about a part of the tree, a I<focus
+scope>: C<< $interaction->has_focus_within($panel) >> tells whether the
+focused widget is C<$panel> or below it, and
+C<< $interaction->focusables(within => $panel) >> lists the widgets below
+it that can take the focus now. A modal dialog keeps Tab inside itself
+by stepping within its own subtree:
+
+    class My::Dialog :strict(params)
+    	:does(Clay::UI::Box)
+    	:does(Clay::UI::Role::Interaction::HasFocusOrder)
+    {
+    	method get_next_focus ()     { return $self->default_next_focus(within => $self) }
+    	method get_previous_focus () { return $self->default_previous_focus(within => $self) }
+    }
+
+A widget class whose C<accepts_focus> answer depends on its own state
+calls C<focus_eligibility_changed> when that state changes (see
+L<Clay::UI::Role::Interaction::Focusable/focus_eligibility_changed>).
+
 =head1 WIDGETS
 
 =head2 Widget classes are built from roles
@@ -1384,10 +1403,10 @@ the declaration - for example an image with a fixed aspect ratio:
     	}
     }
 
-Keys may be written in snake_case; Clay::UI converts them to Clay's
-camelCase. The methods run in alphabetical order of their names, so two
-methods must not write the same key: the result would depend on that
-order. In particular, a class that writes C<background_color> itself
+Write keys in snake_case, the spelling stored slices use; Clay::UI
+converts them to Clay's camelCase. The methods run in alphabetical
+order of their names, so two methods must not write the same key: the
+result would depend on that order. In particular, a class that writes C<background_color> itself
 must not also use the C<background_color> attribute. The one exception
 is C<layout>: the built-in methods merge their keys into it, so your
 method may add keys to C<< $config->{layout} >> as well. The name must not
@@ -1404,6 +1423,30 @@ A widget whose children follow from its own data (a list, a table)
 composes L<Clay::UI::Role::Core::Preparable>: its setters call
 C<request_prepare>, and C<render> calls its C<prepare_layout> once
 before the layout pass, however many changes came before.
+
+A widget that must react when its place in a tree changes (it joined a
+tree, left one, or its tree became a UI) overrides the hook
+C<tree_changed> in a subclass. Clay::UI calls it on every widget of
+the moved subtree once the move is complete, so C<parent> and C<ui>
+already answer the new place. A class cannot override a method of a
+role it composes itself, so the override goes into a subclass:
+
+    class My::ListBase :strict(params)
+    	:does(Clay::UI::Box)
+    	:does(Clay::UI::Role::Core::Preparable)
+    {
+    	method prepare_layout () { return }    # builds the items
+    }
+
+    class My::List :strict(params) :isa(My::ListBase) {
+    	method tree_changed :override () {
+    		$self->SUPER::tree_changed;
+    		$self->request_prepare;    # rebuild the items for the new place
+    		return;
+    	}
+    }
+
+See L<Clay::UI::Role::Layout::HasParent/tree_changed> for the details.
 
 =head1 TRANSITIONS
 
@@ -1589,7 +1632,7 @@ L<Clay::XS/CONTEXTS>.
 =head1 FEATURE INDEX
 
 Each line names a feature, where its reference documentation is, and the
-examples that use it. "XS" is L<Clay::XS>, "Structs" is
+examples that use it ("-" when none does). "XS" is L<Clay::XS>, "Structs" is
 L<Clay::XS::Structs>, "UI" is L<Clay::UI>, "Cookbook" is
 L<Clay::Cookbook>; role names are short for C<Clay::UI::Role::...>.
 
@@ -1617,6 +1660,8 @@ L<Clay::Cookbook>; role names are short for C<Clay::UI::Role::...>.
     floating elements             Structs floating; HasFloating               09, 13, 14, 17, 18
     flow layout (wrap)            XS FLOW LAYOUT; Structs layoutDirection     07, 15
     focus and Tab order           Interaction FOCUS; HasFocusOrder            12, 18
+    focus inside a subtree        Interaction has_focus_within                -
+    focus scopes (modal Tab)      Interaction Focus scopes; HasFocusOrder     -
     grids and tables              Clay::UI::Grid                              05, 16, 18
     hover                         XS Clay_PointerOver; Hoverable              09, 12, 13, 18
     images                        Structs image                               11, 14, 15
@@ -1638,6 +1683,9 @@ L<Clay::Cookbook>; role names are short for C<Clay::UI::Role::...>.
     sizing groups                 XS SIZING GROUPS; HasSizingGroup            14, 18
     stack layout                  XS STACK LAYOUT                             08, 15
     states (user and derived)     Style::HasStates                            12, 18
+    subtree of a widget           Core::Element descendants                   -
+    subtree test (is X below Y)   Layout::HasParent contains                  -
+    tree changes (joined/left)    Layout::HasParent tree_changed              -
     SVG output                    Cookbook "Render to SVG"                    03, 05, 07, 08, 11, 13
     text wrapping                 Structs wrapMode; Text wrap_mode            06, 15, 16, 17
     tooltips                      Cookbook "Show a tooltip on hover"          09, 13

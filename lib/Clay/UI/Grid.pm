@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::XS qw(sizing_fit sizing_grow sizing_percent CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
-use Clay::UI::_validate qw(required clay_field);
+use Clay::UI::_validate qw(required clay_field USER_GROUP_ID_MAX);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Grid::Row;
 use Clay::UI::Grid::Cell;
@@ -22,16 +22,17 @@ use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
-# Group-id encoding: (grid_id << 20) | local_index.
+# Group-id encoding: (grid_id << _LOCAL_BITS) | local_index.
 #   - grid_id in 1..4095     -> 12 bits, one slot per live id space
-#   - local  in 1..1048575   -> 20 bits, one slot per axis-bucket within it
+#   - local in 1..USER_GROUP_ID_MAX (20 bits), one slot per axis-bucket
+#     within it; every packed id is above the user range
 # Width-axis and height-axis ids share the local space because Clay equalizes
 # per-axis only (width vs height live in separate equality buckets).
 use constant {
 	_GRID_ID_BITS  => 12,
-	_LOCAL_BITS    => 20,
+	_LOCAL_BITS    => length(sprintf '%b', USER_GROUP_ID_MAX),
 	_GRID_ID_MAX   => (1 << 12) - 1,   # 4095
-	_LOCAL_MAX     => (1 << 20) - 1,   # 1048575
+	_LOCAL_MAX     => USER_GROUP_ID_MAX,
 };
 
 # Process-global pool of 12-bit grid-ids. Monotonic counter for fresh ids;
@@ -176,15 +177,14 @@ role Clay::UI::Grid
 	field $cell_gap :param = 0;
 	field $row_gap  :param = 0;
 
-	# Per-row cell wrappers ([row][col]). For each input cell: a widget
+	# The grid's children are its rows (Clay::UI::Grid::Row), and a row's
+	# children are its cell wrappers. For each input cell: a widget
 	# composing Clay::UI::Role::Layout::GridCell is used directly (so the
 	# caller's styling becomes the visible cell); anything else is wrapped
 	# in an unstyled Clay::UI::Grid::Cell. The wrapper is what Clay sees
 	# with the sizing-group ids set, so its rendered box is exactly the
 	# equalized column-width x row-height. A spanning row has one wrapper.
-	field @_cell_wrappers;
-	field @_row_spans;        # row index -> 1 when the row spans all columns
-	field @_row_height_ids;   # row index -> packed height-axis group id
+	# Each row carries its span flag and its height id.
 	field $_ids;              # the Clay::UI::Grid::_IdSpace
 
 	ADJUST :params ( :$share_columns_with = undef ) {
@@ -220,14 +220,19 @@ role Clay::UI::Grid
 	method _id_space () { return $_ids }
 
 	method cell_wrappers () {
-		return [ map { [ @$_ ] } @_cell_wrappers ];
+		return [ map { $_->children } @{ $self->children } ];
 	}
 
-	method row_count () { return scalar @_cell_wrappers; }
+	method row_count () { return scalar @{ $self->children }; }
 
 	method is_spanning_row ($index) {
 		$self->_check_row_index($index);
-		return $_row_spans[$index];
+		return $self->_row($index)->spans;
+	}
+
+	# The Clay::UI::Grid::Row at a checked index.
+	method _row ($index) {
+		return $self->children->[$index];
 	}
 
 	method row_gap (@new) {
@@ -282,7 +287,7 @@ role Clay::UI::Grid
 	}
 
 	# Wraps one validated input cell into a cell the grid lays out (see
-	# @_cell_wrappers) and stamps its (column, row) group ids.
+	# $_ids) and stamps its (column, row) group ids.
 	method _wrap_cell ($cell, $width_id, $height_id) {
 		my $wrapper = $cell;
 		unless (_is_grid_cell($cell)) {
@@ -315,15 +320,17 @@ role Clay::UI::Grid
 
 	# Rows stretch to the grid's width, so cells with a grow width share
 	# the space left in the grid. Unstyled rows paint nothing either way.
-	method _new_row (@wrappers) {
+	method _new_row ($wrappers, $spans, $height_id) {
 		my $row = Clay::UI::Grid::Row->new(
 			layout => {
 				sizing           => { width => sizing_grow(), height => sizing_fit() },
 				layout_direction => CLAY_LEFT_TO_RIGHT,
 				child_gap        => $cell_gap,
 			},
+			spans     => $spans,
+			height_id => $height_id,
 		);
-		$row->_attach_children(@wrappers);
+		$row->_attach_children(@$wrappers);
 		return $row;
 	}
 
@@ -349,29 +356,26 @@ role Clay::UI::Grid
 	}
 
 	method _insert_row_record ($index, $wrappers, $spans, $height_id) {
-		splice @_cell_wrappers,  $index, 0, [ @$wrappers ];
-		splice @_row_spans,      $index, 0, $spans;
-		splice @_row_height_ids, $index, 0, $height_id;
-		$self->_splice_children($index, 0, $self->_new_row(@$wrappers));
+		$self->_splice_children($index, 0, $self->_new_row($wrappers, $spans, $height_id));
 		return;
 	}
 
 	method _check_row_index ($index) {
-		my $row_count = scalar @_cell_wrappers;
+		my $row_count = $self->row_count;
 		croak_ui "Clay::UI::Grid: row index " . ($index // 'undef') . " out of range 0.." . ($row_count - 1)
 			unless defined $index && $index =~ /\A[0-9]+\z/ && $index < $row_count;
 		return;
 	}
 
 	method _check_insert_index ($index) {
-		my $row_count = scalar @_cell_wrappers;
+		my $row_count = $self->row_count;
 		croak_ui "Clay::UI::Grid: insert index " . ($index // 'undef') . " out of range 0..$row_count"
 			unless defined $index && $index =~ /\A[0-9]+\z/ && $index <= $row_count;
 		return;
 	}
 
 	method append_row ($row_cells) {
-		$self->_insert_new_row(scalar @_cell_wrappers, $row_cells);
+		$self->_insert_new_row($self->row_count, $row_cells);
 		return $self;
 	}
 
@@ -382,7 +386,7 @@ role Clay::UI::Grid
 	}
 
 	method append_spanning_row ($cell) {
-		$self->_insert_new_spanning_row(scalar @_cell_wrappers, $cell);
+		$self->_insert_new_spanning_row($self->row_count, $cell);
 		return $self;
 	}
 
@@ -394,21 +398,18 @@ role Clay::UI::Grid
 
 	method remove_row ($index) {
 		$self->_check_row_index($index);
-		my ($height_id) = splice @_row_height_ids, $index, 1;
-		my ($wrappers)  = splice @_cell_wrappers, $index, 1;
-		splice @_row_spans, $index, 1;
-		$_ids->release_row_height_id($height_id);
-		_drop_grid_groups(@$wrappers);
+		my $row = $self->_row($index);
+		$_ids->release_row_height_id($row->height_id);
+		_drop_grid_groups(@{ $row->children });
 		$self->_splice_children($index, 1);
 		return $self;
 	}
 
 	method clear_rows () {
-		my @wrappers = map { @$_ } @_cell_wrappers;
-		$_ids->release_row_height_id($_) for @_row_height_ids;
-		@_cell_wrappers = @_row_spans = @_row_height_ids = ();
-		_drop_grid_groups(@wrappers);
-		$self->_splice_children(0, scalar @{ $self->children });
+		my @rows = @{ $self->children };
+		$_ids->release_row_height_id($_->height_id) for @rows;
+		_drop_grid_groups(map { @{ $_->children } } @rows);
+		$self->_splice_children(0, scalar @rows);
 		return $self;
 	}
 
@@ -418,7 +419,7 @@ role Clay::UI::Grid
 		my ($col_ids, $next_width_local) = $_ids->col_ids_for(scalar @$row_cells);
 
 		$_ids->commit_col_ids($col_ids, $next_width_local);
-		my @wrappers = $self->_wrap_row($row_cells, $col_ids, $_row_height_ids[$index]);
+		my @wrappers = $self->_wrap_row($row_cells, $col_ids, $self->_row($index)->height_id);
 		$self->_replace_row_record($index, \@wrappers, 0);
 		return $self;
 	}
@@ -426,36 +427,37 @@ role Clay::UI::Grid
 	method replace_spanning_row ($index, $cell) {
 		$self->_check_row_index($index);
 		$self->_validate_cells($cell);
-		my $wrapper = $self->_wrap_spanning_cell($cell, $_row_height_ids[$index]);
+		my $wrapper = $self->_wrap_spanning_cell($cell, $self->_row($index)->height_id);
 		$self->_replace_row_record($index, [ $wrapper ], 1);
 		return $self;
 	}
 
 	method _replace_row_record ($index, $wrappers, $spans) {
-		_drop_grid_groups(@{ $_cell_wrappers[$index] });
-		$_cell_wrappers[$index] = [ @$wrappers ];
-		$_row_spans[$index]     = $spans;
-		my $row = $self->children->[$index];
-		$row->_splice_children(0, scalar @{ $row->children }, @$wrappers);
+		my $row = $self->_row($index);
+		my $old = $row->children;
+		_drop_grid_groups(@$old);
+		$row->_set_spans($spans);
+		$row->_splice_children(0, scalar @$old, @$wrappers);
 		return;
 	}
 
 	method set_cell ($r, $c, $widget) {
 		$self->_check_row_index($r);
+		my $row = $self->_row($r);
 		croak_ui "Clay::UI::Grid: row $r spans all columns; use replace_spanning_row or replace_row"
-			if $_row_spans[$r];
-		my $current_row_len = scalar @{ $_cell_wrappers[$r] };
+			if $row->spans;
+		my $cells           = $row->children;
+		my $current_row_len = scalar @$cells;
 		croak_ui "Clay::UI::Grid: col index " . ($c // 'undef') . " out of range 0.." . $current_row_len
 			unless defined $c && $c =~ /\A[0-9]+\z/ && $c <= $current_row_len;
 		$self->_validate_cells($widget);
 		my ($col_ids, $next_width_local) = $_ids->col_ids_for($c + 1);
 
 		$_ids->commit_col_ids($col_ids, $next_width_local);
-		my $wrapper  = $self->_wrap_cell($widget, $col_ids->[$c], $_row_height_ids[$r]);
+		my $wrapper  = $self->_wrap_cell($widget, $col_ids->[$c], $row->height_id);
 		my $replaced = $c < $current_row_len ? 1 : 0;
-		_drop_grid_groups($_cell_wrappers[$r][$c]) if $replaced;
-		$_cell_wrappers[$r][$c] = $wrapper;
-		$self->children->[$r]->_splice_children($c, $replaced, $wrapper);
+		_drop_grid_groups($cells->[$c]) if $replaced;
+		$row->_splice_children($c, $replaced, $wrapper);
 		return $self;
 	}
 
@@ -464,9 +466,6 @@ role Clay::UI::Grid
 	# parents, focus and hover.
 	method reorder_rows ($order) {
 		$self->_reorder_children($order);
-		@_cell_wrappers  = @_cell_wrappers[@$order];
-		@_row_spans      = @_row_spans[@$order];
-		@_row_height_ids = @_row_height_ids[@$order];
 		return $self;
 	}
 
@@ -569,7 +568,9 @@ C<height_group>, and Clay raises all members of a group to the size of
 the largest one.
 
 The grid's children are its rows. C<children> returns the
-L<Clay::UI::Grid::Row> objects; use L</cell_wrappers> to get at the
+L<Clay::UI::Grid::Row> objects, each of which knows whether it spans
+(L<Clay::UI::Grid::Row/spans>) and its height id
+(L<Clay::UI::Grid::Row/height_id>); use L</cell_wrappers> to get at the
 cells. The grid composes L<Clay::UI::Role::Core::Element> but not
 L<Clay::UI::Role::Core::Container>: there is no C<add_child>, only the
 row methods below change it.

@@ -17,7 +17,6 @@ use Clay::UI::Events::OnFocus;
 use Clay::UI::Events::OnBlur;
 use Clay::XS qw(CLAY_ATTACH_TO_NONE);
 use Clay::UI::Revision qw(bump_revision);
-use Clay::UI::_keys qw(camelize_keys);
 use Clay::UI::_validate qw(is_finite_number);
 use Clay::UI::_error qw(croak_ui);
 
@@ -126,7 +125,7 @@ class Clay::UI::Interaction :strict(params) {
 	method _owns ($widget) {
 		my $owner = blessed $widget && $widget->can('ui') ? $widget->ui : undef;
 		return 0 unless defined $owner && refaddr($owner) == refaddr($ui);
-		return !grep { _is_within($widget, $_) } @_leaving;
+		return !grep { $_->contains($widget) } @_leaving;
 	}
 
 	method _require_own ($widget, $arg) {
@@ -267,7 +266,7 @@ class Clay::UI::Interaction :strict(params) {
 	# hovered ones get OnHoverStopped and the focused one OnBlur. Until this
 	# returns the subtrees count as gone already (see _owns).
 	method release_subtrees (@tops) {
-		my $leaving = sub ($widget) { grep { _is_within($widget, $_) } @tops };
+		my $leaving = sub ($widget) { grep { $_->contains($widget) } @tops };
 		my $states_before = $self->_state_signature;
 		my @stopped = grep { $leaving->($_) } _live(\%_hovered);
 		delete $_hovered{ refaddr $_ } for @stopped;
@@ -329,6 +328,18 @@ class Clay::UI::Interaction :strict(params) {
 		return defined $_focused && refaddr($_focused) == refaddr($widget) ? 1 : 0;
 	}
 
+	# True when the focused widget is $widget or below it.
+	method has_focus_within ($widget) {
+		_require_widget('has_focus_within', $widget);
+		return defined $_focused && $widget->contains($_focused) ? 1 : 0;
+	}
+
+	# The widgets of the scope that can take the focus now, in tree order.
+	method focusables (%args) {
+		my $within = $self->_focus_scope('focusables', %args);
+		return grep { $self->can_take_focus($_) } _focusables_in($within);
+	}
+
 	# undef blurs. Focusing the focused widget again is a no-op.
 	method set_focused_widget ($widget) {
 		_require_ui($ui, 'set_focused_widget');
@@ -363,15 +374,27 @@ class Clay::UI::Interaction :strict(params) {
 
 	# The default order, ignoring every HasFocusOrder: the next / previous
 	# Focusable after the focused widget in depth-first pre-order that can
-	# focus now, wrapping around.
-	method default_next_focus () {
-		_require_ui($ui, 'default_next_focus');
-		return $self->_step_focus(1);
+	# focus now, wrapping around within the scope.
+	method default_next_focus (%args) {
+		return $self->_step_focus(1, $self->_focus_scope('default_next_focus', %args));
 	}
 
-	method default_previous_focus () {
-		_require_ui($ui, 'default_previous_focus');
-		return $self->_step_focus(-1);
+	method default_previous_focus (%args) {
+		return $self->_step_focus(-1, $self->_focus_scope('default_previous_focus', %args));
+	}
+
+	# The subtree a focus query covers: the widget given as 'within', which
+	# must belong to this UI, or else the whole tree.
+	method _focus_scope ($method, %args) {
+		_require_ui($ui, $method);
+		my @unknown = sort grep { $_ ne 'within' } keys %args;
+		croak_ui "Clay::UI::Interaction::$method: unknown argument(s): " . join(', ', @unknown) if @unknown;
+		return $ui->root unless exists $args{within};
+		my $within = $args{within};
+		my $owner  = blessed $within && $within->DOES('Clay::UI::Role::Layout::HasParent') ? $within->ui : undef;
+		croak_ui "Clay::UI::Interaction::$method: 'within' must be a widget of this Clay::UI"
+			unless defined $owner && refaddr($owner) == refaddr($ui);
+		return $within;
 	}
 
 	# What set_focused_widget accepts, without dying.
@@ -394,7 +417,7 @@ class Clay::UI::Interaction :strict(params) {
 		my $order  = $self->_focus_order_owner;
 		my $target = defined $order
 			? $self->_validate_focus_order($order, $step > 0 ? $order->get_next_focus : $order->get_previous_focus)
-			: $self->_step_focus($step);
+			: $self->_step_focus($step, $ui->root);
 		$self->set_focused_widget($target) if defined $target;
 		return;
 	}
@@ -422,11 +445,13 @@ class Clay::UI::Interaction :strict(params) {
 		return $widget->can_focus ? $widget : undef;
 	}
 
-	# The next Focusable after the focused widget in pre-order ($step 1) or
-	# before it ($step -1) that can focus now, wrapping around. The focused
-	# widget itself may have been disabled while focused.
-	method _step_focus ($step) {
-		my @all = _focusables_in_order($ui->root);
+	# The next Focusable of the subtree $within after the focused widget in
+	# pre-order ($step 1) or before it ($step -1) that can take the focus
+	# now, wrapping around. With the focus outside the subtree, the first
+	# (or last) one. The focused widget itself may have been disabled while
+	# focused.
+	method _step_focus ($step, $within) {
+		my @all = _focusables_in($within);
 		return undef unless @all;
 		my $start;
 		if (defined $_focused) {
@@ -435,7 +460,7 @@ class Clay::UI::Interaction :strict(params) {
 		$start //= $step > 0 ? -1 : scalar @all;
 		for my $offset (1 .. scalar @all) {
 			my $candidate = $all[ ($start + $step * $offset) % @all ];
-			return $candidate if $candidate->can_focus;
+			return $candidate if $self->can_take_focus($candidate);
 		}
 		return undef;
 	}
@@ -453,16 +478,17 @@ class Clay::UI::Interaction :strict(params) {
 		return;
 	}
 
-	# Every Focusable in depth-first pre-order, focusable right now or not.
-	sub _focusables_in_order ($root) {
-		my @focusables;
-		my @stack = ($root);
-		while (@stack) {
-			my $node = shift @stack;
-			push @focusables, $node if $node->DOES($FOCUSABLE);
-			unshift @stack, @{ $node->layout_children } if $node->DOES('Clay::UI::Role::Core::Element');
-		}
-		return @focusables;
+	sub _require_widget ($method, $widget) {
+		croak_ui "Clay::UI::Interaction::$method: takes a widget, got " . (ref($widget) || (defined $widget ? "'$widget'" : 'undef'))
+			unless blessed $widget && $widget->DOES('Clay::UI::Role::Layout::HasParent');
+		return;
+	}
+
+	# Every Focusable of the subtree $within (itself first) in depth-first
+	# pre-order, focusable right now or not.
+	sub _focusables_in ($within) {
+		my @subtree = ($within, $within->DOES('Clay::UI::Role::Core::Element') ? $within->descendants : ());
+		return grep { $_->DOES($FOCUSABLE) } @subtree;
 	}
 
 	sub _is_enabled ($widget) {
@@ -502,13 +528,6 @@ class Clay::UI::Interaction :strict(params) {
 		return;
 	}
 
-	sub _is_within ($widget, $top) {
-		for (my $node = $widget; defined $node; $node = $node->parent) {
-			return 1 if refaddr($node) == refaddr($top);
-		}
-		return 0;
-	}
-
 	# The widget a press or release belongs to. Pointer-over order lists
 	# the topmost Clay root first and each root in pre-order, so a later
 	# Pressable in the first one's root is its descendant or drawn over
@@ -519,7 +538,7 @@ class Clay::UI::Interaction :strict(params) {
 		return undef unless defined $origin;
 		my $root_addr = refaddr(_floating_root($origin)) // 0;
 		for my $next (@pressables) {
-			next if _is_within($origin, $next);
+			next if $next->contains($origin);
 			next unless (refaddr(_floating_root($next)) // 0) == $root_addr;
 			$origin = $next;
 		}
@@ -538,7 +557,7 @@ class Clay::UI::Interaction :strict(params) {
 	sub _is_floating ($widget) {
 		return 0 unless $widget->DOES($FLOATING);
 		my $floating = $widget->floating;
-		return defined $floating && (camelize_keys($floating)->{attachTo} // CLAY_ATTACH_TO_NONE) != CLAY_ATTACH_TO_NONE;
+		return defined $floating && ($floating->{attach_to} // CLAY_ATTACH_TO_NONE) != CLAY_ATTACH_TO_NONE;
 	}
 }
 
@@ -593,6 +612,8 @@ Clay::UI::Interaction - hover, press and focus state of a Clay::UI
 	$interaction->focus_next;                    # focuses $cancel
 	$interaction->set_focused_widget($save);
 	my $focused = $interaction->get_focused_widget;   # $save
+	$interaction->has_focus_within($root);       # 1: $save is below it
+	my @tab_stops = $interaction->focusables;    # ($save, $cancel)
 
 =head1 DESCRIPTION
 
@@ -888,9 +909,24 @@ first C<render> and right after the tree changed, whereas the pointer
 was tested against the last layout.
 
 L</set_focused_widget>, L</focus_next>, L</focus_previous>,
-L</default_next_focus> and L</default_previous_focus> die with
+L</focusables>, L</default_next_focus> and L</default_previous_focus>
+die with
 C<Clay::UI::Interaction::E<lt>methodE<gt>: its Clay::UI no longer exists>
 once the Clay::UI that owns this tracker has been freed.
+
+=head2 Focus scopes
+
+L</focusables>, L</default_next_focus> and L</default_previous_focus>
+take an optional C<< within => $widget >>: the I<focus scope>, a
+subtree of this UI (C<$widget> and every widget below it in layout
+pre-order, see L<Clay::UI::Role::Core::Element/descendants>). Without
+it they cover the whole tree. A modal dialog keeps Tab inside itself
+with a HasFocusOrder that steps within its own subtree (see
+L<Clay::UI::Role::Interaction::HasFocusOrder/default_next_focus>).
+C<within> must be a widget of this UI; anything else dies with
+C<Clay::UI::Interaction::E<lt>methodE<gt>: 'within' must be a widget of this Clay::UI>,
+and another argument dies with
+C<Clay::UI::Interaction::E<lt>methodE<gt>: unknown argument(s): ...>.
 
 
 =head2 get_focused_widget
@@ -906,6 +942,27 @@ the focused widget has been freed; the tracker holds it weakly).
 
 Returns 1 when C<$widget> has the focus, 0 otherwise.
 L<Clay::UI::Role::Interaction::Focusable/is_focused> asks this.
+
+=head2 has_focus_within
+
+	my $bool = $interaction->has_focus_within($panel);
+
+Returns 1 when the focused widget is C<$panel> or below it (also below
+an internal child), 0 otherwise, also when nothing is focused. Use it
+to draw a panel differently while the keyboard is in it, or to close a
+popup once the focus left it. Dies with
+C<Clay::UI::Interaction::has_focus_within: takes a widget, got ...> for
+anything but a widget.
+
+=head2 focusables
+
+	my @widgets = $interaction->focusables;
+	my @inside  = $interaction->focusables(within => $dialog);
+
+Returns the widgets of the scope (see L</Focus scopes>; the scope's
+own widget included) that can take the focus now (L</can_take_focus>),
+in depth-first pre-order of the current tree. Disabled widgets and
+widgets whose C<can_focus> is false are left out.
 
 =head2 can_take_focus
 
@@ -991,6 +1048,7 @@ C<get_previous_focus>.
 =head2 default_next_focus
 
 	my $widget = $interaction->default_next_focus;
+	my $inside = $interaction->default_next_focus(within => $dialog);
 
 Returns the widget the default order (see L</focus_next>) would focus
 next, ignoring every HasFocusOrder, or C<undef> when no widget can take
@@ -998,11 +1056,18 @@ the focus. Changes nothing. A HasFocusOrder widget calls it to fall
 back to the default order (see
 L<Clay::UI::Role::Interaction::HasFocusOrder/default_next_focus>).
 
+With C<within> (see L</Focus scopes>) only the scope's widgets count:
+the next one after the focused widget, wrapping around inside the
+scope, or the first one when the focus is outside the scope or nothing
+is focused.
+
 =head2 default_previous_focus
 
 	my $widget = $interaction->default_previous_focus;
+	my $inside = $interaction->default_previous_focus(within => $dialog);
 
-The mirror of L</default_next_focus>.
+The mirror of L</default_next_focus>: with the focus outside the scope,
+the last widget of the scope.
 
 =head2 release_ineligible
 
@@ -1014,9 +1079,11 @@ now false loses the focus and gets C<OnBlur> before this returns, as
 from C<set_focused_widget(undef)>. A widget that may keep everything is
 left alone. Bumps the revision when a state changed.
 
-The C<disabled> writer of L<Clay::UI::Role::Interaction::Disableable>
-and the C<can_focus> writer of L<Clay::UI::Role::Interaction::Focusable>
-call it; you do not call it yourself unless you write such a setter.
+The C<disabled> writer of L<Clay::UI::Role::Interaction::Disableable>,
+the C<can_focus> writer of L<Clay::UI::Role::Interaction::Focusable>
+and its C<focus_eligibility_changed> call it; a class whose
+C<accepts_focus> answer changes calls C<focus_eligibility_changed>
+rather than this.
 
 =head1 REMOVED WIDGETS
 

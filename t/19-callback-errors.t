@@ -336,12 +336,13 @@ subtest 'read-only queries work inside callbacks' => sub {
 	is( \%failed, {}, 'every query worked' );
 };
 
-subtest 'the wrapper guard table covers every function and matches the POD' => sub {
-	is( [ sort keys %$GUARDS ], [ sort grep { !/^CLAY_/ } @Clay::XS::EXPORT_OK ],
-		'one guard per exported function' );
-
+subtest 'every export has a POD heading and the POD matches the wrapper guard table' => sub {
 	open my $fh, '<', $INC{'Clay/XS.pm'} or die "cannot read Clay/XS.pm: $!";
-	my @paragraphs = split /\n\s*\n/, do { local $/; <$fh> };
+	my $pod = do { local $/; <$fh> };
+	my %headed = map { $_ => 1 } $pod =~ /^=(?:head\d|item)\s+(\w+)/mg;
+	is( [ grep { !$headed{$_} } @Clay::XS::EXPORT_OK ], [], 'every exported function and constant has its own heading' );
+
+	my @paragraphs = split /\n\s*\n/, $pod;
 	my $named = sub ($marker) {
 		my ($paragraph) = grep { /\Q$marker\E/ } @paragraphs;
 		return sort grep { exists $GUARDS->{$_} } $paragraph =~ /C<(\w+)>/g;
@@ -448,7 +449,7 @@ subtest 'a dying warn handler does not keep a destroyed context alive' => sub {
 		like( dies { $ctx->DESTROY }, qr/^warned: Clay::XS: context destroyed with a held callback error/,
 			'the warning still reaches the handler' );
 	}
-	like( dies { Clay::XS::_string_arena_chunk_count($ctx) }, qr/not a live Clay::XS::Context/,
+	like( dies { Clay::XS::_context_stats($ctx) }, qr/not a live Clay::XS::Context/,
 		'the context was freed before it' );
 
 	package Unprintable { use overload '""' => sub { die "cannot print\n" }, fallback => 1 }
@@ -456,7 +457,7 @@ subtest 'a dying warn handler does not keep a destroyed context alive' => sub {
 	Clay_BeginLayout();
 	Clay__OpenTextElement('abandoned', {});
 	like( dies { $other->DESTROY }, qr/^cannot print$/, 'an error object that cannot be printed dies in DESTROY' );
-	like( dies { Clay::XS::_string_arena_chunk_count($other) }, qr/not a live Clay::XS::Context/,
+	like( dies { Clay::XS::_context_stats($other) }, qr/not a live Clay::XS::Context/,
 		'after the context was freed' );
 };
 

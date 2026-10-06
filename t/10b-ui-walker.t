@@ -42,8 +42,14 @@ class RawConfigWidget :does(Clay::UI::Role::Core::Container) {
 	method contribute_raw ($cfg) { %$cfg = (%$cfg, %$raw); return }
 }
 
+# Rots once rot is called: the UI walks the tree when it is built (to
+# announce tree_changed), so the garbage appears only afterwards.
 class RottenWidget :isa(TestWidget) {
-	method layout_children { return [ { not => 'a widget' } ] }
+	field $rotten = 0;
+
+	method rot () { $rotten = 1; return $self }
+
+	method layout_children { return $rotten ? [ { not => 'a widget' } ] : $self->SUPER::layout_children }
 }
 
 class HoverWidget
@@ -140,6 +146,7 @@ subtest 'fail loud on bad child without segfault' => sub {
 	# can catch.
 	my $parent = RottenWidget->new(id => 'parent');
 	my $ui = make_ui($parent);
+	$parent->rot;
 	like(
 		dies { $ui->render },
 		qr/not a blessed widget/,

@@ -5,7 +5,8 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
-use Clay::UI::_keys qw(camelize_keys camelize_string);
+use Clay::XS;
+use Clay::UI::_keys qw(camelize_keys camelize_string snake_keys snake_string);
 
 # -----------------------------------------------------------------------------
 # camelize_string: single-token cases.
@@ -100,5 +101,29 @@ like(
 	qr/already present|collides/,
 	'snake/camel collision in same hash throws',
 );
+
+# -----------------------------------------------------------------------------
+# snake_keys: the mirror, run where attributes are set.
+# -----------------------------------------------------------------------------
+
+is(
+	snake_keys({ childGap => 1, padding => { left => 2 }, childAlignment => { x => 0 }, colors => [ { topLeft => 3 } ] }),
+	{ child_gap => 1, padding => { left => 2 }, child_alignment => { x => 0 }, colors => [ { top_left => 3 } ] },
+	'snake_keys rewrites nested hashes and arrays',
+);
+my $blessed_camel = bless { someKey => 1 }, 'Some::Class';
+is( snake_keys($blessed_camel), exact_ref($blessed_camel), 'snake_keys returns a blessed ref as-is' );
+like(
+	dies { snake_keys({ background_color => [1], backgroundColor => [2] }, 'style') },
+	qr/key 'backgroundColor' in 'style' is 'background_color' in snake_case, which is already present/,
+	'snake_keys: both spellings of one key in a hash throw',
+);
+
+# Every Clay field name survives the trip to snake_case and back, so
+# stored snake_case slices reach Clay with its own keys.
+my $schemas = Clay::XS::_struct_schemas();
+my @fields  = sort { $a cmp $b } keys %{ { map { $_->{name} => 1 } map { @$_ } values %$schemas } };
+my @broken  = grep { camelize_string(snake_string($_)) ne $_ } @fields;
+is( \@broken, [], scalar(@fields) . ' schema field names round-trip through snake_string' );
 
 done_testing;

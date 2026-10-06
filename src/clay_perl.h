@@ -81,7 +81,8 @@ void Clay_SetExternalScrollHandlingEnabled(bool enabled);
  * A singly linked list of chunks. Copies append to the head chunk of the
  * current frame; when it is full a new chunk of max(needed, 2 x previous)
  * bytes is pushed. Chunks are never reallocated or freed while Clay may
- * read from them (see clay_perl_context_begin_frame for the lifetime rule).
+ * read from them (the frame module applies the lifetime rule, see
+ * src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
 typedef struct clay_perl_arena_chunk {
@@ -166,9 +167,10 @@ typedef struct clay_perl_context {
     int32_t max_element_count;
     int32_t max_measure_text_cache_word_count;
 
-    /* Frame bookkeeping for the wrapper guards: the frame state, the
-     * open/close balance, and whether the innermost open element may
-     * still be configured (only right after it was opened). */
+    /* Frame state, written only by the frame module (clay_perl_frame_*)
+     * and read by the wrapper guards: the frame state, the open/close
+     * balance, and whether the innermost open element may still be
+     * configured (only right after it was opened). */
     clay_perl_layout_state layout_state;
     int32_t  open_depth;
     bool     open_element_configurable;
@@ -234,17 +236,43 @@ clay_perl_context *clay_perl_context_from_sv(pTHX_ SV *sv);
 clay_perl_context *clay_perl_context_peek(pTHX_ SV *sv, MAGIC **magic_out);
 
 /* ---------------------------------------------------------------------------
- * Frame lifecycle, string arena and id interning (src/clay_perl_context.c).
+ * The frame module (src/clay_perl_context.c): the frame state machine,
+ * the open/close bookkeeping and the retention of everything Clay keeps
+ * pointers to across frames. Call only while ctx is Clay's current
+ * context.
  * ------------------------------------------------------------------------ */
 
-/* Called at Clay_BeginLayout, before Clay discards the last layout and
- * while layout_state still tells whether that layout is complete:
- * recycles the string arena and sweeps interned ids and hover entries.
- * Both sweeps keep what the last N completed frames used (N per table: 2
- * for ids, 1 for hover); an entry stamped s survives while
- * s >= completed_frames - N. After an unfinished frame the arena keeps
- * every chunk and the id sweep is skipped until a frame completes. */
-void        clay_perl_context_begin_frame(pTHX_ clay_perl_context *self);
+/* Clay_BeginLayout: re-throws a held error left by an unfinished frame
+ * (a DECLARING frame becomes ABANDONED, the open-element bookkeeping is
+ * reset, no frame begins). Otherwise recycles the string arena, sweeps
+ * the interned ids and hover callbacks, calls Clay_BeginLayout and
+ * moves to DECLARING. */
+void clay_perl_frame_begin(pTHX_ clay_perl_context *ctx);
+
+/* Clay_EndLayout: croaks unless DECLARING, closes the elements still
+ * open, calls Clay_EndLayout with ctx as the active transition context,
+ * moves to COMPLETE and counts the frame. Croaks for elements that were
+ * still open once Clay has returned; returns Clay's commands otherwise. */
+Clay_RenderCommandArray clay_perl_frame_end(pTHX_ clay_perl_context *ctx, float delta_time);
+
+/* Element bookkeeping, called by the element wrappers. An element may be
+ * configured once, right after it is opened: element_configured croaks
+ * "<who>: the open element is already configured or has children; ..."
+ * otherwise. A text element is a child, so its parent can no longer be
+ * configured. */
+void clay_perl_frame_element_opened(clay_perl_context *ctx);
+void clay_perl_frame_element_configured(pTHX_ clay_perl_context *ctx, const char *who);
+void clay_perl_frame_text_element_opened(clay_perl_context *ctx);
+void clay_perl_frame_element_closed(clay_perl_context *ctx);
+
+/* { arena_chunks, interned_ids, hover_entries, layout_state (complete,
+ * declaring or abandoned), open_depth, completed_frames } as a new hash
+ * reference, for Clay::XS::_context_stats. */
+SV  *clay_perl_frame_stats(pTHX_ const clay_perl_context *ctx);
+
+/* ---------------------------------------------------------------------------
+ * String arena and id interning (src/clay_perl_context.c).
+ * ------------------------------------------------------------------------ */
 
 /* Copies the (UTF-8) bytes of sv into the arena. Croaks if sv is undef. */
 Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, const char *what);
@@ -287,7 +315,9 @@ void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx);
  * (wrong reference type, non-numeric or non-finite numbers, integers out
  * of the C field's range) naming the struct and field. They never return
  * half-initialised structs. The clay_perl_parse_* scalar helpers croak
- * plain strings. All _to_sv helpers return a new, non-mortal SV.
+ * plain strings. All _to_sv helpers return a new, non-mortal SV; those of
+ * structs with a schema run its write mode, so input and output use the
+ * same keys.
  * ------------------------------------------------------------------------ */
 
 /* Scalar parsing shared by the XS wrappers. */
@@ -335,15 +365,34 @@ Clay_ElementDeclaration clay_element_declaration_from_sv(pTHX_ SV *sv);
  * name). An unknown type name croaks a plain string. */
 void clay_perl_check_struct(pTHX_ const char *type, SV *value, const char *root);
 
+/* Every struct schema, for Clay::XS::_struct_schemas:
+ * { name => [ { name, kind, min, max, nested }, ... ] } with the fields in
+ * schema order. Named schemas appear under their C type name, the
+ * anonymous ones (transition enter and exit) under "<outer>.<field>".
+ * min and max are set for integers and bounded floats, nested (a schema
+ * name) for nested structs; they are undef otherwise. */
+SV *clay_perl_struct_schemas(pTHX);
+
 /* Transition data: from_sv starts from base and overrides the keys present
  * in the hash; undef returns base unchanged. */
 Clay_TransitionData clay_transition_data_from_sv(pTHX_ SV *sv, Clay_TransitionData base, const char *what);
 SV                 *clay_transition_data_to_sv(pTHX_ Clay_TransitionData data);
 
-/* Element ids. from_sv requires an element-id hash reference (undef
- * croaks) and leaves stringId empty; the caller interns it where Clay
- * keeps the id (Clay__OpenElementWithId). */
+/* Transition callback arguments (a transition handler's hash, the
+ * argument of Clay_EaseOut). from_sv requires a hash reference (undef
+ * croaks); the returned args.current points at *current, which holds the
+ * given `current` or, when that is missing, a copy of `initial`. */
+Clay_TransitionCallbackArguments clay_transition_arguments_from_sv(pTHX_ SV *sv, const char *what,
+                                                                   Clay_TransitionData *current);
+SV *clay_transition_arguments_to_sv(pTHX_ const Clay_TransitionCallbackArguments *args);
+
+/* Element ids. Both from_sv functions require an element-id hash
+ * reference (undef croaks). clay_element_id_from_sv leaves stringId
+ * empty, for lookups Clay does not keep the id of;
+ * clay_element_id_from_sv_interned also interns a given stringId in ctx,
+ * for ids Clay keeps (Clay__OpenElementWithId). */
 Clay_ElementId      clay_element_id_from_sv(pTHX_ SV *sv, const char *what);
+Clay_ElementId      clay_element_id_from_sv_interned(pTHX_ clay_perl_context *ctx, SV *sv, const char *what);
 SV                 *clay_element_id_to_sv(pTHX_ Clay_ElementId id);
 
 SV                 *clay_pointer_data_to_sv(pTHX_ Clay_PointerData data);
@@ -462,8 +511,8 @@ void clay_perl_callbacks_free(pTHX_ clay_perl_context *ctx);
 void clay_perl_hover_register(pTHX_ clay_perl_context *ctx,
                               uint32_t element_id, SV *cb, SV *userdata);
 
-/* Drops the hover entries no frame can reach any more (called at the
- * start of every frame). */
-void clay_perl_hover_registry_sweep(pTHX_ clay_perl_context *ctx);
+/* The stamp of a hover_callbacks value (the completed_frames value when it
+ * was registered), for the frame module's sweep. */
+uint32_t clay_perl_hover_entry_stamp(pTHX_ SV *entry);
 
 #endif /* CLAY_PERL_H */

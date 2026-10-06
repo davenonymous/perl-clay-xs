@@ -101,16 +101,9 @@ class Clay::UI::_FrameRegistry :strict(params) {
 		return values %roots;
 	}
 
-	# Every widget of the tree below $root, depth-first pre-order.
+	# $root and every widget below it, depth-first pre-order.
 	sub _pre_order ($root) {
-		my @order;
-		my @stack = ($root);
-		while (@stack) {
-			my $node = shift @stack;
-			push @order, $node;
-			unshift @stack, @{ $node->layout_children } if $node->DOES('Clay::UI::Role::Core::Element');
-		}
-		return @order;
+		return ($root, $root->DOES('Clay::UI::Role::Core::Element') ? $root->descendants : ());
 	}
 
 	# [ widget, element id hash ] for every scroll container that still

@@ -145,9 +145,10 @@ in Clay::UI it is a role; compose it in a class of your own (as
 C<My::Label> above) to get a widget you can construct.
 
 It composes L<Clay::UI::Role::Core::TextNode>, which provides
-C<parent>, C<root>, C<ui>, C<on> and C<mark_changed>. A text widget has
-no C<id>, no children, no sizing groups and no background; put it in a
-L<Clay::UI::Box> to style or size it.
+C<parent>, C<root>, C<ui>, C<contains>, C<tree_changed>, C<on> and
+C<mark_changed>. A text widget has no C<id>, no children, no sizing
+groups and no background; put it in a L<Clay::UI::Box> to style or size
+it.
 
 Clay measures text with the C<measure_text> function of the
 L<Clay::UI> (see L<Clay::UI/new>). The function receives the string and

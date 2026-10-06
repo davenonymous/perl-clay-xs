@@ -161,6 +161,23 @@ subtest 'Clay keys are accepted in snake_case and camelCase' => sub {
 	ok( lives { Clay::UI::Test::Box->new(layout => { childGap => 4, layoutDirection => 1 }) }, 'camelCase' );
 };
 
+subtest 'a camelCase slice reads back in snake_case' => sub {
+	my $box = Clay::UI::Test::Box->new(layout => { childGap => 4, childAlignment => { x => CLAY_ALIGN_X_RIGHT } });
+	is( $box->layout, { child_gap => 4, child_alignment => { x => CLAY_ALIGN_X_RIGHT } }, 'from the constructor' );
+	$box->corner_radius({ topLeft => 2 });
+	is( $box->corner_radius, { top_left => 2 }, 'from an accessor' );
+};
+
+subtest 'both spellings of one key die where the slice is set' => sub {
+	my $both = qr/Clay::UI: key 'childGap' in 'layout' is 'child_gap' in snake_case, which is already present in the same hash/;
+	like( dies { Clay::UI::Test::Box->new(layout => { child_gap => 1, childGap => 2 }) }, $both, 'at construction' );
+	my $box = Clay::UI::Test::Box->new;
+	like( dies { $box->layout({ child_gap => 1, childGap => 2 }) }, $both, 'through the accessor' );
+	like( dies { $box->layout({ padding => { topLeft => 1, top_left => 2 } }) }, qr/key 'topLeft' in 'layout\.padding'/,
+		'a nested hash names its path' );
+	is( $box->layout, {}, 'the slice is unchanged' );
+};
+
 subtest 'hover roles cannot be composed onto a text node' => sub {
 	my $ok = eval q{
 		class HoverText :does(Clay::UI::Role::Core::TextNode) :does(Clay::UI::Role::Interaction::Hoverable) {

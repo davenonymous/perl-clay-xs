@@ -35,9 +35,23 @@ through Clay::UI and replaces `userData` with widget class and id.
 - `lib/Clay/XS.xs` + `src/*.c` + `src/clay_perl.h` are the binding;
   `src/marshal.c` converts Perl hashes to Clay structs (keys are the exact
   camelCase field names from clay.h) and range-checks every argument. Each
-  input struct is one schema table there; the same tables run in parse
-  mode (lenient, per frame) and check mode (`check_struct`, strict), and
-  both croak `Clay::XS::StructError`. Add a field by extending its table.
+  struct a function takes is one schema table there; the same tables run
+  in parse mode (lenient, per frame) and check mode (`check_struct`,
+  strict), which both croak `Clay::XS::StructError`, and in write mode
+  (`schema_write`: the `*_to_sv` of those structs and the transition
+  handler's `Clay_TransitionCallbackArguments` hash). Add a field by
+  extending its table; t/23 checks every field against
+  `lib/Clay/XS/Structs.pod` through `Clay::XS::_struct_schemas`. Element
+  id hashes (including the `stringId` interning) are read only in
+  `src/marshal.c`.
+- `src/clay_perl_enums.h` lists every exported Clay enum once, as X-macros
+  in clay.h's member order (`CLAY_PERL_ENUM_<Group>`, all groups in
+  `CLAY_PERL_ENUMS`). BOOT installs the constants from it,
+  `Clay::XS::_constant_names` returns their names for `@EXPORT_OK`, and
+  the schema rows take their ranges from `CLAY_PERL_ENUM_MAX(Group)` (the
+  last member; the build checks that members are 0..N-1) or, for the
+  transition property flags, `CLAY_PERL_FLAGS_ALL`. Add a constant to its
+  group's list and give it an `=item` in `lib/Clay/XS.pm`; nothing else.
 - `src/clay/clay.h.orig` is the pristine upstream header (committed).
   `make` generates the gitignored `src/clay/clay.h` from it plus the
   patches in `@clay_patches` (`Makefile.PL`), applied in order:
@@ -92,26 +106,38 @@ through Clay::UI and replaces `userData` with widget class and id.
   live in `ctx->callbacks[kind]` (set with `clay_perl_callback_set`); a
   new kind needs an enum entry, a `store_result` case and a trampoline
   with its argument builder.
-- **Callbacks cannot re-enter Clay.** Every XSUB has a wrapper guard in
-  `CLAY_PERL_WRAPPERS` (`lib/Clay/XS.xs`): context, mutating or query,
-  counts check, frame requirement, rethrow policy. Wrappers call
+- **Callbacks cannot re-enter Clay.** Every exported XSUB has a wrapper
+  guard in `CLAY_PERL_WRAPPERS` (`lib/Clay/XS.xs`): context, mutating or
+  query, counts check, frame requirement, rethrow policy. Wrappers call
   `wrapper_enter` (refuses mutating calls inside callbacks, pins the
   context) and, when the rethrow policy is AFTER, `wrapper_leave`. A new
-  XSUB needs a table row; t/19 checks the table against the exports and
-  the POD. "Inside a callback" spans the whole trampoline scope
-  (`invoke_callback`), so DESTROYs of callback arguments count too.
+  exported XSUB needs a table row and a POD heading: `@EXPORT_OK` is built
+  from the table's names, and t/19 checks that every export has a heading
+  and the table against the POD. Internal `_` XSUBs (for the tests and
+  Clay::UI) have no row and are not exported. "Inside a callback" spans
+  the whole trampoline scope (`invoke_callback`), so DESTROYs of callback
+  arguments count too.
 - **Frame state** (`layout_state`): COMPLETE, DECLARING (between
   `Clay_BeginLayout` and `Clay_EndLayout`) or ABANDONED (a begun frame
   whose held error the next `Clay_BeginLayout` re-threw). Functions that
   walk Clay's layout tree (`Clay_SetPointerState`,
   `Clay_UpdateScrollContainers`) need COMPLETE; an element may be
-  configured once, right after it is opened.
+  configured once, right after it is opened. The frame module (the last
+  section of `src/clay_perl_context.c`, `clay_perl_frame_*` in
+  `src/clay_perl.h`) owns this state, the open/close bookkeeping and
+  `completed_frames`; the frame and element XSUBs only guard, parse,
+  call it and call Clay, and the wrapper guards only read the state.
+  `Clay::XS::_context_stats($ctx)` shows it to the tests.
 - **Never give Clay a pointer it keeps into a caller's SV.** Text goes
   into a per-context chunked arena that lives an extra frame (longer for
   chunks an exiting element still shows, and for everything after an
   unfinished frame); element id strings are interned in private,
   read-only SVs. Only the hashing helpers borrow the caller's buffer for
-  the duration of the call.
+  the duration of the call. The frame module decides when they may go:
+  it recycles the arena and sweeps the interned ids (kept 2 completed
+  frames, plus while under the pointer or shown by an exiting element)
+  and the hover callbacks (kept 1) through one stamped-registry sweep,
+  with both keep counts and their reasons side by side.
 - Open/close balance is tracked; `Clay_EndLayout` auto-closes leftovers,
   then croaks.
 - Pointer-over, hover and scroll test against the previous frame's layout,
@@ -148,15 +174,24 @@ through Clay::UI and replaces `userData` with widget class and id.
   `focus_next` / `focus_previous` (live tree order, not frame order);
   detaching a subtree drops its interaction state (`OnHoverStopped`) and
   focus (`OnBlur`) at once (`release_subtrees`; while its events fire the
-  subtree no longer counts as part of the UI).
+  subtree no longer counts as part of the UI). Subtree questions have one
+  answer each: Element's `descendants` (layout pre-order, internal
+  children included; the only subtree walk in Clay::UI), HasParent's
+  `contains` (walks up), and the tracker's `has_focus_within`,
+  `focusables(within => ...)` and `default_next_focus` /
+  `default_previous_focus(within => ...)` (a focus scope: the same
+  stepping, limited to a subtree). Consumers use these instead of
+  walking `children` themselves.
 - Focus eligibility is derived, never pushed into a flag: Focusable's
   `can_focus` reader answers "the users' wish (the `can_focus` argument
   or last write) and `accepts_focus` and not `disabled`"; the writer
   only records the wish. A class that never takes focus overrides
   `accepts_focus` in a subclass (a class cannot override a method of a
-  role it composes itself). Writers that can make a widget ineligible
-  (`can_focus`, Disableable's `disabled`) call the tracker's
-  `release_ineligible`, which disarms and unpresses a disabled widget
+  role it composes itself); one whose answer depends on its own state
+  calls Focusable's `focus_eligibility_changed` from that state's
+  setter. Writers that can make a widget ineligible
+  (`can_focus`, Disableable's `disabled`, `focus_eligibility_changed`)
+  call the tracker's `release_ineligible`, which disarms and unpresses a disabled widget
   and blurs a focused widget that cannot focus any more, at once. The
   tracker never arms or presses a disabled widget; `can_take_focus` is
   the one predicate for "may be focused now".
@@ -176,7 +211,10 @@ through Clay::UI and replaces `userData` with widget class and id.
 - `Clay::UI::Role::Layout::GridCell` is a marker role (no fields; it
   implements no methods and requires Element's sizing-group methods): Grid stamps its column and row group ids on such a widget
   directly and wraps any other widget in a `Clay::UI::Grid::Cell`
-  (which composes the marker). Grids made with `share_columns_with`
+  (which composes the marker). Grid keeps one list: its children are
+  `Clay::UI::Grid::Row`s, whose children are the cell wrappers and
+  which carry their `spans` flag and `height_id`; Grid holds no
+  per-row arrays. Grids made with `share_columns_with`
   share one `Clay::UI::Grid::_IdSpace` (grid id and id counters) and a
   common grid `width_group`. Object::Pad 0.825 keeps `ADJUST :params`
   values alive until the next construction, so an `ADJUST :params`
@@ -199,15 +237,29 @@ through Clay::UI and replaces `userData` with widget class and id.
   never see them. Every tree walk (the walker, the focus order, the
   frame registry) reads `layout_children`, never `children`. `$widget->ui` walks to the root, which a Clay::UI
   stamps at construction (write-once).
+- Tree changes have one public seam: HasParent's no-op `tree_changed`.
+  Clay::UI calls it (`_announce_tree_change`) on every widget of a
+  subtree whose top got a parent, lost it (in `_release_children`, after
+  the tracker's release) or became a UI root (end of Clay::UI's
+  `ADJUST`), in layout pre-order, once the change is complete; never on
+  reorder. Every hook runs; the first error is rethrown afterwards (a
+  release listener's error wins). `_set_parent` / `_detach_parent` /
+  `_set_ui_controller` are private: only `Element`'s primitives and
+  Clay::UI's `ADJUST` call them, and no consumer overrides them.
+  Classes react through `tree_changed :override` in a subclass.
 - Attributes are validated where set (accessors and `ADJUST` via
-  `Clay::UI::_validate`) and copied there; readers return copies too
+  `Clay::UI::_validate`) and copied there with snake_case keys
+  (`snake_keys`; both spellings of one key die there), so stored slices
+  and their readers use one spelling; readers return copies too
   (`copy_value`), so no container is shared with callers. Contributors
   build fresh slices around the widget's own values (no per-frame deep
   copy: the walker's `camelize_keys` makes one), so `to_config` output is
   read-only. Clay values go through `check_struct`, the
   strict check mode of the struct schemas in `src/marshal.c`, so there is
   no Perl copy of Clay's keys or ranges. Classes are `:strict(params)`. User ids must not start with `anon:`; user
-  sizing-group ids are `0 .. 2**20 - 1` (higher ones belong to `Grid`).
+  sizing-group ids are `0 .. USER_GROUP_ID_MAX` (`2**20 - 1`, exported by
+  `Clay::UI::_validate`; Grid derives its id packing from it and owns the
+  ids above).
 - Every setter that changes what a frame lays out or draws calls
   `bump_revision()` (`Clay::UI::Revision`) after its value is accepted,
   never on a read; child changes bump in `Element`'s primitives, the
@@ -261,6 +313,8 @@ through Clay::UI and replaces `userData` with widget class and id.
    patches/0002-clay-flow-layout.patch`. Each patch applies on top of the
    previous ones.
 3. Re-check the helpers in `src/clay_impl.c` against Clay's internals and
-   extend its warning pragmas if the build warns.
+   extend its warning pragmas if the build warns. Compare the enums in
+   clay.h with `src/clay_perl_enums.h`: new members go into their group's
+   list (with POD), new enums the binding needs into a new group.
 4. Regenerate golden fixtures; drift unrelated to upstream changes means
    one of the patches interacts badly with the new code.
