@@ -166,4 +166,38 @@ subtest 'stringOffset locates every line in the text' => sub {
     is( text_frame("whole", { fontSize => 10 })->{renderData}{stringOffset}, 0, 'an unbroken text starts at 0' );
 };
 
+subtest 'Latin-1 strings reach Clay as characters and are never upgraded' => sub {
+    my ($text, $id) = ("caf\x{e9}", "n\x{e9}");
+    my ($upgraded_text, $upgraded_id) = ($text, $id);
+    utf8::upgrade($_) for $upgraded_text, $upgraded_id;
+    is( Clay__HashString($id, 7), Clay__HashString($upgraded_id, 7), 'Clay__HashString hashes the characters' );
+    is( Clay_GetElementId($id), Clay_GetElementId($upgraded_id), 'so does Clay_GetElementId' );
+    is( text_frame($text, { fontSize => 10 })->{renderData}{stringContents}, $upgraded_text, 'text arrives as its characters' );
+
+    Clay_BeginLayout();
+    Clay__OpenElementWithId({ %{ Clay_GetElementId($upgraded_id) }, stringId => $id });
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(10), height => sizing_fixed(10) } } });
+    Clay__CloseElement();
+    Clay_EndLayout(0);
+    Clay_SetPointerState([1, 1], 0);
+    is( [ map { $_->{stringId} } @{ Clay_GetPointerOverIds() } ], [ 'Clay__RootContainer', $upgraded_id ],
+        'an interned id string keeps its characters' );
+    ok( !utf8::is_utf8($text) && !utf8::is_utf8($id), 'neither caller string was upgraded' );
+};
+
+subtest 'stringOffset counts every text from its own start' => sub {
+    Clay_BeginLayout();
+    Clay__OpenElementWithId( Clay_GetElementId("root") );
+    Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(30), height => sizing_fit() },
+                                             layoutDirection => CLAY_TOP_TO_BOTTOM } });
+        Clay__OpenTextElement("one two three", { fontSize => 10 });
+        Clay__OpenTextElement("\x{fc}ber \x{e4}rger", { fontSize => 10 });
+        Clay__OpenTextElement("four five", { fontSize => 10 });
+    Clay__CloseElement();
+    my @lines = grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ Clay_EndLayout(0) };
+    is( [ map { [ $_->{renderData}{stringOffset}, $_->{renderData}{stringContents} ] } @lines ],
+        [ [ 0, 'one' ], [ 4, 'two' ], [ 8, 'three' ], [ 0, "\x{fc}ber" ], [ 5, "\x{e4}rger" ], [ 0, 'four' ], [ 5, 'five' ] ],
+        'ASCII and non-ASCII texts in a row, each line at its character offset' );
+};
+
 done_testing;

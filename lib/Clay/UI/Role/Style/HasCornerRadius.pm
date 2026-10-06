@@ -30,7 +30,7 @@ role Clay::UI::Role::Style::HasCornerRadius {
 		return unless defined $corner_radius;
 
 		$config->{corner_radius} = ref $corner_radius
-			? $corner_radius
+			? copy_value($corner_radius)
 			: { top_left => $corner_radius, top_right => $corner_radius, bottom_left => $corner_radius, bottom_right => $corner_radius };
 		return;
 	}

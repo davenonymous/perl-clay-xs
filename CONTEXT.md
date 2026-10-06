@@ -142,10 +142,21 @@ _Avoid_: focus trap (what a modal dialog builds from it), focus group
 ### Frames
 
 **Frame module**:
-The part of `Clay::XS` that owns a context's frame state (complete,
-declaring, abandoned), its open/close bookkeeping and the count of completed
-frames, and decides from them how long text copies, interned element ids
-and hover callbacks are kept. The frame and element functions only call it.
+The part of `Clay::XS` that owns a context's frame state (complete or
+declaring), its open/close bookkeeping and the count of completed frames,
+and decides from them how long text copies, interned element ids and hover
+callbacks are kept. It finishes an unfinished frame before beginning the
+next one, so Clay never begins a frame over a half-declared one. The frame
+and element functions only call it.
+
+**Unfinished frame**:
+A frame begun with `Clay_BeginLayout` that never reached `Clay_EndLayout`,
+usually because an exception interrupted its declaration. The next
+`Clay_BeginLayout` finishes it (closes what is open, lets Clay end it with
+a delta time of 0 and discards its render commands); it then counts as a
+completed frame. A callback error it held is re-thrown by that
+`Clay_BeginLayout`, which then begins no frame.
+_Avoid_: abandoned frame
 _Avoid_: frame manager, lifecycle code
 
 **Frame registry**:

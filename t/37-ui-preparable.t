@@ -52,6 +52,19 @@ class Clay::UI::Test::ScrollList :strict(params)
 	}
 }
 
+# Logs its preparations to @prepared, by name.
+our @prepared;
+class Clay::UI::Test::Logged :strict(params) :does(Clay::UI::Box) :does(Clay::UI::Role::Core::Preparable) {
+	field $name :param;
+	field $on_prepare :param = undef;
+
+	method prepare_layout () {
+		push @main::prepared, $name;
+		$on_prepare->($self) if $on_prepare;
+		return;
+	}
+}
+
 sub ui_with (@children) {
 	my $root = Clay::UI::Test::Box->new(id => 'root');
 	$root->add_child(@children);
@@ -122,6 +135,43 @@ subtest 'the queue holds widgets weakly' => sub {
 	undef $list;
 	is( $weak, undef, 'a queued widget can be freed' );
 	ok( lives { ui_with()->render }, 'and is forgotten' );
+};
+
+subtest 'a widget an earlier preparation detached stays queued' => sub {
+	my $child  = Clay::UI::Test::Logged->new(name => 'child');
+	my $parent = Clay::UI::Test::Logged->new(name => 'parent', on_prepare => sub ($self) { $self->clear_children });
+	$parent->add_child($child);
+	my $ui = ui_with($parent);
+	@prepared = ();
+	$child->request_prepare;
+	$parent->request_prepare;
+	$ui->render;
+	is( \@prepared, ['parent'], 'the detached child is not prepared' );
+	ok( $child->is_prepare_pending, 'and stays queued' );
+	my $other = ui_with($child);
+	$other->render;
+	is( \@prepared, [ 'parent', 'child' ], 'until a UI it belongs to renders' );
+};
+
+subtest 'parents are prepared before their descendants' => sub {
+	my $leaf   = Clay::UI::Test::Logged->new(name => 'leaf');
+	my $middle = Clay::UI::Test::Logged->new(name => 'middle');
+	my $top    = Clay::UI::Test::Logged->new(name => 'top');
+	my $peer   = Clay::UI::Test::Logged->new(name => 'peer');
+	$middle->add_child($leaf);
+	$top->add_child($middle);
+	my $ui = ui_with($top, $peer);
+	@prepared = ();
+	$_->request_prepare for $leaf, $peer, $middle, $top;
+	$ui->render;
+	is( \@prepared, [qw(peer top middle leaf)], 'by depth, and at one depth in the order they asked' );
+};
+
+subtest 'widgets freed while queued leave no entries' => sub {
+	my $ui = ui_with();
+	Clay::UI::Test::Logged->new(name => "loose $_")->request_prepare for 1 .. 20;
+	$ui->render;
+	is( Clay::UI::Role::Core::Preparable::_pending_count(), 0, 'the queue is empty after a render' );
 };
 
 subtest 'scroll_to prepares a scroll container that prepares itself' => sub {

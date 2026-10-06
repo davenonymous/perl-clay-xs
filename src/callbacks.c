@@ -25,7 +25,11 @@
  * G_EVAL. The trampoline then holds it as the context's held error and
  * returns a neutral value to Clay. The XS wrapper that called into Clay
  * re-throws the held error once Clay has returned (see
- * clay_perl_raise_held_error and the wrappers in lib/Clay/XS.xs).
+ * clay_perl_raise_held_error and the wrappers in lib/Clay/XS.xs). The
+ * other ways out of Perl code are kept from Clay's frames too: the call
+ * runs on a Perl stack of its own, where loop control finds no outer loop
+ * and dies, and an exit is caught and deferred until the wrapper has
+ * Clay's result (see call_dispatcher).
  *
  * Threading the active context to the trampolines:
  *
@@ -75,6 +79,8 @@ CLAY_PERL_THREAD_LOCAL clay_perl_context *clay_perl_active_transition_ctx = NULL
 CLAY_PERL_THREAD_LOCAL uint32_t clay_perl_callback_depth = 0;
 
 CLAY_PERL_THREAD_LOCAL clay_perl_active_dispatch clay_perl_pending_dispatch = { 0, NULL };
+
+CLAY_PERL_THREAD_LOCAL clay_perl_deferred_exit clay_perl_pending_exit = { false, 0 };
 
 /* ---------------------------------------------------------------------------
  * Held callback errors.
@@ -138,20 +144,54 @@ void clay_perl_raise_held_error(pTHX_ clay_perl_context *ctx)
 }
 
 /* ---------------------------------------------------------------------------
+ * Deferred exit.
+ *
+ * Perl's exit unwinds the whole interpreter with a longjmp, which must
+ * not pass through Clay's C frames. call_dispatcher catches it and
+ * records it here; Perl's state is unwound by then, so no Perl code may
+ * run until the outermost XS wrapper re-issues the exit once Clay has
+ * returned (clay_perl_exit_if_pending).
+ * ------------------------------------------------------------------------ */
+
+void clay_perl_exit_if_pending(pTHX_ clay_perl_context *ctx)
+{
+    if (!clay_perl_pending_exit.pending) return;
+    /* A measurement skipped for the exit returned 0x0, which Clay cached;
+     * END blocks may still lay out frames. */
+    if (ctx && ctx->measure_cache_poisoned) {
+        ctx->measure_cache_poisoned = false;
+        Clay_ResetMeasureTextCache();
+    }
+    U32 status = clay_perl_pending_exit.status;
+    clay_perl_pending_exit.pending = false;
+    clay_perl_pending_exit.status  = 0;
+    my_exit(status);
+}
+
+/* ---------------------------------------------------------------------------
  * Dispatch.
  *
  * call_dispatcher publishes (kind, result slot) in clay_perl_pending_dispatch,
- * pushes (callback, args...) and calls Clay::XS::_dispatch under G_EVAL.
- * The previous pending dispatch is restored afterwards, so nested
- * dispatches (an error reported while a callback runs) work. It runs
- * inside invoke_callback's ENTER/SAVETMPS ... FREETMPS/LEAVE, with $@
- * localised there, so the caller's $@ survives the callback. Returns true
- * on failure (the error is held on ctx).
+ * pushes (callback, args...) and calls Clay::XS::_dispatch under G_EVAL, on
+ * a Perl stack of its own (as perl runs magic methods): loop control in a
+ * callback cannot reach a loop outside it, so "last LABEL" dies inside
+ * the eval like any other error. An exit is caught by the JMPENV around
+ * the call and deferred (see above). The previous pending dispatch is
+ * restored afterwards, so nested dispatches (an error reported while a
+ * callback runs) work. It runs inside invoke_callback's ENTER/SAVETMPS ...
+ * FREETMPS/LEAVE, with $@ localised there, so the caller's $@ survives the
+ * callback.
  * ------------------------------------------------------------------------ */
 
-static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
-                            clay_perl_dispatch_result *result, SV *callback,
-                            SV **args, int argc)
+typedef enum {
+    DISPATCH_RETURNED = 0,   /* the callback returned a result */
+    DISPATCH_FAILED,         /* it died; the error is held on ctx */
+    DISPATCH_EXITED          /* it called exit; Perl's state is unwound */
+} dispatch_outcome;
+
+/* Pushes (callback, args...) on the current Perl stack and calls the
+ * dispatcher under G_EVAL. */
+static void push_and_dispatch(pTHX_ CV *dispatch_cv, SV *callback, SV **args, int argc)
 {
     dSP;
     PUSHMARK(SP);
@@ -163,19 +203,50 @@ static bool call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
         PUSHs(args[i]);
     }
     PUTBACK;
+    call_sv((SV *) dispatch_cv, G_VOID | G_DISCARD | G_EVAL);
+}
 
+/* push_and_dispatch inside a JMPENV. G_EVAL catches every die, so only
+ * my_exit jumps out of call_sv; returns that jump (0 when none). */
+static int dispatch_catching_exit(pTHX_ CV *dispatch_cv, SV *callback, SV **args, int argc)
+{
+    dJMPENV;
+    int jump;
+    JMPENV_PUSH(jump);
+    if (jump == 0) push_and_dispatch(aTHX_ dispatch_cv, callback, args, argc);
+    JMPENV_POP;
+    return jump;
+}
+
+static dispatch_outcome call_dispatcher(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
+                                        clay_perl_dispatch_result *result, SV *callback,
+                                        SV **args, int argc)
+{
     clay_perl_active_dispatch saved = clay_perl_pending_dispatch;
+    {
+        dSP;
+        PUSHSTACKi(PERLSI_MAGIC);
+    }
     clay_perl_pending_dispatch.kind   = kind;
     clay_perl_pending_dispatch.result = result;
-    call_sv((SV *) ctx->dispatch_cv, G_VOID | G_DISCARD | G_EVAL);
+    int jump = dispatch_catching_exit(aTHX_ clay_perl_dispatcher(aTHX), callback, args, argc);
     clay_perl_pending_dispatch = saved;
+
+    /* my_exit has popped every Perl stack down to the main one and unwound
+     * the scopes already. */
+    if (jump != 0) {
+        clay_perl_pending_exit.pending = true;
+        clay_perl_pending_exit.status  = STATUS_EXIT;
+        return DISPATCH_EXITED;
+    }
+    POPSTACK;
 
     /* Test for an exception without truth-testing it: an exception object
      * with an overloaded bool could itself die here, outside any eval. */
     SV *error = ERRSV;
-    if (!SvROK(error) && !SvTRUE_nomg(error)) return false;
+    if (!SvROK(error) && !SvTRUE_nomg(error)) return DISPATCH_RETURNED;
     clay_perl_hold_callback_error(aTHX_ ctx);
-    return true;
+    return DISPATCH_FAILED;
 }
 
 /* Upper bound on the arguments a trampoline passes before the userdata. */
@@ -187,16 +258,20 @@ typedef int (*callback_args_builder)(pTHX_ const void *data, SV **args);
 
 /* Calls a Perl callback for a trampoline: builds its arguments (plus the
  * userdata, always last) inside a temporaries scope of their own, with $@
- * localised, and dispatches. Returns true on failure (the error is
- * held on ctx).
+ * localised, and dispatches. Returns true when the trampoline must give
+ * Clay its neutral result: the callback failed (the error is held on
+ * ctx), or an exit is pending, in which case no callback runs at all.
  *
  * The whole scope counts as running a callback (clay_perl_callback_depth):
  * freeing the arguments and restoring $@ can run DESTROY methods, and
- * Clay is still inside its own function while they run. */
+ * Clay is still inside its own function while they run. After an exit
+ * that scope is gone already, and only the depth is restored. */
 static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kind kind,
                             clay_perl_dispatch_result *result, const clay_perl_callback *callback,
                             callback_args_builder build_args, const void *data)
 {
+    if (clay_perl_pending_exit.pending) return true;
+
     SV *args[MAX_CALLBACK_ARGS + 1];
 
     clay_perl_callback_depth++;
@@ -205,11 +280,13 @@ static bool invoke_callback(pTHX_ clay_perl_context *ctx, clay_perl_dispatch_kin
     save_scalar(PL_errgv);
     int argc = build_args(aTHX_ data, args);
     args[argc++] = sv_2mortal(newSVsv(callback->userdata ? callback->userdata : &PL_sv_undef));
-    bool failed = call_dispatcher(aTHX_ ctx, kind, result, callback->code, args, argc);
-    FREETMPS;
-    LEAVE;
+    dispatch_outcome outcome = call_dispatcher(aTHX_ ctx, kind, result, callback->code, args, argc);
+    if (outcome != DISPATCH_EXITED) {
+        FREETMPS;
+        LEAVE;
+    }
     clay_perl_callback_depth--;
-    return failed;
+    return outcome != DISPATCH_RETURNED;
 }
 
 /* A result the callback must return: undef (usually a forgotten return)

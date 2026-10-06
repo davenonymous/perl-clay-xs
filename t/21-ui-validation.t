@@ -86,6 +86,8 @@ subtest 'render arguments are validated' => sub {
 		qr/unknown pointer_state key\(s\): pressed/, 'unknown pointer_state key' );
 	like( dies { $ui->render(pointer_state => { x => 'left', y => 2 }) },
 		qr/pointer_state 'x' must be a finite number/, 'non-numeric pointer position' );
+	like( dies { $ui->render(pointer_state => { x => 1, y => 2, down => {} }) },
+		qr/pointer_state 'down' must be a plain boolean value/, 'reference as the down flag' );
 	like( dies { $ui->render(delta_time => -1) }, qr/'delta_time' must be a finite number >= 0/, 'negative delta_time' );
 	like( dies { $ui->render(scroll_delta => 5) }, qr/'scroll_delta' must be/, 'scalar scroll_delta' );
 	like( dies { $ui->render(scroll_delta => { x => 0, yy => -1 }) }, qr/unknown scroll_delta key\(s\): yy/,

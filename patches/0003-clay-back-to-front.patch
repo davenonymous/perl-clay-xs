@@ -10,7 +10,7 @@
  } Clay_LayoutDirection;
  
  // Controls how the lines of a CLAY_LEFT_TO_RIGHT_WRAP container use height they do not need.
-@@ -1995,6 +1998,22 @@
+@@ -2004,6 +2007,22 @@
              openLayoutElement->minDimensions.height += childGap;
          }
      }
@@ -33,7 +33,7 @@
  
      context->layoutElementChildrenBuffer.length -= openLayoutElement->children.length;
  
-@@ -2645,6 +2664,46 @@
+@@ -2665,6 +2684,46 @@
      return position;
  }
  
@@ -80,7 +80,7 @@
  // Writes out the location of text elements to layout elements buffer 1
  void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArray* textElementsOut, Clay__int32_tArray* aspectRatioElementsOut) {
      Clay_Context* context = Clay_GetCurrentContext();
-@@ -3052,8 +3111,8 @@
+@@ -3091,8 +3150,8 @@
      return changed;
  }
  
@@ -91,7 +91,7 @@
  Clay__AxisExtent Clay__StackExtentAlongAxis(Clay_LayoutElement* element, bool xAxis) {
      Clay_Context* context = Clay_GetCurrentContext();
      Clay_LayoutConfig* layoutConfig = &element->config.layout;
-@@ -3278,7 +3337,7 @@
+@@ -3322,7 +3381,7 @@
  
          // DFS node has been visited, this is on the way back up to the root
          Clay_LayoutConfig *layoutConfig = &currentElement->config.layout;
@@ -100,7 +100,7 @@
              // Resize any parent containers that have grown in height along their non layout axis
              for (int32_t j = 0; j < currentElement->children.length; ++j) {
                  Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[j]);
-@@ -3488,7 +3547,7 @@
+@@ -3532,7 +3591,7 @@
                                      }
                                      borderOffset.x += (childElement->dimensions.width + (float)layoutConfig->childGap);
                                  }
@@ -109,7 +109,7 @@
                                  for (int32_t i = 0; i < currentElement->children.length; ++i) {
                                      Clay_LayoutElement *childElement = Clay_LayoutElementArray_Get(&context->layoutElements, currentElement->children.elements[i]);
                                      if (i > 0) {
-@@ -3751,6 +3810,8 @@
+@@ -3795,6 +3854,8 @@
              } else if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT_WRAP) {
                  contentSizeCurrent = Clay__FlowLaidOutContentSize(currentElement);
                  flowCursor = Clay__FlowBeginPlacement(currentElement);
@@ -118,7 +118,7 @@
              }
  
              if (scrollContainerData) {
-@@ -3765,6 +3826,8 @@
+@@ -3809,6 +3870,8 @@
                  // Alignment along non layout axis
                  if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT_WRAP) {
                      currentElementTreeNode->nextChildOffset = Clay__FlowPlaceChild(currentElement, i, &flowCursor);
@@ -127,7 +127,7 @@
                  } else if (layoutConfig->layoutDirection == CLAY_LEFT_TO_RIGHT) {
                      currentElementTreeNode->nextChildOffset.y = currentElement->config.layout.padding.top;
                      float whiteSpaceAroundChild = currentElement->dimensions.height - (float)(layoutConfig->padding.top + layoutConfig->padding.bottom) - childElement->dimensions.height;
-@@ -4272,7 +4335,7 @@
+@@ -4316,7 +4379,7 @@
                          // .layoutDirection
                          CLAY_TEXT(CLAY_STRING("Layout Direction"), infoTitleConfig);
                          Clay_LayoutConfig *layoutConfig = &selectedItem->layoutElement->config.layout;

@@ -164,6 +164,14 @@ subtest 'threads do not inherit contexts' => sub {
 	})->join;
 	like( $error, qr/different interpreter\/thread/, 'a thread using the inherited context croaks' );
 	is( text_of(build_frame('still fine')), 'still fine', 'the parent context is intact' );
+
+	# Clay has one current context, so a thread makes its own while none is.
+	$ctx->DESTROY;
+	my $text = threads->create(sub {
+		my $own = new_context();
+		return text_of(build_frame('measured in a thread'));
+	})->join;
+	is( $text, 'measured in a thread', 'a thread lays out text with a context of its own, callbacks included' );
 };
 
 subtest 'Clay_Initialize validates capacity before allocating' => sub {

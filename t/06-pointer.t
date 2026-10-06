@@ -123,16 +123,14 @@ Clay_EndLayout(0);
 
 Clay_SetMeasureTextFunction(sub { die "measure failed\n" });
 Clay_BeginLayout();
-Clay__OpenTextElement("abandoned", {});
+Clay__OpenTextElement("unfinished", {});
+like( dies { Clay_SetPointerState({ x => 30, y => 30 }, 0) },
+    qr/^Clay_SetPointerState: cannot be called between Clay_BeginLayout and Clay_EndLayout; end the frame first \(Clay_EndLayout, or Clay_BeginLayout, which finishes an unfinished frame\)/,
+    'Clay_SetPointerState croaks while a frame is unfinished, saying how to end it' );
 like( dies { Clay_BeginLayout() }, qr/^measure failed \(from the previous unfinished frame\)/,
-    'the frame is abandoned' );
-like( dies { Clay_SetPointerState({ x => 30, y => 30 }, 0) }, qr/the last frame was never finished/,
-    'Clay_SetPointerState croaks after an abandoned frame' );
+    'Clay_BeginLayout finishes the frame and re-throws its error' );
 Clay_SetMeasureTextFunction(sub { return { width => 0, height => 0 } });
-Clay_BeginLayout();
-build_layout();
-Clay_EndLayout(0);
-ok( lives { Clay_SetPointerState({ x => 30, y => 30 }, 0) }, 'and works again after the next completed frame' );
+ok( lives { Clay_SetPointerState({ x => 30, y => 30 }, 0) }, 'and Clay_SetPointerState works again at once' );
 
 # ----- Pointer state round-trip ---------------------------------------------
 Clay_SetPointerState({ x => 10, y => 20 }, 1);

@@ -8,10 +8,10 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Object::Pad::MOP::Class;
 use List::Util qw(any uniq);
-use Scalar::Util qw(blessed refaddr);
+use Scalar::Util qw(blessed refaddr reftype);
 no warnings 'experimental';
 
-use Clay::UI::_validate qw(validate_id);
+use Clay::UI::_validate qw(validate_id is_index shown_value described_value);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasSizingGroup;
 use Clay::UI::Role::Layout::HasParent;
@@ -79,9 +79,16 @@ sub _is_permutation ($order, $count) {
 	return 0 unless ref $order eq 'ARRAY' && @$order == $count;
 	my %seen;
 	for my $index (@$order) {
-		return 0 unless defined $index && !ref $index && $index =~ /\A[0-9]+\z/ && $index < $count && !$seen{$index}++;
+		return 0 unless is_index($index) && $index < $count && !$seen{$index}++;
 	}
 	return 1;
+}
+
+# Dies unless $predicate is a code reference.
+sub _require_predicate ($method, $predicate) {
+	croak_ui "Clay::UI: $method takes a code reference, got " . described_value($predicate)
+		unless ref $predicate && reftype($predicate) eq 'CODE';
+	return;
 }
 
 sub _self_and_ancestors ($node) {
@@ -107,7 +114,18 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return [ @_children ];
 	}
 
+	method child_count () {
+		return scalar @_children;
+	}
+
+	method child_at ($index) {
+		croak_ui "Clay::UI: child_at takes an index, got " . described_value($index)
+			unless is_index($index);
+		return $index < @_children ? $_children[$index] : undef;
+	}
+
 	method get_children_with ($predicate) {
+		_require_predicate(get_children_with => $predicate);
 		return grep { $predicate->($_) } @_children;
 	}
 
@@ -160,6 +178,10 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	}
 
 	method remove_internal_children (@kids) {
+		for my $kid (@kids) {
+			croak_ui "Clay::UI: remove_internal_children takes widgets, got " . described_value($kid)
+				unless _is_widget($kid);
+		}
 		my %leaving = map { refaddr($_) => 1 } @kids;
 		my @removed = grep { $leaving{ refaddr($_) } } @_internal_children;
 		return $self unless @removed;
@@ -196,7 +218,7 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 	# revision (Clay::UI::Revision) is bumped, and every widget of an added
 	# or removed subtree gets its tree_changed call once all that is done.
 	# Clay::UI::Role::Core::Container and Clay::UI::Grid build their public
-	# mutators on these.
+	# mutators on these. _adopt_children is the one exception: see there.
 	# ---------------------------------------------------------------------
 
 	method _attach_children (@kids) {
@@ -204,11 +226,27 @@ role Clay::UI::Role::Core::Element :does(Clay::UI::Role::Layout::HasSizingGroup)
 		return;
 	}
 
+	# For objects a widget class builds itself and that no tree holds yet
+	# (Clay::UI::Grid's cell wrappers and rows): validates, attaches and
+	# bumps like _attach_children, but announces nothing. The primitive
+	# that attaches the finished subtree announces every widget in it
+	# once, when the change is complete.
+	method _adopt_children (@kids) {
+		croak_ui "Clay::UI: internal error: _adopt_children on a widget that is part of a tree ("
+			. ref($self) . ")"
+			if defined $self->parent || defined $self->_local_ui_controller;
+		_validate_attachment($self, @kids);
+		push @_children, @kids;
+		$_->_set_parent($self) for @kids;
+		bump_revision();
+		return;
+	}
+
 	method _splice_children ($offset, $length, @kids) {
-		croak_ui "Clay::UI: child offset $offset out of range 0.." . scalar(@_children)
-			unless $offset >= 0 && $offset <= @_children;
-		croak_ui "Clay::UI: cannot remove $length children at offset $offset of " . scalar(@_children)
-			unless $length >= 0 && $offset + $length <= @_children;
+		croak_ui "Clay::UI: child offset " . shown_value($offset) . " out of range 0.." . scalar(@_children)
+			unless is_index($offset) && $offset <= @_children;
+		croak_ui "Clay::UI: cannot remove " . shown_value($length) . " children at offset $offset of " . scalar(@_children)
+			unless is_index($length) && $offset + $length <= @_children;
 		_validate_attachment($self, @kids);
 		return () if !@kids && !$length;    # nothing changes, so no revision bump
 
@@ -420,6 +458,24 @@ Returns a new arrayref holding the direct children, in order. Changing
 that array does not change the widget. Internal children (see
 L</add_internal_children>) are not included.
 
+=head2 child_count
+
+	my $count = $widget->child_count;
+
+Returns the number of direct children, without copying them. Internal
+children are not counted.
+
+=head2 child_at
+
+	my $first = $widget->child_at(0);
+
+Returns the direct child at C<$index> (0 is the first), without copying
+the children, or undef for an index past the last child. Internal
+children are not included. Dies with
+C<Clay::UI: child_at takes an index, got ...> for anything but a
+non-negative integer in plain decimal digits (C<-1>, C<1.5>, C<'01'>,
+undef and references die).
+
 =head2 get_children_with
 
 	my @foos = $root->get_children_with(sub { ($_->id // '') =~ /^foo_/ });
@@ -429,7 +485,9 @@ Returns the direct children for which C<< $predicate->($child) >> is
 true, as a list (in scalar context: how many). C<$_> is set to the
 child as well, so both calling styles work. Does not look at
 grandchildren or internal children. Text widgets are passed too; their
-C<id> is undef.
+C<id> is undef. Dies with
+C<Clay::UI: get_children_with takes a code reference, got ...> for
+anything else.
 
 =head2 has_child
 
@@ -510,7 +568,9 @@ Detaches the given internal children the way removed children are
 detached (their C<parent> becomes undef, hover, press and focus inside
 them are released, see L</ATTACHING CHILDREN>). Widgets that are not
 internal children of this widget are ignored. Bumps the revision when
-something was removed. Returns the widget.
+something was removed. Returns the widget. Dies, changing nothing, with
+C<Clay::UI: remove_internal_children takes widgets, got ...> for
+anything but widgets.
 
 =head2 to_config
 

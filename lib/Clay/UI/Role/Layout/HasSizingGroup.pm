@@ -28,15 +28,17 @@ role Clay::UI::Role::Layout::HasSizingGroup {
 
 	method width_group (@new) {
 		return $self->_group_in_effect($width_group) unless @new;
-		$width_group = _write_group(width_group => $width_group, @new);
-		bump_revision();
+		my $written = _write_group(width_group => $width_group, @new);
+		bump_revision() if $written != $width_group;
+		$width_group = $written;
 		return $self->_group_in_effect($width_group);
 	}
 
 	method height_group (@new) {
 		return $self->_group_in_effect($height_group) unless @new;
-		$height_group = _write_group(height_group => $height_group, @new);
-		bump_revision();
+		my $written = _write_group(height_group => $height_group, @new);
+		bump_revision() if $written != $height_group;
+		$height_group = $written;
 		return $self->_group_in_effect($height_group);
 	}
 
@@ -179,9 +181,9 @@ width instead.
 
 The width group of the widget: an integer from 0 to 2**20 - 1
 (1048575). C<0>, the default, means no group. A constructor parameter
-and a read/write accessor; a write bumps the revision
-(L<Clay::UI::Revision>), takes effect at the next C<render> and returns
-the group in effect.
+and a read/write accessor; a write of another group bumps the revision
+(L<Clay::UI::Revision>; writing the current group back changes nothing),
+takes effect at the next C<render> and returns the group in effect.
 
 Dies with
 C<Clay::UI: 'width_group' must be an integer in 0..1048575 (larger ids are reserved for Clay::UI::Grid)>

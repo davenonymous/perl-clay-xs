@@ -141,4 +141,72 @@ subtest 'cyclic nesting terminates and reports an error' => sub {
 	like( $errors[0]{errorText}, qr/did not converge/, 'with a descriptive text' );
 };
 
+subtest 'exiting members do not widen their group' => sub {
+	@errors = ();
+	Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+	my $exit = { duration => 10, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, exit => { hasSetFinal => 1 } };
+	my $member = sub ($name, $width, %extra) {
+		return sub { el($name, { layout => { sizing => { width => sizing_grow() }, padding => { left => 5 } },
+		                         sizingGroup => { width => 1 }, %extra }, fixed("$name.in", $width)) };
+	};
+	my %container = (
+		'a floating root'      => { floating => { attachTo => CLAY_ATTACH_TO_ROOT } },
+		'a clipping container' => { clip => { horizontal => 1 }, layout => { sizing => { width => sizing_fixed(100) } } },
+	);
+	# Every third frame declares no B, so a B exits next to the A of the
+	# next frames, as the member itself or inside an exiting parent.
+	my %exiting = (
+		'member'        => sub ($frame) { $member->("B$frame", 10, transition => $exit) },
+		'nested member' => sub ($frame) {
+			sub { el("W$frame", { layout => { sizing => { width => sizing_grow() } }, transition => $exit }, $member->("B$frame", 10)) }
+		},
+	);
+	for my $where (sort keys %container) {
+		for my $what (sort keys %exiting) {
+			my @widths;
+			for my $frame (1 .. 40) {
+				frame(sub {
+					el('box', { %{ $container{$where} },
+					            layout => { %{ $container{$where}{layout} // {} }, layoutDirection => CLAY_TOP_TO_BOTTOM } },
+						sub { el('r1', { layout => { sizing => { width => sizing_grow() } } }, $member->('A', 20), fixed('pad', 30, 5)) },
+						sub { el('r2', { layout => { sizing => { width => sizing_grow() } } },
+							($frame % 3 ? $exiting{$what}->($frame) : ())) });
+				});
+				push @widths, box_of('A')->{width};
+			}
+			is( [ @widths[-3 .. -1] ], [ ($widths[2]) x 3 ], "an exiting $what in $where leaves A as wide as in frame 3" );
+		}
+	}
+	Clay_SetTransitionHandlers();
+	is( \@errors, [], 'Clay reported no errors' );
+};
+
+subtest 'sizes beyond float precision do not hang the layout' => sub {
+	# 'wide' (24200692, at least 24200690) and an empty element share 24200690:
+	# compressing 'wide' by 1 rounds back to 24200692, a float step of 2.
+	my $code = <<'PERL';
+use Clay::XS qw(:all);
+my $ctx = Clay_Initialize(Clay_MinMemorySize(), [800, 600]);
+sub open_with ($$) { Clay__OpenElementWithId(Clay_GetElementId($_[0])); Clay__ConfigureOpenElement($_[1]) }
+Clay_BeginLayout();
+open_with('row', { layout => { sizing => { width => sizing_fixed(24200690), height => sizing_fixed(10) } } });
+	open_with('wide', { layout => { sizing => { width => sizing_fit(24200690), height => sizing_fixed(10) } }, clip => { horizontal => 1 } });
+		open_with('content', { layout => { sizing => { width => sizing_fixed(24200692), height => sizing_fixed(10) } } });
+		Clay__CloseElement();
+	Clay__CloseElement();
+	open_with('empty', {});
+	Clay__CloseElement();
+Clay__CloseElement();
+Clay_EndLayout();
+print "completed\n";
+PERL
+	my $pid = open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+	local $SIG{ALRM} = sub { kill 'KILL', $pid };
+	alarm 60;
+	my $output = do { local $/; <$child> };
+	alarm 0;
+	close $child;
+	is( $output, "completed\n", 'Clay_EndLayout returns' );
+};
+
 done_testing;

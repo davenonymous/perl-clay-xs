@@ -258,6 +258,8 @@ class Clay::UI :strict(params) {
 				croak_ui "Clay::UI::render: pointer_state '$axis' must be a finite number"
 					unless is_finite_number($pointer->{$axis});
 			}
+			croak_ui "Clay::UI::render: pointer_state 'down' must be a plain boolean value"
+				if ref $pointer->{down};
 			$pointer = { x => $pointer->{x}, y => $pointer->{y}, down => $pointer->{down} ? 1 : 0 };
 		}
 
@@ -799,8 +801,11 @@ pre-order of the last layout). See L</EVENTS>.
 Every widget of this UI that called C<request_prepare> since its last
 preparation gets its C<prepare_layout> method called
 (L<Clay::UI::Role::Core::Preparable>), so it can rebuild its children
-from its own state. Preparations may request more preparations; after
-100 rounds C<render> gives up and dies.
+from its own state: parents before their descendants, widgets at the
+same depth in the order they asked. A widget that an earlier
+preparation detached is not prepared and stays queued. Preparations
+may request more preparations; after 100 rounds C<render> gives up and
+dies.
 
 =item 5. Layout pass
 
@@ -823,10 +828,10 @@ other Clay::UI objects; the changes show in this frame's layout. They
 must not call C<render> of the same Clay::UI.
 
 If a listener dies, the remaining events still fire and the
-preparations still run. If a C<prepare_layout> dies, preparation stops:
-the widgets after it in the same round are taken off the queue without
-being prepared, and stay out of date until something calls their
-C<request_prepare> again (see L<Clay::UI::Role::Core::Preparable/prepare_layout>).
+preparations still run. If a C<prepare_layout> dies, the other widgets
+due in that round are still prepared; then preparation stops: later
+rounds do not run, and the requests made during that round stay queued
+for the next C<render> (see L<Clay::UI::Role::Core::Preparable/prepare_layout>).
 In both cases the layout pass still runs, so the frame shows the scroll
 input already applied and the changes made before the error. Then
 C<render> dies with the first error and the frame's render commands are
@@ -841,7 +846,8 @@ C<render> works normally.
 		root   => $root_widget,
 		width  => 800,
 		height => 600,
-		# optional: memory_size, max_element_count, error_handler, measure_text
+		# optional: memory_size, max_element_count,
+		#           max_measure_text_cache_word_count, error_handler, measure_text
 	);
 
 Creates a Clay::UI, its Clay context and its interaction tracker, and
@@ -1053,9 +1059,9 @@ The pointer for this frame: a hashref with finite numbers C<x> and C<y>
 true value while the button is held (default false). No other keys.
 When omitted (or undef), the pointer state of the previous frame is
 used again. A change of C<down> from false to true is a press, from
-true to false a release (see L</EVENTS>). The constructor sets the
-pointer to "up, outside the viewport", so the first frame never reports
-a press that did not happen.
+true to false a release (see L</EVENTS>). Until the first
+C<pointer_state>, the pointer is up and Clay tests no position, so
+nothing is under it and no press is reported.
 
 =item delta_time
 
@@ -1105,6 +1111,7 @@ C<Clay::UI::render: unknown argument(s)>,
 C<... 'pointer_state' must be a hashref>,
 C<... unknown pointer_state key(s)>,
 C<... pointer_state 'x' must be a finite number>,
+C<... pointer_state 'down' must be a plain boolean value>,
 C<... 'delta_time' must be a finite number E<gt>= 0>,
 C<... unknown scroll_delta key(s)>, C<... 'scroll_delta' must be ...>,
 C<... 'enable_drag_scrolling' must be a plain boolean value>.
@@ -1124,9 +1131,9 @@ error.
 
 =item *
 
-A C<prepare_layout> died: the preparations still due in that round are
-dropped (see L</HOW A FRAME WORKS>), the layout pass runs, then
-C<render> dies with the first error of the frame. Or preparations kept requesting new
+A C<prepare_layout> died: the other preparations of that round still
+run, later rounds do not (see L</HOW A FRAME WORKS>), the layout pass
+runs, then C<render> dies with the first error of the frame. Or preparations kept requesting new
 ones: C<Clay::UI: widgets kept requesting preparation; 100 rounds of prepare_layout did not settle>.
 
 =item *
@@ -1290,6 +1297,11 @@ Returns C<undef> when the last completed frame did not lay the
 container out. Dies for anything that is not a scroll container:
 C<Clay::UI: ... is not a scroll container (it does not compose Clay::UI::Role::Layout::HasScroll)>.
 
+During the layout pass (from a C<contribute_> method, say) it returns
+the same: the position as this frame lays it out (the wheel, drag and
+momentum scrolling of the frame applied) and the viewport and content
+of the last completed frame.
+
 =head2 scroll_to
 
 	$ui->scroll_to($scroll_box, { y => -12 });         # 12 units down
@@ -1307,7 +1319,8 @@ next C<render> shows the new position. The move counts as a change for
 L<Clay::UI::Revision>. It fires no C<OnScroll> (that event reports only the
 scrolling Clay does inside C<render>), and it stops momentum: a glide
 started by drag scrolling ends at the new position. A position equal to
-the current one changes nothing.
+the current one still ends a glide and counts as a change for the
+revision; it does not prepare the container (see below).
 
 A container that composes L<Clay::UI::Role::Core::Preparable> is
 prepared before the next layout pass when its position changed (its

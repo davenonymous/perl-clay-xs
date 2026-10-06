@@ -95,7 +95,7 @@ role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 		my %cfg = (
 			font_id        => $font_id,
 			font_size      => $font_size,
-			text_color     => $text_color,
+			text_color     => copy_value($text_color),
 			letter_spacing => $letter_spacing,
 			line_height    => $line_height,
 		);
@@ -262,9 +262,9 @@ Returns the text settings the layout pass (the part of
 L<Clay::UI/render> that declares the tree to Clay) passes to Clay: a
 new hashref with the snake_case keys above. C<wrap_mode> and
 C<text_alignment> are included only when they are set. The
-C<text_color> inside is the widget's own copy; treat the result as
-read-only. This is the method L<Clay::UI::Role::Core::TextNode>
-requires.
+C<text_color> inside is a new copy as well, so changing the result
+changes nothing in the widget. This is the method
+L<Clay::UI::Role::Core::TextNode> requires.
 
 =head1 SEE ALSO
 

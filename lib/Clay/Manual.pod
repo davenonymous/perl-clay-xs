@@ -484,7 +484,7 @@ children and its size comes from the measure function (see L</TEXT>).
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/layout-direction.png" alt="Two grey parent elements, each with three numbered coloured children. With CLAY_LEFT_TO_RIGHT the children sit side by side in a row at the top left of the parent; with CLAY_TOP_TO_BOTTOM they form a column."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/layout-direction.png" alt="Two grey parent elements, each with three numbered coloured children. With CLAY_LEFT_TO_RIGHT the children sit side by side in a row at the top left of the parent; with CLAY_TOP_TO_BOTTOM they form a column."></p>
 
 =end html
 
@@ -541,7 +541,7 @@ gives:
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing.png" alt="A 300 wide row with padding 10 and childGap 10 holding four coloured children. The labels under them give each sizing rule and the width Clay computed: GROW 45, FIXED 50 is 50, PERCENT 0.5 is 125, GROW with max 30 is 30."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/sizing.png" alt="A 300 wide row with padding 10 and childGap 10 holding four coloured children. The labels under them give each sizing rule and the width Clay computed: GROW 45, FIXED 50 is 50, PERCENT 0.5 is 125, GROW with max 30 is 30."></p>
 
 =end html
 
@@ -572,7 +572,7 @@ size.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/padding-and-child-gap.png" alt="A grey parent with three numbered children. Brackets mark the 16 units of padding between the parent's left edge and the first child, the 4 units of childGap between the first and the second child, and the 8 units of padding between the parent's top edge and the children."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/padding-and-child-gap.png" alt="A grey parent with three numbered children. Brackets mark the 16 units of padding between the parent's left edge and the first child, the 4 units of childGap between the first and the second child, and the 8 units of padding between the parent's top edge and the children."></p>
 
 =end html
 
@@ -593,7 +593,7 @@ table cell, give the cell C<< child_alignment => { x => CLAY_ALIGN_X_RIGHT } >>.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/child-alignment.png" alt="Nine grey elements in three rows of three, each with one small blue child. The child sits at the left, the centre or the right of its element depending on x, and at the top, the centre or the bottom depending on y."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/child-alignment.png" alt="Nine grey elements in three rows of three, each with one small blue child. The child sits at the left, the centre or the right of its element depending on x, and at the top, the centre or the bottom depending on y."></p>
 
 =end html
 
@@ -630,7 +630,7 @@ F<examples/07-ui-flow.pl>.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
 
 =end html
 
@@ -647,7 +647,7 @@ picture". See L<Clay::XS/STACK LAYOUT> and F<examples/08-ui-stack.pl>.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
 
 =end html
 
@@ -663,7 +663,7 @@ badges are floating elements.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
 
 =end html
 
@@ -733,7 +733,7 @@ turns into a clip region.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/clipping-and-scrolling.png" alt="Two lists of eight coloured rows in parents of the same size. Without clipping, rows 5 to 8 are drawn below the parent's bottom edge. With vertical clipping and a scroll position of y -44, only rows 2 to 6 are visible, the first and the last of them cut off at the parent's edges."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/clipping-and-scrolling.png" alt="Two lists of eight coloured rows in parents of the same size. Without clipping, rows 5 to 8 are drawn below the parent's bottom edge. With vertical clipping and a scroll position of y -44, only rows 2 to 6 are visible, the first and the last of them cut off at the parent's edges."></p>
 
 =end html
 
@@ -787,7 +787,7 @@ combined with C<image>. See L<Clay::XS::Structs/aspectRatio>.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/aspect-ratio.png" alt="Three blue boxes 120 wide. With aspectRatio 16 / 9 the box is 67.5 tall, with aspectRatio 1 it is a 120 by 120 square, with aspectRatio 4 / 3 it is 90 tall."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/aspect-ratio.png" alt="Three blue boxes 120 wide. With aspectRatio 16 / 9 the box is 67.5 tall, with aspectRatio 1 it is a 120 by 120 square, with aspectRatio 4 / 3 it is 90 tall."></p>
 
 =end html
 
@@ -806,7 +806,7 @@ and L<Clay::UI::Grid> uses them to build tables.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
 
 =end html
 
@@ -824,7 +824,7 @@ F<examples/05-ui-grid.pl> and F<examples/16-invoice-pdf.pl>.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
 
 =end html
 
@@ -986,7 +986,7 @@ C<$max> on FIT) to make text wrap.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/text-wrapping.png" alt="The same text, which contains one newline, in three grey parents 200 wide. With CLAY_TEXT_WRAP_WORDS it breaks at a space and at the newline into three lines inside the parent. With CLAY_TEXT_WRAP_NEWLINES it breaks only at the newline and the first line runs past the parent's right edge. With CLAY_TEXT_WRAP_NONE it is one line that runs far past the parent."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/text-wrapping.png" alt="The same text, which contains one newline, in three grey parents 200 wide. With CLAY_TEXT_WRAP_WORDS it breaks at a space and at the newline into three lines inside the parent. With CLAY_TEXT_WRAP_NEWLINES it breaks only at the newline and the first line runs past the parent's right edge. With CLAY_TEXT_WRAP_NONE it is one line that runs far past the parent."></p>
 
 =end html
 
@@ -1492,6 +1492,13 @@ only on a changed revision keeps drawing until the animation is over.
 
 Without handlers nothing is animated: the C<transition> key does
 nothing, and a changed value shows at once.
+
+An element whose C<transition> has an C<exit> part stays on screen
+after it is no longer declared, until its exit animation ends. Clay
+keeps a copy of every such element, with its subtree, between frames;
+the copies count against the element count, and a frame whose elements
+and copies do not fit drops the exit animations (see
+L<Clay::XS/FUNCTIONS: TRANSITIONS>).
 
 With Clay::UI, add the C<transition> key from a C<contribute_> method
 (see L</Writing your own widget class>), give the widget an C<id>, and

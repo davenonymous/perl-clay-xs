@@ -151,4 +151,59 @@ is( Clay_GetScrollContainerData($scroll_id)->{scrollPosition}{y}, -12,
     'the returned offset becomes the scroll position' );
 Clay_SetExternalScrollHandlingEnabled(0);
 
+# Mid-frame, Clay reads the clip config through the element slot the
+# container had in its last frame, which another element may hold by
+# then; the config key is only there once the frame has declared the
+# container (scrollmid.pl of the review).
+subtest 'mid-frame scroll data has a config only once the container is declared' => sub {
+    my ($scroller, $other) = map { Clay_GetElementId($_) } qw(S other);
+    my $clip_box = sub ($id, $clip) {
+        Clay__OpenElementWithId($id);
+        Clay__ConfigureOpenElement({ clip => $clip, layout => { sizing => { width => sizing_fixed(50), height => sizing_fixed(50) } } });
+        Clay__CloseElement();
+    };
+    my $s_clip = { vertical => 1, childOffset => [0, -7] };
+    Clay_BeginLayout();
+    $clip_box->($scroller, $s_clip);
+    Clay_EndLayout(0);
+    my $between = Clay_GetScrollContainerData($scroller);
+    is( $between->{config}, { horizontal => 0, vertical => 1, childOffset => { x => 0, y => -7 } },
+        'between frames the config is the container\'s own' );
+
+    Clay_BeginLayout();
+    $clip_box->($other, { horizontal => 1, childOffset => [99, 99] });    # takes S's element slot
+    my $before = Clay_GetScrollContainerData($scroller);
+    ok( !exists $before->{config}, 'before the frame declares the container there is no config key' );
+    is( [ @{$before}{qw(found scrollContainerDimensions)} ], [ 1, { width => 50, height => 50 } ],
+        'but found and the dimensions are there' );
+    ok( exists $before->{scrollPosition} && exists $before->{contentDimensions}, 'and so are the position and content' );
+    $clip_box->($scroller, { vertical => 1, childOffset => [0, -3] });
+    is( Clay_GetScrollContainerData($scroller)->{config}, { horizontal => 0, vertical => 1, childOffset => { x => 0, y => -3 } },
+        'once declared, the config is this frame\'s clip declaration' );
+    ok( lives { set_scroll_position($scroller, [0, 0]) }, 'set_scroll_position works mid-frame' );
+    Clay_EndLayout(0);
+    ok( exists Clay_GetScrollContainerData($scroller)->{config}, 'and between frames again' );
+    ok( !exists Clay_GetScrollContainerData( Clay_GetElementId('nowhere') )->{config}, 'an unknown id has no config' );
+};
+
+# A container that is no longer declared keeps a record pointing at its
+# old element slot until Clay_UpdateScrollContainers drops it; a new
+# container in that slot must still get its own scroll data.
+subtest 'a new container in the slot of a vanished one gets its own dimensions' => sub {
+    my $container = sub ($name, $width, $height) {
+        Clay__OpenElementWithId( Clay_GetElementId($name) );
+        Clay__ConfigureOpenElement({ clip => { vertical => 1 },
+                                     layout => { sizing => { width => sizing_fixed($width), height => sizing_fixed($height) } } });
+        Clay__CloseElement();
+    };
+    Clay_BeginLayout();
+    $container->('vanishing', 60, 20);
+    Clay_EndLayout(0);
+    Clay_BeginLayout();
+    $container->('arriving', 40, 30);
+    Clay_EndLayout(0);
+    is( Clay_GetScrollContainerData( Clay_GetElementId('arriving') )->{scrollContainerDimensions}, { width => 40, height => 30 },
+        'the dimensions of the frame that declared it' );
+};
+
 done_testing;

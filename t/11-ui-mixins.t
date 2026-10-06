@@ -12,6 +12,7 @@ use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
 use Clay::UI::Role::Layout::HasFloating;
+use Clay::UI::Text;
 
 # -----------------------------------------------------------------------------
 # A widget composing every mixin. The Element role's to_config walks
@@ -182,6 +183,38 @@ class StyledSub :isa(StyledBase) {}
 subtest 'a subclass keeps its superclass contributors' => sub {
 	is( StyledSub->new->to_config, { background_color => [1, 2, 3, 255] },
 		'contribute_* defined directly on the superclass is discovered' );
+};
+
+my @contributed;
+role OrderRole { method contribute_middle ($cfg) { push @contributed, 'middle'; return } }
+class OrderBase :does(Clay::UI::Role::Core::Element) {
+	method contribute_zebra ($cfg) { push @contributed, 'zebra'; return }
+}
+class OrderWidget :isa(OrderBase) :does(OrderRole) {
+	method contribute_alpha ($cfg) { push @contributed, 'alpha'; return }
+}
+
+subtest 'contributors run in the alphabetical order of their names' => sub {
+	@contributed = ();
+	OrderWidget->new->to_config;
+	is( \@contributed, [qw(alpha middle zebra)],
+		'whether they come from the class, a role or a superclass' );
+};
+
+subtest 'to_config and text_config hand out parts of their own' => sub {
+	my $widget = TestKitchenSink->new(background_color => [10, 20, 30, 255], corner_radius => { top_left => 4 });
+	my $config = $widget->to_config;
+	$config->{background_color}[0] = 99;
+	$config->{corner_radius}{top_left} = 99;
+	is( [ $widget->background_color, $widget->corner_radius ], [ [10, 20, 30, 255], { top_left => 4 } ],
+		'editing the to_config parts changes no reader' );
+	is( [ @{ $widget->to_config }{qw(background_color corner_radius)} ], [ [10, 20, 30, 255], { top_left => 4 } ],
+		'nor the next to_config' );
+
+	class TestText :does(Clay::UI::Text) {}
+	my $text = TestText->new(text => 'hi', text_color => [1, 2, 3, 255]);
+	$text->text_config->{text_color}[0] = 99;
+	is( $text->text_color, [1, 2, 3, 255], 'editing the text_config colour changes no reader' );
 };
 
 done_testing;

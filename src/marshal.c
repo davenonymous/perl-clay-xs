@@ -44,8 +44,10 @@
  *     with a Clay::XS::StructError naming the struct and field. Values are fetched once (one get-magic call) and read
  *     with the _nomg accessors.
  *
- *   - Strings are characters: text comes back from Clay as UTF-8 flagged
- *     Perl strings (clay_perl_utf8_sv).
+ *   - Strings are characters: text goes to Clay as UTF-8 bytes without
+ *     upgrading the caller's scalar (clay_perl_latin1_needs_encoding and
+ *     friends) and comes back from Clay as UTF-8 flagged Perl strings
+ *     (clay_perl_utf8_sv).
  */
 
 #include "clay_perl.h"
@@ -413,6 +415,50 @@ static void hv_store_sv(pTHX_ HV *hv, const char *key, SV *value)
     (void) hv_store(hv, key, (I32) strlen(key), value, 0);
 }
 
+bool clay_perl_latin1_needs_encoding(const char *bytes, STRLEN length)
+{
+    for (STRLEN i = 0; i < length; i++) {
+        if ((U8) bytes[i] & 0x80) return true;
+    }
+    return false;
+}
+
+STRLEN clay_perl_latin1_utf8_length(const char *bytes, STRLEN length)
+{
+    STRLEN encoded = length;
+    for (STRLEN i = 0; i < length; i++) {
+        if ((U8) bytes[i] & 0x80) encoded++;
+    }
+    return encoded;
+}
+
+void clay_perl_latin1_to_utf8(char *destination, const char *bytes, STRLEN length)
+{
+    for (STRLEN i = 0; i < length; i++) {
+        U8 byte = (U8) bytes[i];
+        if (byte < 0x80) {
+            *destination++ = (char) byte;
+        } else {
+            *destination++ = (char) (0xC0 | (byte >> 6));
+            *destination++ = (char) (0x80 | (byte & 0x3F));
+        }
+    }
+}
+
+const char *clay_perl_sv_utf8_bytes(pTHX_ SV *sv, STRLEN *length)
+{
+    const char *bytes = SvPV_nomg(sv, *length);
+    if (SvUTF8(sv) || !clay_perl_latin1_needs_encoding(bytes, *length)) return bytes;
+    STRLEN encoded = clay_perl_latin1_utf8_length(bytes, *length);
+    SV *copy = sv_2mortal(newSV(encoded + 1));
+    clay_perl_latin1_to_utf8(SvPVX(copy), bytes, *length);
+    SvPVX(copy)[encoded] = '\0';
+    SvCUR_set(copy, encoded);
+    SvPOK_on(copy);
+    *length = encoded;
+    return SvPVX(copy);
+}
+
 SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length)
 {
     if (!bytes || length <= 0) return newSVpvs("");
@@ -421,13 +467,42 @@ SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length)
     return sv;
 }
 
+/* The number of characters in the UTF-8 bytes [start, end); ASCII-only
+ * ranges are counted by their length. */
+static UV utf8_chars_between(pTHX_ const U8 *start, const U8 *end)
+{
+    for (const U8 *byte = start; byte < end; byte++) {
+        if (*byte & 0x80) return (UV) utf8_length(start, end);
+    }
+    return (UV) (end - start);
+}
+
+/* Where the last slice of a render command array started: Clay emits the
+ * lines of a text in order, so the next line of the same text is counted
+ * from there instead of from the start of the text. */
+typedef struct slice_offset_cursor {
+    const char *base;     /* the text (baseChars) of the last slice */
+    const char *chars;    /* where in it the last slice started */
+    UV          offset;   /* that start, in characters */
+} slice_offset_cursor;
+
 /* The character offset of a slice in the string it was cut from: a text
  * line's position in its element's text. Clay keeps the base pointer on
  * every slice; a slice without one starts at 0. */
-static UV clay_string_slice_offset(pTHX_ const Clay_StringSlice *slice)
+static UV clay_string_slice_offset(pTHX_ const Clay_StringSlice *slice, slice_offset_cursor *cursor)
 {
-    if (!slice->baseChars || !slice->chars || slice->chars <= slice->baseChars) return 0;
-    return (UV) utf8_length((const U8 *) slice->baseChars, (const U8 *) slice->chars);
+    if (!slice->baseChars || !slice->chars || slice->chars < slice->baseChars) return 0;
+    const char *from = slice->baseChars;
+    UV offset = 0;
+    if (cursor->base == slice->baseChars && cursor->chars <= slice->chars) {
+        from   = cursor->chars;
+        offset = cursor->offset;
+    }
+    offset += utf8_chars_between(aTHX_ (const U8 *) from, (const U8 *) slice->chars);
+    cursor->base   = slice->baseChars;
+    cursor->chars  = slice->chars;
+    cursor->offset = offset;
+    return offset;
 }
 
 /* ===========================================================================
@@ -1074,7 +1149,7 @@ static const schema_field transition_arguments_fields[] = {
     { "current", offsetof(Clay_TransitionCallbackArguments, current),
       MEMBER_SIZE(Clay_TransitionCallbackArguments, current), FIELD_CUSTOM, 0, 0,
       &transition_data_schema, read_current_transition_data, write_current_transition_data },
-    F_FLOAT (Clay_TransitionCallbackArguments, elapsedTime),
+    F_NON_NEGATIVE(Clay_TransitionCallbackArguments, elapsedTime),
     F_FLOAT (Clay_TransitionCallbackArguments, duration),
     F_FLAGS (Clay_TransitionCallbackArguments, properties, CLAY_PERL_FLAGS_ALL(TransitionProperty)),
 };
@@ -1337,7 +1412,7 @@ Clay_ElementId clay_element_id_from_sv_interned(pTHX_ clay_perl_context *ctx, SV
     SV *string_id = fetch_defined(aTHX_ hv, "stringId");
     if (string_id) {
         STRLEN length;
-        const char *bytes = SvPVutf8_nomg(string_id, length);
+        const char *bytes = clay_perl_sv_utf8_bytes(aTHX_ string_id, &length);
         id.stringId = clay_perl_intern_id(aTHX_ ctx, bytes, length);
     }
     return id;
@@ -1438,7 +1513,7 @@ SV *clay_element_data_to_sv(pTHX_ Clay_ElementData data)
     return newRV_noinc((SV *) hv);
 }
 
-SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data)
+SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data, bool with_config)
 {
     HV *hv = newHV();
     Clay_Vector2 zero = { 0, 0 };
@@ -1449,7 +1524,9 @@ SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data)
     hv_store_sv(aTHX_ hv, "contentDimensions",
                 clay_dimensions_to_sv(aTHX_ data.contentDimensions));
 
-    hv_store_sv(aTHX_ hv, "config", schema_write(aTHX_ &clip_schema, &data.config));
+    if (with_config) {
+        hv_store_sv(aTHX_ hv, "config", schema_write(aTHX_ &clip_schema, &data.config));
+    }
 
     hv_store_bool(aTHX_ hv, "found", data.found);
     return newRV_noinc((SV *) hv);
@@ -1471,7 +1548,7 @@ SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data)
  * union member that Clay would have populated.
  * ======================================================================== */
 
-static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
+static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd, slice_offset_cursor *cursor)
 {
     HV *hv = newHV();
 
@@ -1488,7 +1565,7 @@ static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
                     clay_perl_utf8_sv(aTHX_ cmd->renderData.text.stringContents.chars,
                                       cmd->renderData.text.stringContents.length));
         hv_store_uv(aTHX_ hv, "stringOffset",
-                    clay_string_slice_offset(aTHX_ &cmd->renderData.text.stringContents));
+                    clay_string_slice_offset(aTHX_ &cmd->renderData.text.stringContents, cursor));
         hv_store_sv(aTHX_ hv, "textColor",
                     clay_color_to_sv(aTHX_ cmd->renderData.text.textColor));
         hv_store_uv(aTHX_ hv, "fontId",        cmd->renderData.text.fontId);
@@ -1541,11 +1618,11 @@ static SV *clay_render_data_to_sv(pTHX_ const Clay_RenderCommand *cmd)
     return newRV_noinc((SV *) hv);
 }
 
-static SV *clay_render_command_to_sv(pTHX_ const Clay_RenderCommand *cmd)
+static SV *clay_render_command_to_sv(pTHX_ const Clay_RenderCommand *cmd, slice_offset_cursor *cursor)
 {
     HV *hv = newHV();
     hv_store_sv(aTHX_ hv, "boundingBox", clay_bounding_box_to_sv(aTHX_ cmd->boundingBox));
-    hv_store_sv(aTHX_ hv, "renderData",  clay_render_data_to_sv(aTHX_ cmd));
+    hv_store_sv(aTHX_ hv, "renderData",  clay_render_data_to_sv(aTHX_ cmd, cursor));
     hv_store_uv(aTHX_ hv, "userData",    PTR2UV(cmd->userData));
     hv_store_uv(aTHX_ hv, "id",          cmd->id);
     hv_store_iv(aTHX_ hv, "zIndex",      (IV) cmd->zIndex);
@@ -1556,10 +1633,11 @@ static SV *clay_render_command_to_sv(pTHX_ const Clay_RenderCommand *cmd)
 SV *clay_render_command_array_to_sv(pTHX_ const Clay_RenderCommandArray *array)
 {
     AV *av = newAV();
+    slice_offset_cursor cursor = { NULL, NULL, 0 };
     if (array && array->internalArray && array->length > 0) {
         av_extend(av, array->length - 1);
         for (int32_t i = 0; i < array->length; i++) {
-            av_push(av, clay_render_command_to_sv(aTHX_ &array->internalArray[i]));
+            av_push(av, clay_render_command_to_sv(aTHX_ &array->internalArray[i], &cursor));
         }
     }
     return newRV_noinc((SV *) av);

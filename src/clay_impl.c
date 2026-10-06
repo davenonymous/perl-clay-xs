@@ -42,7 +42,8 @@
 #define CLAY_PERL_ALIGNMENT_SLACK ((uint64_t) 64 * 64)
 
 /* Unless the frame exceeded the element cap, Clay_EndLayout clones every
- * exiting element and its subtree into the top of layoutElements
+ * element with an exit transition and its subtree into the top of
+ * layoutElements
  * (Clay__CloneElementsWithExitTransition), with their children in the top
  * of layoutElementChildren and their id strings at the same indices of
  * layoutElementIdStrings. The walk follows those clones from each exiting
@@ -78,8 +79,10 @@ void clay_perl_clay_visit_exiting_buffers(clay_perl_buffer_visitor visit, void *
     }
     if (!any_exiting) return;
 
-    /* A frame over the element cap skips the clones: elementThisFrame then
-     * points at elements Clay never closed. Report the walk incomplete. */
+    /* A frame over the element cap makes no clones and drops every exit
+     * transition (patches/0004), so nothing exits after it; an exiting
+     * transition left then would not point at a clone. Report the walk
+     * incomplete. */
     int32_t capacity = context->layoutElements.capacity;
     if (context->booleanWarnings.maxElementsExceeded || capacity <= 0) {
         visit(NULL, data);
@@ -126,6 +129,21 @@ void clay_perl_clay_default_counts(int32_t *element_count, int32_t *word_count)
 {
     *element_count = Clay__defaultMaxElementCount;
     *word_count    = Clay__defaultMaxMeasureTextWordCacheCount;
+}
+
+bool clay_perl_clay_max_elements_exceeded(void)
+{
+    return Clay_GetCurrentContext()->booleanWarnings.maxElementsExceeded;
+}
+
+bool clay_perl_clay_scroll_container_declared(uint32_t element_id)
+{
+    Clay_Context *context = Clay_GetCurrentContext();
+    for (int32_t i = 0; i < context->scrollContainerDatas.length; i++) {
+        const Clay__ScrollContainerDataInternal *data = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
+        if (data->elementId == element_id) return data->generation == context->generation;
+    }
+    return false;
 }
 
 void clay_perl_clay_release_pointer(void)

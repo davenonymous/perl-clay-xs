@@ -15,6 +15,7 @@ use Clay::UI::Revision qw(bump_revision current_revision);
 use Clay::UI::Test::Box;
 use Clay::UI::Test::Text;
 use Clay::UI::Test::Grid;
+use Clay::UI::Test::GridCell;
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Layout::HasScroll;
@@ -95,6 +96,17 @@ subtest 'widget setters bump the revision' => sub {
 subtest 'reading an attribute does not bump the revision' => sub {
 	ok( !bumps($_->[2]), $_->[0] ) for @setters;
 	ok( !bumps(sub { $box->add_child }), 'add_child without children' );
+};
+
+subtest 'writing the current sizing group back does not bump the revision' => sub {
+	my $grouped = Clay::UI::Test::Box->new(width_group => 7, height_group => 3);
+	ok( !bumps(sub { $grouped->width_group(7); $grouped->height_group(3) }), 'a user group' );
+	my $owner = Clay::UI::Test::Grid->new(id => 'owner');
+	my $cell  = Clay::UI::Test::GridCell->new;
+	$owner->append_row([$cell]);
+	ok( !bumps(sub { $cell->width_group($cell->width_group); $cell->height_group($cell->height_group) }),
+		'a group the grid stamped' );
+	ok( bumps(sub { $grouped->width_group(8) }), 'another group does' );
 };
 
 subtest 'mark_changed bumps the revision and returns the widget' => sub {

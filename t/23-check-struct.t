@@ -66,6 +66,8 @@ subtest 'range and type errors name the field' => sub {
 		[ Clay_SizingAxis => { type => CLAY__SIZING_TYPE_PERCENT, percent => 1.5 }, qr/percent: expected a number in 0\.\.1, got '1.5'/ ],
 		[ Clay_SizingAxis => { min => 0, max => -9**9**9 }, qr/max: expected a finite number or \+Inf/ ],
 		[ Clay_LayoutConfig => { padding => { top => 1.5 } }, qr/^Clay_LayoutConfig\.padding\.top: expected an integer/ ],
+		[ Clay_TransitionCallbackArguments => { elapsedTime => -0.5 },
+			qr/^Clay_TransitionCallbackArguments\.elapsedTime: expected a number >= 0, got '-0\.5'/ ],
 	);
 	for my $case (@cases) {
 		my ($type, $value, $message) = @$case;
@@ -179,6 +181,15 @@ subtest 'Clay::XS::Structs documents every schema field' => sub {
 		is( [ grep { !$headed{$_} } @fields ], [], "$type: every field has a heading or item" );
 		is( $index_keys{$type}, \@fields, "$type: the QUICK INDEX lists its keys in schema order" );
 	}
+};
+
+subtest 'the check_struct POD lists every named schema' => sub {
+	open my $fh, '<', $INC{'Clay/XS.pm'} or die "cannot read Clay/XS.pm: $!";
+	my $pod = do { local $/; <$fh> };
+	my ($list) = $pod =~ /^=head2 check_struct\n.*?one of:\n\n(.*?)\n\n/ms;
+	ok( defined $list, 'the list is found' );
+	is( [ sort split ' ', $list // '' ], [ sort grep { !/\./ } keys %$SCHEMAS ],
+		'it names exactly the schemas check_struct knows' );
 };
 
 subtest 'unknown type names' => sub {

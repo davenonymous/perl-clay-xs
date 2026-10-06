@@ -21,6 +21,9 @@ our @EXPORT_OK = qw(
 	clay_field
 	copy_value
 	is_finite_number
+	is_index
+	shown_value
+	described_value
 	validate_border_width
 	validate_id
 	validate_group_id
@@ -40,6 +43,25 @@ sub _fail ($name, $message) {
 sub is_finite_number ($value) {
 	return defined $value && !ref $value && looks_like_number($value)
 		&& $value == $value && $value != 9**9**9 && $value != -9**9**9;
+}
+
+# A child, row or column index: a non-negative integer in plain decimal
+# digits without leading zeros (so '01' and '1' are never two indices),
+# defined and not a reference.
+sub is_index ($value) {
+	return defined $value && !ref $value && $value =~ /\A(?:0|[1-9][0-9]*)\z/ ? 1 : 0;
+}
+
+# A value as an error message shows it: the value itself, its reference
+# type, or 'undef'.
+sub shown_value ($value) {
+	return 'undef' unless defined $value;
+	return ref($value) || $value;
+}
+
+# The same for a "got ..." message: a string is quoted.
+sub described_value ($value) {
+	return ref($value) || (defined $value ? "'$value'" : 'undef');
 }
 
 # A deep copy of the hashes and arrays in $value, as plain (unblessed)

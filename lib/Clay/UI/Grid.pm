@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 
 use Clay::XS qw(sizing_fit sizing_grow sizing_percent CLAY_LEFT_TO_RIGHT CLAY_TOP_TO_BOTTOM);
-use Clay::UI::_validate qw(required clay_field USER_GROUP_ID_MAX);
+use Clay::UI::_validate qw(required clay_field is_index shown_value USER_GROUP_ID_MAX);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Grid::Row;
 use Clay::UI::Grid::Cell;
@@ -22,18 +22,20 @@ use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
-# Group-id encoding: (grid_id << _LOCAL_BITS) | local_index.
-#   - grid_id in 1..4095     -> 12 bits, one slot per live id space
-#   - local in 1..USER_GROUP_ID_MAX (20 bits), one slot per axis-bucket
-#     within it; every packed id is above the user range
+# Group-id encoding: (grid_id << _LOCAL_BITS) | local_index, in Clay's
+# 32-bit sizingGroup.
+#   - local in 1..USER_GROUP_ID_MAX (_LOCAL_BITS bits, 20), one slot per
+#     axis-bucket within an id space; every packed id is above the user range
+#   - grid_id in 1.._GRID_ID_MAX, the bits left (12, so 4095), one slot per
+#     live id space
 # Width-axis and height-axis ids share the local space because Clay equalizes
 # per-axis only (width vs height live in separate equality buckets).
 use constant {
-	_GRID_ID_BITS  => 12,
-	_LOCAL_BITS    => length(sprintf '%b', USER_GROUP_ID_MAX),
-	_GRID_ID_MAX   => (1 << 12) - 1,   # 4095
-	_LOCAL_MAX     => USER_GROUP_ID_MAX,
+	_LOCAL_BITS => length(sprintf '%b', USER_GROUP_ID_MAX),
+	_LOCAL_MAX  => USER_GROUP_ID_MAX,
 };
+use constant _GRID_ID_BITS => 32 - _LOCAL_BITS;
+use constant _GRID_ID_MAX  => (1 << _GRID_ID_BITS) - 1;
 
 # Process-global pool of 12-bit grid-ids. Monotonic counter for fresh ids;
 # the free-list receives ids released when an id space is destroyed, so
@@ -223,7 +225,7 @@ role Clay::UI::Grid
 		return [ map { $_->children } @{ $self->children } ];
 	}
 
-	method row_count () { return scalar @{ $self->children }; }
+	method row_count () { return $self->child_count; }
 
 	method is_spanning_row ($index) {
 		$self->_check_row_index($index);
@@ -232,7 +234,7 @@ role Clay::UI::Grid
 
 	# The Clay::UI::Grid::Row at a checked index.
 	method _row ($index) {
-		return $self->children->[$index];
+		return $self->child_at($index);
 	}
 
 	method row_gap (@new) {
@@ -287,14 +289,16 @@ role Clay::UI::Grid
 	}
 
 	# Wraps one validated input cell into a cell the grid lays out (see
-	# $_ids) and stamps its (column, row) group ids.
+	# $_ids) and stamps its (column, row) group ids. A wrapper the grid
+	# makes adopts the cell without announcing it: the cell is announced
+	# once its row is in the grid.
 	method _wrap_cell ($cell, $width_id, $height_id) {
 		my $wrapper = $cell;
 		unless (_is_grid_cell($cell)) {
 			$wrapper = Clay::UI::Grid::Cell->new(
 				layout => { sizing => { width => sizing_fit(), height => sizing_fit() } },
 			);
-			$wrapper->add_child($cell);
+			$wrapper->_adopt_children($cell);
 		}
 		return $self->_stamp($wrapper, $width_id, $height_id);
 	}
@@ -309,7 +313,7 @@ role Clay::UI::Grid
 			$wrapper = Clay::UI::Grid::Cell->new(
 				layout => { sizing => { width => sizing_percent(1), height => sizing_fit() } },
 			);
-			$wrapper->add_child($cell);
+			$wrapper->_adopt_children($cell);
 		}
 		return $self->_stamp($wrapper, undef, $height_id);
 	}
@@ -320,6 +324,8 @@ role Clay::UI::Grid
 
 	# Rows stretch to the grid's width, so cells with a grow width share
 	# the space left in the grid. Unstyled rows paint nothing either way.
+	# The row adopts its wrappers; _insert_row_record announces the whole
+	# row once it is in the grid.
 	method _new_row ($wrappers, $spans, $height_id) {
 		my $row = Clay::UI::Grid::Row->new(
 			layout => {
@@ -330,12 +336,15 @@ role Clay::UI::Grid
 			spans     => $spans,
 			height_id => $height_id,
 		);
-		$row->_attach_children(@$wrappers);
+		$row->_adopt_children(@$wrappers);
 		return $row;
 	}
 
 	# Builds a complete row for index $index. Everything that can fail
-	# (validation, id allocation) happens before the grid changes.
+	# (validation, then id allocation, the height id last) happens before
+	# the grid changes; building the row cannot fail, and the only error
+	# after the change is a tree_changed hook's, which _splice_children
+	# rethrows once the row is in place.
 	method _insert_new_row ($index, $row_cells) {
 		$self->_validate_row($row_cells);
 		my ($col_ids, $next_width_local) = $_ids->col_ids_for(scalar @$row_cells);
@@ -362,15 +371,15 @@ role Clay::UI::Grid
 
 	method _check_row_index ($index) {
 		my $row_count = $self->row_count;
-		croak_ui "Clay::UI::Grid: row index " . ($index // 'undef') . " out of range 0.." . ($row_count - 1)
-			unless defined $index && $index =~ /\A[0-9]+\z/ && $index < $row_count;
+		croak_ui "Clay::UI::Grid: row index " . shown_value($index) . " out of range 0.." . ($row_count - 1)
+			unless is_index($index) && $index < $row_count;
 		return;
 	}
 
 	method _check_insert_index ($index) {
 		my $row_count = $self->row_count;
-		croak_ui "Clay::UI::Grid: insert index " . ($index // 'undef') . " out of range 0..$row_count"
-			unless defined $index && $index =~ /\A[0-9]+\z/ && $index <= $row_count;
+		croak_ui "Clay::UI::Grid: insert index " . shown_value($index) . " out of range 0..$row_count"
+			unless is_index($index) && $index <= $row_count;
 		return;
 	}
 
@@ -446,17 +455,16 @@ role Clay::UI::Grid
 		my $row = $self->_row($r);
 		croak_ui "Clay::UI::Grid: row $r spans all columns; use replace_spanning_row or replace_row"
 			if $row->spans;
-		my $cells           = $row->children;
-		my $current_row_len = scalar @$cells;
-		croak_ui "Clay::UI::Grid: col index " . ($c // 'undef') . " out of range 0.." . $current_row_len
-			unless defined $c && $c =~ /\A[0-9]+\z/ && $c <= $current_row_len;
+		my $current_row_len = $row->child_count;
+		croak_ui "Clay::UI::Grid: col index " . shown_value($c) . " out of range 0.." . $current_row_len
+			unless is_index($c) && $c <= $current_row_len;
 		$self->_validate_cells($widget);
 		my ($col_ids, $next_width_local) = $_ids->col_ids_for($c + 1);
 
 		$_ids->commit_col_ids($col_ids, $next_width_local);
 		my $wrapper  = $self->_wrap_cell($widget, $col_ids->[$c], $row->height_id);
 		my $replaced = $c < $current_row_len ? 1 : 0;
-		_drop_grid_groups($cells->[$c]) if $replaced;
+		_drop_grid_groups($row->child_at($c)) if $replaced;
 		$row->_splice_children($c, $replaced, $wrapper);
 		return $self;
 	}
@@ -540,7 +548,7 @@ the same layout pass as the rest of the UI.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
 
 =end html
 
@@ -1113,7 +1121,10 @@ L<Clay::UI::Role::Layout::HasSizingGroup/width_group>).
 
 Each grid takes a grid number from a pool of 4095 for the whole
 process; a grid made with C<share_columns_with> uses the number of the
-grid it shares with. A group id is C<< (grid_number << 20) | index >>,
+grid it shares with. The pool size follows from the user range: Clay's
+group ids have 32 bits, the index of a group takes the 20 bits of the
+user range (C<USER_GROUP_ID_MAX>, 2**20 - 1), and the grid number the
+12 that are left (2**12 - 1 = 4095). A group id is C<< (grid_number << 20) | index >>,
 where the index counts columns (for width ids) and rows (for height
 ids) of that grid. This means:
 

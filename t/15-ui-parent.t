@@ -19,6 +19,7 @@ use Clay::UI::Test::Grid;
 use Clay::UI::Test::Text;
 use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Interaction::Focusable;
+use Clay::UI::Role::Layout::GridCell;
 
 class FocusBox :strict(params)
 	:does(Clay::UI::Role::Core::Container)
@@ -32,7 +33,7 @@ my @tree_log;
 
 sub log_tree_change ($label, $widget) {
 	my $parent = $widget->parent;
-	push @tree_log, join ':', $label, (defined $parent ? $parent->id : '-'), (defined $widget->ui ? 'ui' : 'no-ui');
+	push @tree_log, join ':', $label, (defined $parent ? $parent->id // ref $parent : '-'), (defined $widget->ui ? 'ui' : 'no-ui');
 	return;
 }
 
@@ -46,6 +47,8 @@ class HookBox :strict(params) :isa(FocusBox) {
 		return;
 	}
 }
+
+class HookGridCell :strict(params) :isa(HookBox) :does(Clay::UI::Role::Layout::GridCell) {}
 
 class HookText :strict(params) :isa(Clay::UI::Test::Text) {
 	method tree_changed :override () {
@@ -561,6 +564,56 @@ subtest 'every hook runs even if one dies' => sub {
 	like( dies { $root->remove_child($panel, $holder) }, qr/^blur listener bug$/,
 		'a release listener error wins over the hook errors after it' );
 	is( [ $panel->parent, $holder->parent ], [ undef, undef ], 'both subtrees are detached' );
+};
+
+# Each Grid mutator builds the new row or cell first and announces it once
+# it is in the grid: a cell the grid wraps ('wrapped') and a GridCell that
+# is its own wrapper ('own') each get one call, with ui set.
+my %grid_mutations = (
+	append_row           => [ sub ($grid, @cells) { $grid->append_row([@cells]) },           qw(wrapped own) ],
+	insert_row           => [ sub ($grid, @cells) { $grid->insert_row(0, [@cells]) },        qw(wrapped own) ],
+	append_spanning_row  => [ sub ($grid, @cells) { $grid->append_spanning_row(@cells) },    qw(own) ],
+	replace_row          => [ sub ($grid, @cells) { $grid->replace_row(0, [@cells]) },       qw(wrapped own) ],
+	replace_spanning_row => [ sub ($grid, @cells) { $grid->replace_spanning_row(0, @cells) }, qw(wrapped) ],
+	set_cell             => [ sub ($grid, @cells) { $grid->set_cell(0, 1, @cells) },         qw(wrapped) ],
+);
+for my $name (sort keys %grid_mutations) {
+	my ($mutate, @labels) = @{ $grid_mutations{$name} };
+	subtest "Grid's $name announces every new cell once, inside the grid" => sub {
+		my $root = HookBox->new(id => 'root');
+		my $grid = Clay::UI::Test::Grid->new(id => 'grid');
+		$root->add_child($grid);
+		my $ui = hook_ui($root);
+		$grid->append_row([ HookBox->new(id => 'old') ]);
+		my %class_of = (wrapped => 'HookBox', own => 'HookGridCell');
+		my @cells = map { $class_of{$_}->new(id => $_) } @labels;
+		@tree_log = ();
+		$mutate->($grid, @cells);
+		my %calls;
+		for my $entry (@tree_log) {
+			my ($label, $ui_flag) = ( split /:/, $entry )[ 0, -1 ];
+			push @{ $calls{$label} }, $ui_flag unless $label eq 'old';
+		}
+		is( \%calls, { map { $_ => ['ui'] } @labels }, 'one call per new cell, with ui set' );
+	};
+}
+
+subtest 'a dying hook in append_row leaves the row added' => sub {
+	my $root = HookBox->new(id => 'root');
+	my $grid = Clay::UI::Test::Grid->new(id => 'grid');
+	$root->add_child($grid);
+	my $ui   = hook_ui($root);
+	my $cell = HookGridCell->new(id => 'cell');
+	$cell->set_die_with("cell hook bug\n");
+	like( dies { $grid->append_row([ $cell, HookBox->new(id => 'other') ]) }, qr/^cell hook bug$/,
+		'append_row dies with the hook error' );
+	is( $grid->row_count, 1, 'after the row was added' );
+	same( $cell->parent->parent, $grid, 'with the cell in it' );
+	$cell->set_die_with(undef);
+	my $next = HookGridCell->new(id => 'next');
+	$grid->append_row([$next]);
+	isnt( $next->height_group, $cell->height_group, 'the next row gets a height group of its own' );
+	is( $next->width_group, $cell->width_group, 'and shares the first column' );
 };
 
 done_testing;

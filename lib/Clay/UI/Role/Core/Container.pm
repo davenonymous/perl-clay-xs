@@ -9,6 +9,7 @@ use Object::Pad 0.800;
 
 use Clay::UI::Role::Core::Element;
 use Clay::UI::_error qw(croak_ui);
+use Clay::UI::_validate qw(described_value);
 
 our $VERSION = '0.01';
 
@@ -42,6 +43,8 @@ role Clay::UI::Role::Core::Container :does(Clay::UI::Role::Core::Element) {
 	}
 
 	method remove_child_with_id ($target_id) {
+		croak_ui "Clay::UI: remove_child_with_id takes an id string, got " . described_value($target_id)
+			unless defined $target_id && !ref $target_id;
 		$self->_detach_children(grep {
 			$_->DOES('Clay::UI::Role::Core::Element') && defined $_->id && $_->id eq $target_id
 		} @{ $self->children });
@@ -49,6 +52,7 @@ role Clay::UI::Role::Core::Container :does(Clay::UI::Role::Core::Element) {
 	}
 
 	method remove_children_with ($predicate) {
+		Clay::UI::Role::Core::Element::_require_predicate(remove_children_with => $predicate);
 		$self->_detach_children(grep { $predicate->($_) } @{ $self->children });
 		return $self;
 	}
@@ -126,8 +130,10 @@ Like L</add_child>, but puts the widgets before the child at index
 C<$offset> (0 inserts them first, the number of children appends). The
 children already there keep their state: none is detached. Returns the
 widget. Dies, changing nothing, like L</add_child>, and with
-C<Clay::UI: child offset ... out of range 0..N> for an offset outside
-the children.
+C<Clay::UI: child offset ... out of range 0..N> for an offset that is
+not an index of the children or the count of them: anything but an
+integer in plain decimal digits from 0 to N (C<'abc'>, C<0.5>, C<-1>,
+C<'01'>, undef and references die).
 
 =head2 clear_children
 
@@ -156,7 +162,9 @@ child.
 
 Removes and detaches every direct child whose C<id> equals the argument
 (string comparison). Children without an id and text widgets are never
-matched. An id no child has is ignored. Returns the widget.
+matched. An id no child has is ignored. Returns the widget. Dies with
+C<Clay::UI: remove_child_with_id takes an id string, got ...> for undef
+or a reference.
 
 =head2 remove_children_with
 
@@ -166,7 +174,9 @@ matched. An id no child has is ignored. Returns the widget.
 Removes and detaches every direct child for which
 C<< $predicate->($child) >> is true. C<$_> is set to the child as well.
 Text widgets are passed too; their C<id> is undef.
-Returns the widget.
+Returns the widget. Dies with
+C<Clay::UI: remove_children_with takes a code reference, got ...> for
+anything else.
 
 If a removal releases the focused or hovered widget and one of the
 resulting C<OnBlur> / C<OnHoverStopped> listeners dies, the removal

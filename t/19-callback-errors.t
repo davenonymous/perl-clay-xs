@@ -163,7 +163,7 @@ subtest 'a context without a measure function reports measured text' => sub {
 		'second context without a measurer croaks' );
 };
 
-subtest 'an error left by an abandoned frame is raised by the next Clay_BeginLayout' => sub {
+subtest 'an error left by an unfinished frame is raised by the next Clay_BeginLayout' => sub {
 	my $ctx = fresh_context(measure => sub { die "measure failed\n" });
 	Clay_BeginLayout();
 	Clay__OpenTextElement('abandoned', {});
@@ -173,6 +173,108 @@ subtest 'an error left by an abandoned frame is raised by the next Clay_BeginLay
 	Clay_BeginLayout();
 	Clay__OpenTextElement('fine', {});
 	ok( lives { Clay_EndLayout() }, 'the following frame works' );
+};
+
+subtest 'a query in the middle of a frame leaves the held error for Clay_EndLayout' => sub {
+	my $ctx = fresh_context(measure => sub { die "measure failed\n" });
+	Clay_BeginLayout();
+	box('outer');
+	Clay__OpenTextElement('unmeasurable', {});
+	ok( lives { Clay_PointerOver(Clay_GetElementId('outer')) }, 'Clay_PointerOver returns normally' );
+	is( Clay::XS::_context_stats($ctx)->{open_depth}, 1, 'and the element stays open' );
+	Clay__CloseElement();
+	like( dies { Clay_EndLayout() }, qr/^measure failed$/, 'Clay_EndLayout re-throws the error' );
+	is( Clay::XS::_context_stats($ctx), hash { field layout_state => 'complete'; field open_depth => 0; etc },
+		'with nothing left open' );
+};
+
+subtest 'a call refused inside a callback evaluates none of its arguments' => sub {
+	package Recording::Bool { our $calls = 0; use overload 'bool' => sub { $calls++; 1 }, fallback => 1 }
+	my $flag = bless {}, 'Recording::Bool';
+	my %calls = (
+		Clay_SetPointerState                  => [ [0, 0], $flag ],
+		Clay_UpdateScrollContainers           => [ $flag, [0, 0], 0 ],
+		Clay_SetExternalScrollHandlingEnabled => [ $flag ],
+		Clay_SetDebugModeEnabled              => [ $flag ],
+		Clay_SetCullingEnabled                => [ $flag ],
+	);
+	my %refused;
+	my $ctx = fresh_context(measure => sub ($text, $config, $userdata) {
+		for my $name (sort keys %calls) {
+			eval { Clay::XS->can($name)->(@{ $calls{$name} }); 1 }
+				or $refused{$name} = $@ =~ /^\Q$name\E: cannot be called from inside a Clay callback/ ? 1 : $@;
+		}
+		return { width => 1, height => 1 };
+	});
+	text_frame();
+	is( \%refused, { map { $_ => 1 } keys %calls }, 'every call is refused' );
+	is( $Recording::Bool::calls, 0, 'before its boolean argument is read' );
+};
+
+subtest 'loop control in a callback cannot leave the callback' => sub {
+	my $ctx = fresh_context();
+	Clay_BeginLayout();
+	box('looping');
+	Clay_OnHover(sub { no warnings 'exiting'; last FRAME });
+	Clay__CloseElement();
+	Clay_EndLayout();
+	my @errors;
+	FRAME: for my $iteration (1 .. 2) {
+		eval { Clay_SetPointerState([10, 10], 0); 1 } or push @errors, $@;
+	}
+	is( scalar @errors, 2, 'the loop around the call runs every iteration' );
+	like( $errors[0], qr/^Label not found for "last FRAME"/, 'Clay_SetPointerState re-throws the error last died with' );
+	is( Clay::XS::_context_stats($ctx)->{callback_depth}, 0, 'no callback is left running' );
+	ok( lives { Clay_BeginLayout(); Clay_EndLayout() }, 'the next frame works' );
+	is( warnings { undef $ctx }, [], 'and the context goes away silently' );
+};
+
+# Runs Perl code in a child perl; returns its output (STDOUT and STDERR)
+# and exit status.
+sub run_child ($code) {
+	my $pid = open my $child, '-|' // die "cannot fork: $!";
+	if (!$pid) {
+		open STDERR, '>&', \*STDOUT or die "cannot redirect STDERR: $!";
+		exec $^X, (map { "-I$_" } @INC), '-e', $code;
+		die "cannot run $^X: $!";
+	}
+	my $output = do { local $/; <$child> };
+	close $child;
+	return ($output, $? >> 8);
+}
+
+subtest 'exit in a callback takes effect once Clay has returned' => sub {
+	my $preamble = <<'PERL';
+use Clay::XS qw(:all);
+our $ctx = Clay_Initialize(Clay_MinMemorySize(), [300, 100]);
+END {
+	Clay_SetMeasureTextFunction(sub { [1, 1] });
+	print eval { Clay_BeginLayout(); Clay_EndLayout(); 1 } ? "END: frame ok\n" : "END: died: $@";
+}
+PERL
+	my %exits = (
+		'a hover callback' => <<'PERL',
+Clay_BeginLayout();
+Clay__OpenElementWithId(Clay_GetElementId('quit'));
+Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(100), height => sizing_fixed(100) } } });
+Clay_OnHover(sub { exit 3 });
+Clay__CloseElement();
+Clay_EndLayout();
+Clay_SetPointerState([10, 10], 1);
+print "not reached\n";
+PERL
+		'a measure callback' => <<'PERL',
+Clay_SetMeasureTextFunction(sub { exit 3 });
+Clay_BeginLayout();
+Clay__OpenTextElement('quit', {});
+print "not reached\n";
+PERL
+	);
+	for my $where (sort keys %exits) {
+		my ($output, $status) = run_child($preamble . $exits{$where});
+		is( [ $output, $status ], [ "END: frame ok\n", 3 ],
+			"exit 3 in $where: END blocks can use Clay, the status is 3, nothing else is printed" );
+	}
 };
 
 subtest 'a query inside a hover callback leaves the held error alone' => sub {
@@ -427,11 +529,17 @@ Clay_SetMeasureTextFunction(sub { [1, 1] });
 { no warnings 'redefine'; *Clay::XS::_dispatch = sub { die "replacement called\n" }; }
 Clay_BeginLayout(); Clay__OpenTextElement('measured', {});
 print eval { Clay_EndLayout(); 1 } ? "measured\n" : "died: $@";
+undef $ctx;
+my $later = Clay_Initialize(Clay_MinMemorySize(), [100, 100]);
+Clay_SetMeasureTextFunction(sub { [1, 1] });
+Clay_BeginLayout(); Clay__OpenTextElement('measured', {});
+print eval { Clay_EndLayout(); 1 } ? "measured later\n" : "died: $@";
 PERL
 	open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
 	my $output = do { local $/; <$child> };
 	close $child;
-	is( $output, "measured\n", 'the trampolines keep calling the original dispatcher' );
+	is( $output, "measured\nmeasured later\n",
+		'the trampolines keep calling the original dispatcher, also for a context made after the replacement' );
 };
 
 subtest 'a measure function returning undef is an error' => sub {

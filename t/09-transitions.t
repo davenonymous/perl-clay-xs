@@ -168,7 +168,7 @@ subtest 'exiting element keeps its text' => sub {
     Clay_SetTransitionHandlers();
 };
 
-subtest 'an abandoned frame does not free text an exiting element shows' => sub {
+subtest 'an unfinished frame does not free text an exiting element shows' => sub {
     Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
     my $toast_frame = sub ($with_toast) {
         Clay_BeginLayout();
@@ -186,11 +186,133 @@ subtest 'an abandoned frame does not free text an exiting element shows' => sub 
                  grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_TEXT } @{ Clay_EndLayout(0.016) } ];
     };
     $toast_frame->(1) for 1 .. 3;
+    # Left open without the toast: the next Clay_BeginLayout finishes this
+    # frame, and the toast starts its exit in it.
     Clay_BeginLayout();
-    Clay__OpenTextElement("abandoned " . ("x" x 20_000), {});
+    Clay__OpenElementWithId( Clay_GetElementId("page") );
+    Clay__ConfigureOpenElement({});
+    Clay__OpenTextElement("unfinished " . ("x" x 20_000), {});
     is( $toast_frame->(0), ["TOAST-MESSAGE-TEXT"], 'the exiting toast still shows its text' );
     is( $toast_frame->(0), ["TOAST-MESSAGE-TEXT"], 'also in the frame after' );
     Clay_SetTransitionHandlers();
+};
+
+subtest 'an exiting element removed after an unfinished frame finishes its exit' => sub {
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $exit = { duration => 1, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, exit => { hasSetFinal => 1 } };
+    my $box = sub ($name, $transition) {
+        Clay__OpenElementWithId( Clay_GetElementId($name) );
+        Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(20), height => sizing_fixed(20) } },
+            backgroundColor => [200, 0, 0, 255], ($transition ? (transition => $transition) : ()) });
+        Clay__CloseElement();
+    };
+    Clay_BeginLayout();
+    $box->('X', $exit);
+    Clay_EndLayout(0.016);
+    ok( !eval { Clay_BeginLayout(); $box->('X', $exit); die "widget code failed\n" }, 'the second frame is left unfinished' );
+    Clay_BeginLayout();
+    $box->('P', undef);
+    my $commands = Clay_EndLayout(0.016);
+    is( scalar(grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @$commands), 2,
+        'the frame after it completes and draws P and the exiting X' );
+    is( Clay::XS::_context_stats($ctx), hash { field layout_state => 'complete'; field open_depth => 0; etc },
+        'and leaves nothing open' );
+    Clay_SetTransitionHandlers();
+};
+
+subtest 'an element declared once without its transition loses its exit' => sub {
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $exit = { duration => 1, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, exit => { hasSetFinal => 1 } };
+    my $box = sub ($name, $transition, @children) {
+        Clay__OpenElementWithId( Clay_GetElementId($name) );
+        Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(20), height => sizing_fixed(20) } },
+            backgroundColor => [200, 0, 0, 255], ($transition ? (transition => $transition) : ()) });
+        $_->() for @children;
+        Clay__CloseElement();
+    };
+    my $drawn = sub (@boxes) {
+        Clay_BeginLayout();
+        $_->() for @boxes;
+        my %name_of = map { Clay_GetElementId($_)->{id} => $_ } qw(X Y C);
+        return [ sort map { $name_of{ $_->{id} } // '?' }
+                 grep { $_->{commandType} == CLAY_RENDER_COMMAND_TYPE_RECTANGLE } @{ Clay_EndLayout(0.016) } ];
+    };
+    my $y_with_child = sub { $box->('Y', $exit, sub { $box->('C', undef) }) };
+    $drawn->(sub { $box->('Y', $exit) }, sub { $box->('X', $exit) });
+    $drawn->($y_with_child, sub { $box->('X', undef) });
+    is( $drawn->($y_with_child), [qw(C Y)], 'removing it next frame just removes it' );
+    is( $drawn->(), [qw(C Y)], 'an element that kept its exit transition still exits' );
+    Clay_SetTransitionHandlers();
+};
+
+subtest 'a duplicate id without a transition leaves the transition of the first element alone' => sub {
+    my $own = Clay_Initialize(Clay_MinMemorySize(), { width => 100, height => 100 }, sub { });
+    my $calls = 0;
+    Clay_SetTransitionHandlers(sub ($args, $userdata) { $calls++; 0 }, sub ($target, $properties, $userdata) { $target });
+    my $enter = { duration => 1, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, enter => { hasSetInitial => 1 } };
+    my $box = sub ($transition) {
+        Clay__OpenElementWithId( Clay_GetElementId('twin') );
+        Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(20), height => sizing_fixed(20) } },
+            backgroundColor => [200, 0, 0, 255], ($transition ? (transition => $transition) : ()) });
+        Clay__CloseElement();
+    };
+    my $frame = sub (@boxes) {
+        Clay_BeginLayout();
+        Clay__OpenElementWithId( Clay_GetElementId('twins') );
+        Clay__ConfigureOpenElement({});
+        $_->() for @boxes;
+        Clay__CloseElement();
+        Clay_EndLayout(0.016);
+    };
+    $frame->();
+    $frame->(sub { $box->($enter) });                                  # twin enters
+    $frame->(sub { $box->($enter) }, sub { $box->(undef) });           # and a second twin has no transition
+    is( $calls, 1, 'the enter transition of the first twin runs on' );
+    Clay_SetCurrentContext($ctx);
+};
+
+# A context with a small element count and an error handler collecting
+# error types. Clay_Initialize takes the counts of the current context, so
+# they are set on $ctx for the call and restored.
+sub small_context ($element_count, $errors) {
+    my ($elements, $words) = (Clay_GetMaxElementCount(), Clay_GetMaxMeasureTextCacheWordCount());
+    Clay_SetMaxElementCount($element_count);
+    Clay_SetMaxMeasureTextCacheWordCount(64);
+    my $small = Clay_Initialize(Clay_MinMemorySize(), { width => 400, height => 300 },
+        sub ($error, $userdata) { push @$errors, $error->{errorType} });
+    Clay_SetCurrentContext($ctx);
+    Clay_SetMaxElementCount($elements);
+    Clay_SetMaxMeasureTextCacheWordCount($words);
+    Clay_SetCurrentContext($small);
+    return $small;
+}
+
+subtest 'exiting elements that do not fit into the element count lose their exit' => sub {
+    my @errors;
+    my $small = small_context(64, \@errors);
+    Clay_SetTransitionHandlers(sub { 0 }, undef, sub ($initial, $properties, $userdata) { $initial });
+    my $exit = { duration => 1, properties => CLAY_TRANSITION_PROPERTY_BACKGROUND_COLOR, exit => { hasSetFinal => 1 } };
+    my $box = sub ($name, $transition, @children) {
+        Clay__OpenElementWithId( Clay_GetElementId($name) );
+        Clay__ConfigureOpenElement({ layout => { sizing => { width => sizing_fixed(5), height => sizing_fixed(5) } },
+            backgroundColor => [200, 0, 0, 255], ($transition ? (transition => $transition) : ()) });
+        $_->() for @children;
+        Clay__CloseElement();
+    };
+    my @pointer_over;
+    for my $frame (1 .. 4) {
+        Clay_BeginLayout();
+        $box->('E', $exit, sub { $box->("e$_", undef) for 1 .. 20 }) if $frame < 3;    # 21 clones next to 57 elements
+        $box->("p$_", undef) for 1 .. 35;
+        Clay_EndLayout(0.016);
+        my $target = Clay_GetElementData( Clay_GetElementId('p30') )->{boundingBox};
+        Clay_SetPointerState([ $target->{x} + 1, $target->{y} + 1 ], 0);
+        push @pointer_over, [ map { $_->{stringId} } @{ Clay_GetPointerOverIds() } ];
+    }
+    is( $errors[0], CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED, 'the error handler hears that the clones do not fit' );
+    is( \@pointer_over, [ [], [], ([ 'Clay__RootContainer', 'p30' ]) x 2 ],
+        'Clay ignores the pointer after those frames, and finds p30 once E is gone' );
+    Clay_SetCurrentContext($ctx);
 };
 
 subtest 'memory stays bounded while exit transitions keep running' => sub {

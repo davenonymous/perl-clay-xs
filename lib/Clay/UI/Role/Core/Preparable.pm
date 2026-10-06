@@ -13,14 +13,22 @@ use Clay::UI::_error qw(croak_ui);
 
 our $VERSION = '0.01';
 
-# Process-wide, like the revision: refaddr => the widget (weak), for every
-# widget whose prepare_layout is due before its UI's next layout pass.
+# Process-wide, like the revision: refaddr => [ the widget (weak), its
+# request number ], for every widget whose prepare_layout is due before its
+# UI's next layout pass. The request numbers order the widgets of a round.
 my %_pending;
+my $_next_request = 0;
 
 # Calls prepare_layout on the pending widgets that belong to $ui, until
 # none is left (a preparation may request another one). Widgets of other
 # UIs, or of none yet, stay pending. Dies when preparations keep
 # requesting new ones.
+#
+# A round prepares parents before their descendants (fewer ancestors
+# first), and widgets at the same depth in the order they asked. Each
+# widget is checked again right before its preparation: one that an
+# earlier preparation of the round moved out of this UI goes back into
+# the queue, as it was.
 #
 # A dying prepare_layout does not stop the round: the other due widgets
 # are still prepared (as the remaining events still fire after a listener
@@ -30,17 +38,62 @@ use constant _MAX_ROUNDS => 100;
 
 sub _prepare_pending ($ui) {
 	for my $round (1 .. _MAX_ROUNDS) {
-		my @due = grep { _belongs_to($_, $ui) } map { $_pending{$_} } sort keys %_pending;
+		_forget_freed();
+		my @due = _due_in_order($ui);
 		return unless @due;
-		delete $_pending{ refaddr $_ } for @due;
+		delete $_pending{ refaddr $_->[0] } for @due;
 		my $first_error;
-		for my $widget (@due) {
+		for my $entry (@due) {
+			my ($widget, $request) = @$entry;
+			unless (_belongs_to($widget, $ui)) {
+				_queue($widget, $request);
+				next;
+			}
 			local $@;
 			eval { $widget->prepare_layout; 1 } or $first_error //= $@ || 'unknown prepare_layout error';
 		}
 		die $first_error if defined $first_error;
 	}
 	croak_ui "Clay::UI: widgets kept requesting preparation; " . _MAX_ROUNDS . " rounds of prepare_layout did not settle";
+}
+
+# The pending entries of $ui's widgets, as [ widget, request number ] with
+# strong references, parents before descendants, then by request.
+sub _due_in_order ($ui) {
+	my @due = map { [ $_->[0], $_->[1], _depth($_->[0]) ] } grep { _belongs_to($_->[0], $ui) } values %_pending;
+	return map { [ @$_[0, 1] ] } sort { $a->[2] <=> $b->[2] || $a->[1] <=> $b->[1] } @due;
+}
+
+sub _depth ($widget) {
+	my $depth = 0;
+	$depth++ while defined( $widget = $widget->parent );
+	return $depth;
+}
+
+# Queues $widget (weakly) under a request number, unless it is queued.
+sub _queue ($widget, $request) {
+	my $address = refaddr $widget;
+	return if _queued_at($address);
+	$_pending{$address} = [ $widget, $request ];
+	weaken $_pending{$address}[0];
+	return;
+}
+
+# The widget queued at $address, or undef (also for a freed one).
+sub _queued_at ($address) {
+	my $entry = $_pending{$address};
+	return $entry ? $entry->[0] : undef;
+}
+
+# Forgets the entries of widgets freed while they were queued.
+sub _forget_freed () {
+	delete $_pending{$_} for grep { !defined $_pending{$_}[0] } keys %_pending;
+	return;
+}
+
+# The number of entries in the queue, for the tests.
+sub _pending_count () {
+	return scalar keys %_pending;
 }
 
 sub _belongs_to ($widget, $ui) {
@@ -55,18 +108,14 @@ role Clay::UI::Role::Core::Preparable {
 	method prepare_layout;
 
 	method request_prepare () {
-		my $address = refaddr $self;
-		unless (defined $_pending{$address}) {
-			$_pending{$address} = $self;
-			weaken $_pending{$address};
-		}
+		_queue($self, $_next_request++);
 		bump_revision();
 		return $self;
 	}
 
 	method is_prepare_pending () {
-		my $pending = $_pending{ refaddr $self };
-		return defined $pending && refaddr($pending) == refaddr($self) ? 1 : 0;
+		my $queued = _queued_at(refaddr $self);
+		return defined $queued && refaddr($queued) == refaddr($self) ? 1 : 0;
 	}
 }
 
@@ -133,7 +182,17 @@ included.
 
 Only widgets that belong to the rendering UI are prepared (their
 C<ui> is that UI). A widget that is not part of a UI yet stays queued
-until a UI it belongs to renders.
+until a UI it belongs to renders. That is checked again right before
+each preparation: a widget that an earlier preparation of the same
+round detached (a list rebuilding its rows, say) is not prepared and
+stays queued.
+
+=item *
+
+Parents are prepared before their descendants: a round prepares the
+queued widgets with fewer ancestors first, and widgets with as many
+ancestors in the order they called C<request_prepare>. A widget that
+rebuilds its subtree therefore runs before the widgets inside it.
 
 =item *
 
@@ -147,7 +206,8 @@ C<Clay::UI: widgets kept requesting preparation; 100 rounds of prepare_layout di
 =item *
 
 The queue is shared by all UIs of the process and holds widgets
-weakly: a widget freed while it is queued is forgotten.
+weakly: a widget freed while it is queued is forgotten (its entry goes
+at the next C<render> of any UI).
 
 =back
 

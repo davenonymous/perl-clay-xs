@@ -167,6 +167,21 @@ subtest 'exiting children take no space' => sub {
 	frame($layout->(0));
 	ok( Clay_GetElementData(Clay_GetElementId('b'))->{found}, 'b is still laid out while it exits' );
 	is( box_of('c'), [40, 0, 40, 10], 'c moves up next to a while b exits' );
+
+	my $bottom_aligned = sub ($with_b) {
+		return flow('low', { sizing => { width => sizing_fixed(300), height => sizing_fixed(100) },
+		                     childAlignment => { y => CLAY_ALIGN_Y_BOTTOM } },
+			fixed('d', 40, 10),
+			($with_b
+				? sub { el('e', { layout => { sizing => { width => sizing_fixed(40), height => sizing_fixed(30) } },
+				                  transition => { duration => 1, properties => CLAY_TRANSITION_PROPERTY_X,
+				                                  exit => { hasSetFinal => 1 } } }) }
+				: ()));
+	};
+	frame($bottom_aligned->(1)) for 1 .. 2;
+	my $declared_y = box_of('e')->[1];
+	frame($bottom_aligned->(0));
+	is( box_of('e')->[1], $declared_y, 'an exiting child placed before the first line keeps its bottom alignment' );
 	Clay_SetTransitionHandlers();
 };
 

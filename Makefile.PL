@@ -45,6 +45,20 @@ my @clay_patches = qw(
     patches/0004-clay-upstream-fixes.patch
 );
 
+# -----------------------------------------------------------------------------
+# The C sources of the binding besides lib/Clay/XS.xs. Each gets an explicit
+# compile rule in MY::postamble below.
+# -----------------------------------------------------------------------------
+
+my @c_sources = qw(
+    src/clay_impl.c
+    src/clay_perl_context.c
+    src/marshal.c
+    src/callbacks.c
+);
+
+sub object_of ($source) { return $source =~ s/\.c\z/\$(OBJ_EXT)/r }
+
 WriteMakefile(
     NAME           => 'Clay::UI',
     VERSION_FROM   => 'lib/Clay/UI.pm',
@@ -57,11 +71,7 @@ WriteMakefile(
     XSBUILD        => {
         xs => {
             'lib/Clay/XS' => {
-                OBJECT => 'lib/Clay/XS$(OBJ_EXT) '
-                        . 'src/clay_impl$(OBJ_EXT) '
-                        . 'src/clay_perl_context$(OBJ_EXT) '
-                        . 'src/marshal$(OBJ_EXT) '
-                        . 'src/callbacks$(OBJ_EXT)',
+                OBJECT => join(' ', 'lib/Clay/XS$(OBJ_EXT)', map { object_of($_) } @c_sources),
                 INC    => '-I. -Isrc',
             },
         },
@@ -84,10 +94,7 @@ WriteMakefile(
         'JSON::PP'  => 0,
     },
 
-    C          => [ 'src/clay_impl.c',
-                    'src/clay_perl_context.c',
-                    'src/marshal.c',
-                    'src/callbacks.c' ],
+    C          => [ @c_sources ],
     H          => [ 'src/clay_perl.h',
                     'src/clay_perl_enums.h',
                     'src/clay_impl_helpers.h',
@@ -104,11 +111,11 @@ WriteMakefile(
         # documentation shows; both are shipped but not installed.
         no_index    => { directory => [qw(tools images)] },
         resources   => {
-            bugtracker => { web => 'https://github.com/dave/perl-clay-xs/issues' },
+            bugtracker => { web => 'https://github.com/davenonymous/perl-clay-xs/issues' },
             repository => {
                 type => 'git',
-                url  => 'https://github.com/dave/perl-clay-xs.git',
-                web  => 'https://github.com/dave/perl-clay-xs',
+                url  => 'https://github.com/davenonymous/perl-clay-xs.git',
+                web  => 'https://github.com/davenonymous/perl-clay-xs',
             },
         },
     },
@@ -116,26 +123,25 @@ WriteMakefile(
 
 # ExtUtils::MakeMaker's default `.c.o` suffix rule does not pass `-o $@`,
 # so when a source file lives in a subdirectory the compiler still emits
-# the .o into CWD instead of the matching subdirectory. Override the rule
-# for our src/ tree so the object files land where O_FILES expects them.
+# the .o into CWD instead of the matching subdirectory. Every file of
+# @c_sources therefore gets an explicit rule (plain make syntax, no GNU
+# pattern rules), so the object files land where O_FILES expects them.
 # The rule for src/clay/clay.h is built from @clay_patches (see above).
 sub MY::postamble {
     my $apply_patches = join '', map { "\tpatch src/clay/clay.h.tmp < $_\n" } @clay_patches;
+    my $compile_sources = join '', map {
+        my $object = object_of($_);
+        "$object : $_ src/clay/clay.h\n"
+            . "\t\$(CCCMD) \$(CCCDLFLAGS) -I. -Isrc \"-I\$(PERL_INC)\" \$(PASTHRU_DEFINE) \$(DEFINE) -o $object $_\n\n"
+    } @c_sources;
     return "\nsrc/clay/clay.h : src/clay/clay.h.orig @clay_patches\n"
         . "\t\$(RM_F) src/clay/clay.h.tmp\n"
         . "\t\$(CP) src/clay/clay.h.orig src/clay/clay.h.tmp\n"
         . $apply_patches
-        . "\t\$(MV) src/clay/clay.h.tmp src/clay/clay.h\n"
+        . "\t\$(MV) src/clay/clay.h.tmp src/clay/clay.h\n\n"
+        . $compile_sources
         . <<'POSTAMBLE';
-
-src/clay_impl$(OBJ_EXT) : src/clay/clay.h
-src/marshal$(OBJ_EXT) : src/clay/clay.h
-src/callbacks$(OBJ_EXT) : src/clay/clay.h
-src/clay_perl_context$(OBJ_EXT) : src/clay/clay.h
 lib/Clay/XS$(OBJ_EXT) : src/clay/clay.h
-
-src/%$(OBJ_EXT) : src/%.c
-	$(CCCMD) $(CCCDLFLAGS) -I. -Isrc "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) -o $@ $<
 
 # --- Documentation figures -------------------------------------------
 # Usage: make images         (after changing a figure or a pod reference)

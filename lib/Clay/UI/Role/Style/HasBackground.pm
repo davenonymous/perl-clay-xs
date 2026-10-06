@@ -28,7 +28,7 @@ role Clay::UI::Role::Style::HasBackground {
 
 	method contribute_background ($config) {
 		return unless defined $background_color;
-		$config->{background_color} = $background_color;
+		$config->{background_color} = copy_value($background_color);
 		return;
 	}
 }

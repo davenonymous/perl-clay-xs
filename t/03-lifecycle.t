@@ -91,13 +91,13 @@ subtest 'frame state' => sub {
     like( dies { Clay_BeginLayout() }, qr/^measure failed \(from the previous unfinished frame\)/,
         'the next Clay_BeginLayout re-throws the held error' );
     is( stats($context), hash {
-        field layout_state => 'abandoned'; field open_depth => 0; field completed_frames => 0; etc;
-    }, 'and leaves the unfinished frame abandoned, with nothing open' );
+        field layout_state => 'complete'; field open_depth => 0; field completed_frames => 1; etc;
+    }, 'after finishing the unfinished frame, with nothing open' );
 
     Clay_SetMeasureTextFunction(sub { return [1, 1] });
     Clay_BeginLayout();
     Clay_EndLayout();
-    is( stats($context), hash { field layout_state => 'complete'; field completed_frames => 1; etc },
+    is( stats($context), hash { field layout_state => 'complete'; field completed_frames => 2; etc },
         'a completed frame is counted' );
 };
 

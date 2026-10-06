@@ -830,7 +830,7 @@ Its own size and its children are laid out as usual.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
 
 =end html
 
@@ -1300,7 +1300,8 @@ installed by C<Clay_SetMeasureTextFunction>, which receives this hash
 (with all eight keys) for every word it measures; the element is as big
 as the measured text, wrapped into lines when it does not fit. Every
 line becomes one C<TEXT> render command whose C<renderData> holds the
-line (C<stringContents>), C<textColor>, C<fontId>, C<fontSize>,
+line (C<stringContents>), where the line starts in the text
+(C<stringOffset>, in characters), C<textColor>, C<fontId>, C<fontSize>,
 C<letterSpacing> and C<lineHeight>. The whole hash may be undef or
 C<{}>: all zero.
 
@@ -1734,7 +1735,12 @@ padding.
 =item config
 
 The element's L</clip> config: C<horizontal>, C<vertical> and
-C<childOffset>.
+C<childOffset>. The key may be absent: it is there between frames when
+the last completed frame declared the container, and during a frame
+once the container has been declared in it; before that (and when
+C<found> is 0) it is left out, because Clay would read it from an
+element slot that may hold another element (see
+L<Clay::XS/Clay_GetScrollContainerData>).
 
 =item found (Clay_ScrollContainerData)
 
@@ -1799,8 +1805,8 @@ C<renderData> by C<commandType>:
 
     RECTANGLE (1)              backgroundColor, cornerRadius
     BORDER (2)                 color, cornerRadius, width (Clay_BorderWidth)
-    TEXT (3)                   stringContents, textColor, fontId, fontSize,
-                               letterSpacing, lineHeight
+    TEXT (3)                   stringContents, stringOffset, textColor, fontId,
+                               fontSize, letterSpacing, lineHeight
     IMAGE (4)                  backgroundColor, cornerRadius, imageData
     SCISSOR_START (5)          horizontal, vertical
     SCISSOR_END (6)            horizontal, vertical
@@ -1853,7 +1859,9 @@ it.
 =item elapsedTime
 
 Seconds since the transition started (the sum of the C<$delta_time>
-values given to C<Clay_EndLayout>).
+values given to C<Clay_EndLayout>), a number >= 0. Clay interpolates
+with the ratio of C<elapsedTime> to C<duration>; a negative time would
+move it outside 0..1 and border widths outside their range.
 
 =item duration (Clay_TransitionCallbackArguments)
 

@@ -358,4 +358,40 @@ subtest 'HasScroll attributes are mutable' => sub {
 	is( $cfg->{clip}{child_offset}, { x => 10, y => 20 }, 'clip sees new child_offset' );
 };
 
+subtest 'child_count and child_at read the children without copying them' => sub {
+	my $box  = Clay::UI::Test::Box->new(id => 'box');
+	my @kids = map { Clay::UI::Test::Box->new(id => "kid$_") } 0 .. 2;
+	$box->add_child(@kids);
+	$box->add_internal_children(Clay::UI::Test::Box->new(id => 'helper'));
+	is( $box->child_count, scalar @{ $box->children }, 'child_count is the number of children, internal ones left out' );
+	is( [ map { Scalar::Util::refaddr($box->child_at($_)) } 0 .. 2 ], [ map { Scalar::Util::refaddr($_) } @{ $box->children } ],
+		'child_at agrees with children' );
+	is( $box->child_at(3), undef, 'an index past the last child gives undef' );
+	for my $bad (-1, 1.5, '01', undef, [0]) {
+		like( dies { $box->child_at($bad) }, qr/^Clay::UI: child_at takes an index, got /,
+			'child_at dies for ' . ( ref $bad || $bad // 'undef' ) );
+	}
+};
+
+subtest 'child methods reject malformed offsets, ids, predicates and widgets' => sub {
+	my $box  = Clay::UI::Test::Box->new(id => 'box');
+	my $kept = Clay::UI::Test::Box->new(id => 'kept');
+	$box->add_child($kept);
+	for my $offset ('abc', 0.5, -1, '01', undef, []) {
+		like( dies { $box->insert_children($offset, Clay::UI::Test::Box->new) }, qr/^Clay::UI: child offset \S+ out of range 0\.\.1/,
+			'insert_children dies for offset ' . ( ref $offset || $offset // 'undef' ) );
+	}
+	like( dies { $box->remove_child_with_id(undef) }, qr/^Clay::UI: remove_child_with_id takes an id string, got undef/,
+		'remove_child_with_id dies for undef' );
+	like( dies { $box->remove_child_with_id(['kept']) }, qr/^Clay::UI: remove_child_with_id takes an id string, got ARRAY/,
+		'and for a reference' );
+	like( dies { $box->remove_children_with('kept') }, qr/^Clay::UI: remove_children_with takes a code reference, got 'kept'/,
+		'remove_children_with dies for anything but a code reference' );
+	like( dies { $box->get_children_with(undef) }, qr/^Clay::UI: get_children_with takes a code reference, got undef/,
+		'so does get_children_with' );
+	like( dies { $box->remove_internal_children('kept') }, qr/^Clay::UI: remove_internal_children takes widgets, got 'kept'/,
+		'remove_internal_children dies for anything but widgets' );
+	is( [ map { Scalar::Util::refaddr($_) } @{ $box->children } ], [ Scalar::Util::refaddr($kept) ], 'nothing changed' );
+};
+
 done_testing;

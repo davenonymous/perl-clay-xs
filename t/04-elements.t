@@ -186,7 +186,7 @@ subtest 'culling drops off-screen elements unless disabled' => sub {
 };
 
 # -----------------------------------------------------------------------------
-# Open/close balance is enforced; a frame abandoned mid-element can still be
+# Open/close balance is enforced; a frame interrupted mid-element can still be
 # ended and the next frame renders normally.
 # -----------------------------------------------------------------------------
 
@@ -352,5 +352,55 @@ subtest 'a floating element may attach to an element declared later in the frame
     is( \@errors, [CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND], 'a target that is never declared is still reported' );
 };
 
+# -----------------------------------------------------------------------------
+# Frames that reach the element count (fixed by
+# patches/0004-clay-upstream-fixes.patch).
+# -----------------------------------------------------------------------------
+
+# A context with a small element count. Clay_Initialize takes the counts of
+# the current context, so they are set on $ctx for the call and restored.
+sub small_context ($element_count) {
+    my ($elements, $words) = (Clay_GetMaxElementCount(), Clay_GetMaxMeasureTextCacheWordCount());
+    Clay_SetMaxElementCount($element_count);
+    Clay_SetMaxMeasureTextCacheWordCount(32);
+    my $small = Clay_Initialize(Clay_MinMemorySize(), { width => 800, height => 600 }, sub { });
+    Clay_SetCurrentContext($ctx);
+    Clay_SetMaxElementCount($elements);
+    Clay_SetMaxMeasureTextCacheWordCount($words);
+    Clay_SetCurrentContext($small);
+    Clay_SetMeasureTextFunction(sub { return [10, 10] });
+    return $small;
+}
+
+subtest 'the debug view of a frame that nearly fills the element count' => sub {
+    my $small = small_context(64);
+    Clay_SetDebugModeEnabled(1);
+    Clay_BeginLayout();
+    for (1 .. 62) { Clay__OpenElement(); Clay__ConfigureOpenElement({}); Clay__CloseElement() }
+    my $commands = Clay_EndLayout();
+    is( [ map { $_->{renderData}{stringContents} } @$commands ],
+        ['Clay Error: Debug view caused layout element count to exceed Clay__maxElementCount'],
+        'reports that the debug view did not fit' );
+    Clay_SetCurrentContext($ctx);
+};
+
+subtest 'elements past the element count configure nothing' => sub {
+    my $small = small_context(64);
+    Clay_BeginLayout();
+    element('P', { layout => $square }, sub {
+        for (1 .. 70) { Clay__OpenElement(); Clay__ConfigureOpenElement({ clip => { vertical => 1 } }); Clay__CloseElement() }
+    });
+    Clay_EndLayout();
+    ok( !Clay_GetScrollContainerData( Clay_GetElementId('P') )->{found}, 'their parent did not take their clip' );
+
+    my $tiny = small_context(1);    # not even Clay's root element fits
+    Clay_BeginLayout();
+    Clay__OpenElement();
+    Clay__ConfigureOpenElement({});
+    ok( lives { Clay_OnHover(sub { }) }, 'Clay_OnHover does nothing for them, also with no element open' );
+    Clay__CloseElement();
+    Clay_EndLayout();
+    Clay_SetCurrentContext($ctx);
+};
 
 done_testing;

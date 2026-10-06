@@ -136,10 +136,20 @@ for every frame. Clay remembers what it needs between frames (element
 positions for hit testing, scroll positions, text measurements,
 transitions) on its own.
 
-This distribution vendors Clay v0.14 together with three patches that
-add sizing groups, a wrapping flow layout and a stack layout (see
-L</SIZING GROUPS>, L</FLOW LAYOUT> and L</STACK LAYOUT>). No system
-library is needed.
+This distribution vendors Clay v0.14 together with four patches. Three
+add features: sizing groups, a wrapping flow layout and a stack layout
+(see L</SIZING GROUPS>, L</FLOW LAYOUT> and L</STACK LAYOUT>). The
+fourth fixes upstream bugs and so changes some of Clay's behaviour: every
+render command of a floating element carries its C<zIndex>, a culled
+clip container still emits its scissor commands,
+C<CLAY_TEXT_WRAP_NONE> never breaks a line, C<lineHeight> boxes stack
+from the element's top, an image or custom element gets no background
+rectangle, an exit transition starts from the element's current look,
+a floating element may attach to an element declared later in the
+frame, and frames that reach the element count, exit transitions and
+large sizes can no longer crash or hang Clay (see
+L</FUNCTIONS: TRANSITIONS> and L</SIZING GROUPS>). No system library is
+needed.
 
 =head2 What this module is
 
@@ -479,7 +489,9 @@ Sets the maximum number of elements for the next C<Clay_Initialize>.
     Clay_SetMaxElementCount($count);
 
 C<$count> is an integer in C<1 .. 2**31 - 1>. The count bounds the
-elements, text lines and render commands of one frame.
+elements, text lines and render commands of one frame, together with
+the copies Clay keeps of elements with exit transitions (see
+L</FUNCTIONS: TRANSITIONS>).
 
 =over 4
 
@@ -597,14 +609,16 @@ Clay opens its own root element (id C<Clay__RootContainer>, sized to
 the layout dimensions); every element you open at the top level becomes
 its child.
 
-If the previous frame was never ended and holds a callback error,
-C<Clay_BeginLayout> croaks with that error plus the suffix
-C< (from the previous unfinished frame)> and does not start a frame;
-call it again to start one. A previous frame that was never ended and
-holds no error is simply abandoned (see L</ELEMENTS AND FRAMES>).
+If the previous frame was never ended (an exception interrupted its
+declaration, say), C<Clay_BeginLayout> finishes it first: it closes the
+elements still open and lets Clay end that frame, discarding its render
+commands (see L</ELEMENTS AND FRAMES>). If the unfinished frame holds a
+callback error, C<Clay_BeginLayout> then croaks with that error plus the
+suffix C< (from the previous unfinished frame)> and does not start a
+frame; call it again to start one.
 
 I<Context:> current. I<Frame:> any time. I<In a callback:> refused.
-I<Held errors:> re-throws one held by an abandoned frame (see above).
+I<Held errors:> re-throws one held by an unfinished frame (see above).
 
 =head2 Clay_EndLayout
 
@@ -698,7 +712,10 @@ are ignored; use L</check_struct> to catch typos.
 
 Call it at most once per element, right after opening it and before
 declaring any child (as the C C<CLAY()> macro does). An element you
-never configure keeps the zero declaration.
+never configure keeps the zero declaration. Once a frame has more
+elements than the element count allows, Clay drops every further
+element, and configuring one changes nothing (the declaration is still
+parsed and checked).
 
 Croaks:
 
@@ -893,8 +910,12 @@ and must return C<< { width => $w, height => $h } >> or C<[$w, $h]>.
 C<%text_config> is the text element's C<Clay_TextElementConfig> with
 every key filled in. Clay measures word by word: C<$text> is usually a
 single word (text between ASCII spaces and newlines) or a single space.
-Clay caches the results per text and config (see
-L</Clay_ResetMeasureTextCache>).
+Clay caches the results by the text together with C<fontId>,
+C<fontSize>, C<letterSpacing> and whether C<wrapMode> is
+C<CLAY_TEXT_WRAP_NONE> (see L</Clay_ResetMeasureTextCache>). The other
+keys of C<%text_config> are not part of the cache key: a measure
+function whose result depends on C<userData> or C<lineHeight>, say,
+gets the cached result of another config that differs only there.
 
 Every context that lays out text needs its own measure function.
 Measuring text without one is a held error
@@ -961,10 +982,9 @@ C<$is_down> true gives C<CLAY_POINTER_DATA_PRESSED_THIS_FRAME>.
 While the last frame had more elements than the element count allows,
 Clay ignores the call.
 
-Croaks C<Clay_SetPointerState: cannot be called between Clay_BeginLayout and Clay_EndLayout>, C<Clay_SetPointerState: the last frame was never finished; complete a frame (Clay_BeginLayout ... Clay_EndLayout) first> (only after a C<Clay_BeginLayout> that re-threw
-the held error of an abandoned frame instead of starting a new one,
-until the next frame completes; see L</ELEMENTS AND FRAMES>), and
-re-throws errors from hover callbacks.
+Croaks C<Clay_SetPointerState: cannot be called between Clay_BeginLayout and Clay_EndLayout; end the frame first (Clay_EndLayout, or Clay_BeginLayout, which finishes an unfinished frame)>
+(see L</ELEMENTS AND FRAMES>), and re-throws errors from hover
+callbacks.
 
 I<Context:> current. I<Frame:> completed frame (or before the first
 frame). I<In a callback:> refused. I<Held errors:> re-thrown.
@@ -1040,7 +1060,10 @@ the last completed frame.
 Croaks C<Clay_OnHover: no element is open (unbalanced Clay__OpenElement/Clay__CloseElement)>, C<Clay_OnHover: callback: expected a CODE reference, got ...> (undef included) and
 C<Clay_OnHover: the open element has no id>. The last one only happens
 when the open element's numeric id is 0, which in practice no id
-function produces. Errors the callback
+function produces. Once a frame has more elements than the element
+count allows, Clay drops every further element, and C<Clay_OnHover>
+does nothing for them (as C<Clay__ConfigureOpenElement> configures
+nothing). Errors the callback
 throws are re-thrown by C<Clay_SetPointerState>.
 
 I<Context:> current. I<Frame:> element open. I<In a callback:>
@@ -1155,9 +1178,8 @@ C<Clay_BeginLayout>. Clay drops the scroll state of every container
 that the last completed frame did not declare; calling it again before
 the next frame changes nothing more.
 
-Croaks C<Clay_UpdateScrollContainers: cannot be called between Clay_BeginLayout and Clay_EndLayout>, C<Clay_UpdateScrollContainers: the last frame was never finished; ...> and
-C<Clay_UpdateScrollContainers: deltaTime: expected a finite number, got ...>. The second croak follows the same rule as for
-L</Clay_SetPointerState>.
+Croaks C<Clay_UpdateScrollContainers: cannot be called between Clay_BeginLayout and Clay_EndLayout; ...> (see L</Clay_SetPointerState>) and
+C<Clay_UpdateScrollContainers: deltaTime: expected a finite number, got ...>.
 
 I<Context:> current. I<Frame:> completed frame (or before the first
 frame). I<In a callback:> refused. I<Held errors:> re-thrown.
@@ -1216,7 +1238,13 @@ padding), C<< { width, height } >>.
 
 =item C<config>
 
-The container's C<clip> declaration.
+The container's C<clip> declaration, present only while it is the
+container's own: between frames when the last completed frame declared
+the container, and during a frame once that frame has declared it.
+Before that, Clay would read it through the container's place in the
+element list, which may hold another element by then, so the key is
+left out (it is absent, not undef). It is also absent when C<found> is
+0.
 
 =item C<found> (Clay_GetScrollContainerData)
 
@@ -1227,11 +1255,18 @@ everything else is zero.
 
 See L<Clay::XS::Structs/Clay_ScrollContainerData>.
 
+The other keys are kept on Clay's own record of the container, so they
+can be read at any time: in the middle of a frame they describe the
+container as the last completed frame laid it out, with the scroll
+input applied since (the usual way to draw a scroll bar while declaring
+the frame).
+
 Croaks a L</STRUCT ERRORS> object for anything but an element id hash
 reference.
 
-I<Context:> current. I<Frame:> any time. I<In a callback:> allowed.
-I<Held errors:> re-thrown.
+I<Context:> current. I<Frame:> any time (C<config> between frames and,
+during a frame, once the container has been declared). I<In a
+callback:> allowed. I<Held errors:> re-thrown.
 
 =head2 set_scroll_position
 
@@ -1358,11 +1393,11 @@ Switches visibility culling on or off.
 
 With culling on (the default), Clay emits no render commands for
 elements whose box lies entirely outside the layout dimensions, and
-stops emitting the lines of a text once they pass the bottom edge. A
-culled clip container emits no C<SCISSOR_START> / C<SCISSOR_END> pair
-either. Culling tests each element on its own: the children of a culled
-element are still emitted when their own boxes reach into the layout,
-and they are then not clipped.
+stops emitting the lines of a text once they pass the bottom edge.
+Culling tests each element on its own: the children of a culled element
+are still emitted when their own boxes reach into the layout. A culled
+clip container still emits its C<SCISSOR_START> / C<SCISSOR_END> pair,
+so children of it that reach into the layout stay clipped.
 
 I<Context:> current. I<Frame:> any time. I<In a callback:> refused.
 I<Held errors:> re-thrown.
@@ -1382,6 +1417,23 @@ without handlers the C<transition> key does nothing and every change
 shows at once, as in C with a NULL handler. The hook is set when the
 element is declared: install the handlers before the frame whose
 transitions they should run.
+
+An element that exits stays on screen, with its subtree as last
+declared, until its exit transition ends. For that Clay copies every
+element that has an exit transition, with its subtree, at the end of
+each frame and keeps the copies until the next frame ends; a frame in
+which elements exit also lays out a second copy of them. The copies
+count against the element count (see L</Clay_SetMaxElementCount>): a
+frame has room for the element count less the copies Clay keeps, and,
+while elements exit, less twice that. When a frame and the copies do
+not fit, Clay reports C<CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED> to
+the error handler, drops every exit transition (exiting elements
+disappear at once), and treats the frame like one with more elements
+than the element count allows (the next C<Clay_SetPointerState> is
+ignored). A frame with more elements than the element count allows
+drops every exit transition as well. An element declared without the
+C<transition> key loses its transitions, its exit included, even if it
+had one in the frame before.
 
 L<Clay::UI> has no attribute for C<transition>, but widgets can use it:
 add the key in a C<contribute_> method of the widget class (see
@@ -1577,6 +1629,7 @@ C<$type> is the exact C type name of a struct, one of:
     Clay_CustomElementConfig       Clay_ClipElementConfig
     Clay_FloatingElementConfig     Clay_FloatingAttachPoints
     Clay_TransitionElementConfig   Clay_TransitionData
+    Clay_TransitionCallbackArguments
     Clay_SizingGroup
 
 L<Clay::XS::Structs> describes each. Element ids (C<Clay_ElementId>)
@@ -2107,7 +2160,9 @@ The arena passed to C<Clay_Initialize> is too small.
 =item CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED
 
 The frame needs more elements, text lines or render commands than the
-element count allows (see L</Clay_SetMaxElementCount>).
+element count allows (see L</Clay_SetMaxElementCount>), or its elements
+and the copies of elements with exit transitions do not fit together
+(see L</FUNCTIONS: TRANSITIONS>).
 
 =item CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED
 
@@ -2277,7 +2332,7 @@ they croak C<Clay::XS: argument is not a live Clay::XS::Context> when
 used.
 
 Freeing a context that still holds a callback error (because a frame
-was abandoned) warns C<Clay::XS: context destroyed with a held callback error: ...>.
+was left unfinished) warns C<Clay::XS: context destroyed with a held callback error: ...>.
 
 =head2 Threads
 
@@ -2355,9 +2410,8 @@ call, or one after a child, croaks.
 
 C<Clay_SetPointerState> and C<Clay_UpdateScrollContainers> work on the
 layout of the last completed frame. They croak between
-C<Clay_BeginLayout> and C<Clay_EndLayout>. They also croak C<< <function>: the last frame was never finished; ... >> after a C<Clay_BeginLayout>
-that re-threw the held error of an abandoned frame (see below) and so
-started no frame, until the next frame completes.
+C<Clay_BeginLayout> and C<Clay_EndLayout>, also while a frame is left
+unfinished (see below).
 
 =item *
 
@@ -2371,10 +2425,16 @@ instead. The next frame works normally.
 
 =item *
 
-A frame that is never ended is I<abandoned>: calling
-C<Clay_BeginLayout> again starts a new one (after re-throwing an error
-the abandoned frame held, see L</ERRORS FROM CALLBACKS>). Text and ids
-the abandoned frame handed to Clay stay alive until a frame completes.
+A frame that is never ended is I<unfinished>. The next
+C<Clay_BeginLayout> finishes it like C<Clay_EndLayout> with a delta time
+of 0 would (it closes the elements still open, lets Clay compute the
+layout and discards the render commands), so Clay never begins a frame
+over an unfinished one. The finished frame counts as a completed frame:
+elements it did not declare start their exit transitions in it, and
+the pointer and scroll functions work on its layout. If the unfinished
+frame held a callback error, that C<Clay_BeginLayout> then re-throws it
+and starts no frame (see L</ERRORS FROM CALLBACKS>); otherwise it starts
+the new frame at once.
 
 =back
 
@@ -2771,7 +2831,8 @@ C<Clay_SetDebugModeEnabled>, C<Clay_SetCullingEnabled>,
 C<Clay_SetMaxElementCount>, C<Clay_SetMaxMeasureTextCacheWordCount>).
 
 These calls are refused whichever context is current: Clay has a
-single current context. The refusal also covers code that runs when
+single current context. A refused call reads none of its arguments, so
+no tie, get-magic or overload of an argument runs. The refusal also covers code that runs when
 the callback's arguments are freed after it returns (a C<DESTROY> of
 an object that only an argument held, say), because Clay has not
 returned yet.
@@ -2787,6 +2848,20 @@ C<Clay_GetMaxElementCount>, C<Clay_GetMaxMeasureTextCacheWordCount> and
 the helpers that need no context (ids, hashing, the ease function, the
 sizing helpers, check_struct). A query called inside a callback never
 re-throws a held error; see L</ERRORS FROM CALLBACKS>.
+
+A callback runs on a Perl stack of its own, so loop control cannot
+leave it: C<last>, C<next>, C<redo> or C<goto> aimed at a loop or label
+outside the callback dies inside it (C<Label not found for "last FRAME">,
+C<Can't "last" outside a loop block>), and that error is re-thrown like
+any other. C<die> and C<return> behave as usual.
+
+C<exit> in a callback takes effect once Clay has returned: no further
+callback runs, and the Clay::XS function that called into Clay exits
+with the status right after Clay's call, before it would re-throw
+anything. C<END> blocks and destructors then run as for any exit and may
+use Clay::XS again. Code that runs while the exit unwinds the scopes of
+the program (a C<DESTROY> of a lexical going out of scope, say) runs
+while Clay has not returned yet, so the calls listed above croak there.
 
 Dropping the last reference to the running context inside a callback
 is safe: every Clay::XS call keeps its context alive until the
@@ -2817,7 +2892,8 @@ C<Clay_SetPointerState> re-throws errors from hover callbacks.
 
 =item *
 
-An error held when a frame is abandoned is re-thrown by the next
+An error held when a frame is left unfinished (including one raised
+while C<Clay_BeginLayout> finishes it) is re-thrown by the next
 C<Clay_BeginLayout> with the suffix C<(from the previous unfinished frame)>.
 
 =item *
@@ -2830,6 +2906,13 @@ and leaves the previous context current.
 Every other function that needs a context re-throws a held error once
 its Clay call has returned, so its own effect (a setter's new value,
 say) has already taken place. The exceptions are listed next.
+
+=item *
+
+Between C<Clay_BeginLayout> and C<Clay_EndLayout> nothing re-throws: a
+query called in the middle of a declaration (C<Clay_PointerOver> to
+pick a colour, say) returns normally, the elements stay open as
+declared, and C<Clay_EndLayout> re-throws the error.
 
 =back
 
@@ -2958,12 +3041,13 @@ sees them. An C<IMAGE> or C<CUSTOM> element emits no C<RECTANGLE>: its
 C<backgroundColor> travels in its own command.
 
 With culling on (the default, see L</Clay_SetCullingEnabled>), elements
-entirely outside the layout dimensions emit no commands; for a culled
-clip container that includes its C<SCISSOR_START> and C<SCISSOR_END>.
-Culling does not look at clip containers: content that a clip container
-hides but that lies within the layout is still emitted, and the scissor
-commands clip it. A child that reaches into the layout from a culled
-clip container is emitted without scissor commands around it.
+entirely outside the layout dimensions emit no commands, except that a
+culled clip container still emits its C<SCISSOR_START> and
+C<SCISSOR_END>. Culling does not look at clip containers: content that
+a clip container hides but that lies within the layout is still
+emitted, and the scissor commands clip it. A child that reaches into
+the layout from a culled clip container is emitted between its scissor
+commands, so it stays clipped.
 
 =head2 CLAY_RENDER_COMMAND_TYPE_NONE
 
@@ -3119,7 +3203,7 @@ L<Clay::XS::Structs/sizingGroup>). L<Clay::UI::Grid> builds on it.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
 
 =end html
 
@@ -3161,7 +3245,20 @@ cannot settle. Clay then reports C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE>
 through the error handler, stops equalizing after a fixed number of
 rounds, and the members of the groups in the cycle keep unequal sizes.
 
+=item *
+
+Only elements declared in the frame take part. An element in its exit
+transition (see L</FUNCTIONS: TRANSITIONS>) keeps the sizes of its last
+frame, and so do the members inside it; they neither widen their groups
+nor take space in their parents, so a group next to exiting members
+keeps its size from frame to frame.
+
 =back
+
+Clay's own distribution of free and missing space stops once a step
+changes nothing, so sizes too large for a float to take a small step
+(beyond about 16 million layout units) end the frame instead of
+stalling it.
 
 =head1 FLOW LAYOUT
 
@@ -3177,7 +3274,7 @@ inner width.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
 
 =end html
 
@@ -3236,6 +3333,15 @@ C<childAlignment.x> aligns every line on its own.
 C<childAlignment.y> aligns each child within its line and, with
 C<CLAY_LINE_SIZING_FIT>, the block of lines within the container.
 
+=item *
+
+A child in its exit transition (see L</FUNCTIONS: TRANSITIONS>) takes
+no space and starts no line: it is drawn where the next child goes,
+aligned within that child's line. One placed before the first line
+(exiting children come first unless their exit sibling ordering says
+otherwise) aligns within the first line; with no line at all, it aligns
+within the container.
+
 =back
 
 Borders between children (C<betweenChildren>) draw a vertical bar in
@@ -3257,7 +3363,7 @@ its padding.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.04/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
 
 =end html
 

@@ -85,6 +85,11 @@
 ^src/clay/clay\.h$
 ^src/clay/clay\.h\.tmp
 
+# Build products of the XS module and the C sources.
+\.o$
+\.bs$
+^lib/Clay/XS\.c$
+
 # Development-only files.
 ^\.claude/
 ^CLAUDE\.md$

@@ -215,7 +215,10 @@ cleared, and for a removal the leaving subtree's hover and focus are
 released (its C<OnHoverStopped> and C<OnBlur> listeners have run), so
 C<parent> and C<ui> answer the new place: C<ui> is undef in a removed
 subtree. A call that moves several subtrees (replacing a row, say)
-completes every move before the first hook runs. Reordering children
+completes every move before the first hook runs. Each widget gets one
+call per change: a L<Clay::UI::Grid> builds a new row (or the wrapper
+of a new cell) completely before it puts it into the grid, and only
+then announces it. Reordering children
 (L<Clay::UI::Grid/reorder_rows>) changes no place and calls nothing.
 
 Every hook runs even if one dies; the method that changed the tree

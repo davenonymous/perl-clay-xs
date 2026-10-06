@@ -302,9 +302,15 @@ subtest 'grid-id pool exhaustion dies loudly' => sub {
 		};
 		$err = $@;
 	}
-	like( $err, qr/grid-id pool exhausted/, 'die message mentions exhaustion' );
+	like( $err, qr/grid-id pool exhausted \(max 4095 live grids\)/, 'die message mentions exhaustion and the pool size' );
 	# Restore the pool so later tests (and other test files) are unaffected.
 	Clay::UI::Grid::_release_grid_id($_) for @held_ids;
+};
+
+subtest 'packed grid ids fill the 32 bits of a Clay sizing group' => sub {
+	is( Clay::UI::Grid::_GRID_ID_BITS() + Clay::UI::Grid::_LOCAL_BITS(), 32, 'grid bits and index bits make 32' );
+	is( Clay::UI::Grid::_pack_group_id(Clay::UI::Grid::_GRID_ID_MAX(), Clay::UI::_validate::USER_GROUP_ID_MAX()), 2**32 - 1,
+		'the largest packed id is the largest uint32' );
 };
 
 # -----------------------------------------------------------------------------
@@ -602,6 +608,17 @@ subtest 'a cell class of your own composing GridCell is used as it is' => sub {
 	ok( $row->[1]->isa('Clay::UI::Grid::Cell'), 'another widget is wrapped' );
 };
 
+subtest 'a row that fails before it is in place stamps none of its cells' => sub {
+	my $grid = Clay::UI::Test::Grid->new(id => 'unstamped');
+	my $cell = Clay::UI::Test::GridCell->new;
+	like( dies { $grid->append_row([ $cell, 'not a widget' ]) }, qr/child is not a widget/, 'a row with a non-widget dies' );
+	is( [ $cell->width_group, $cell->height_group, $cell->parent ], [ 0, 0, undef ], 'its GridCell is left as it was' );
+	${ ref_field('Clay::UI::Grid::_IdSpace.$next_height_local', $grid->_id_space) } = 1 << 20;
+	like( dies { $grid->append_row([$cell]) }, qr/local index 1048576 out of range/, 'a row without a height id dies' );
+	is( [ $cell->width_group, $cell->height_group, $cell->parent ], [ 0, 0, undef ], 'and leaves it as it was too' );
+	is( $grid->row_count, 0, 'neither added a row' );
+};
+
 # -----------------------------------------------------------------------------
 # reorder_rows and clear_rows.
 # -----------------------------------------------------------------------------
@@ -622,7 +639,7 @@ subtest 'reorder_rows moves rows without detaching them' => sub {
 	is( [ map { $grid->is_spanning_row($_) ? 1 : 0 } 0 .. 2 ], [ 0, 0, 1 ], 'and so do the spanning flags' );
 	is( refaddr($first[0]->parent), refaddr($parent), 'no cell was detached' );
 
-	for my $bad ([ 0, 1 ], [ 0, 0, 1 ], [ 0, 1, 3 ], [ 0, 1, 'x' ], 'nope') {
+	for my $bad ([ 0, 1 ], [ 0, 0, 1 ], [ 0, 1, 3 ], [ 0, 1, 'x' ], [ '0', '01', '1' ], 'nope') {
 		like( dies { $grid->reorder_rows($bad) }, qr/new child order must be an array reference of the indices 0\.\.2/, 'a bad order dies' );
 	}
 	is( [ map { refaddr $_ } @{ $grid->children } ], [ map { refaddr $_ } @rows[ 2, 0, 1 ] ], 'and changes nothing' );

@@ -51,11 +51,6 @@ static void chunk_list_free(clay_perl_arena_chunk *chunk)
 
 clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity)
 {
-    CV *dispatch_cv = get_cv("Clay::XS::_dispatch", 0);
-    if (!dispatch_cv) {
-        croak("Clay::XS: internal error: Clay::XS::_dispatch is not defined");
-    }
-
     char *arena_memory = (char *) malloc(clay_arena_capacity);
     if (!arena_memory) return NULL;
 
@@ -74,7 +69,6 @@ clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity)
     self->strings.current   = first_chunk;
     self->interned_ids      = newHV();
     self->hover_callbacks   = newHV();
-    self->dispatch_cv       = (CV *) SvREFCNT_inc_simple_NN((SV *) dispatch_cv);
     self->layout_state      = CLAY_PERL_LAYOUT_COMPLETE;
     return self;
 }
@@ -87,7 +81,6 @@ void clay_perl_context_free(pTHX_ clay_perl_context *self)
     SvREFCNT_dec(self->held_error);
     SvREFCNT_dec((SV *) self->hover_callbacks);
     SvREFCNT_dec((SV *) self->interned_ids);
-    SvREFCNT_dec((SV *) self->dispatch_cv);
 
     chunk_list_free(self->strings.current);
     chunk_list_free(self->strings.retained);
@@ -230,9 +223,6 @@ static bool buffer_set_hits(const buffer_set *set, const char *start, size_t len
  *   - An older chunk stays alive while an exiting element's text points
  *     into it; memory during long exit animations stays bounded by the
  *     text those elements show.
- *   - After an unfinished frame Clay may point into the text of any frame
- *     since the last completed one, so every chunk is kept until a frame
- *     completes.
  * Steady state: one chunk for this frame and one for the last, recycled
  * without any per-frame allocation. A new chunk gets half again the
  * bytes it needs, so text that grows a little every frame does not
@@ -245,7 +235,6 @@ static size_t chunk_bytes_for(size_t wanted)
     return padded > MIN_STRING_CHUNK_BYTES ? padded : MIN_STRING_CHUNK_BYTES;
 }
 
-/* exiting is NULL after an unfinished frame: keep every chunk. */
 static void arena_begin_frame(clay_perl_string_arena *arena, const buffer_set *exiting)
 {
     size_t wanted = arena->frame_bytes;
@@ -261,7 +250,7 @@ static void arena_begin_frame(clay_perl_string_arena *arena, const buffer_set *e
     while (older) {
         clay_perl_arena_chunk *chunk = older;
         older = chunk->next;
-        bool in_use = !exiting || buffer_set_hits(exiting, chunk->bytes, chunk->used);
+        bool in_use = buffer_set_hits(exiting, chunk->bytes, chunk->used);
         if (in_use) {
             chunk->next     = arena->retained;
             arena->retained = chunk;
@@ -307,8 +296,12 @@ Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, con
     SvGETMAGIC(sv);
     if (!SvOK(sv)) croak("%s: text must be a defined string", what);
 
-    STRLEN len = 0;
-    const char *pv = SvPVutf8_nomg(sv, len);
+    /* A Latin-1 string is encoded straight into the arena; the caller's
+     * SV is never upgraded. */
+    STRLEN pv_len = 0;
+    const char *pv = SvPV_nomg(sv, pv_len);
+    bool encode = !SvUTF8(sv) && clay_perl_latin1_needs_encoding(pv, pv_len);
+    STRLEN len = encode ? clay_perl_latin1_utf8_length(pv, pv_len) : pv_len;
     /* Clay_String.length is int32_t; refuse rather than truncate. */
     if (len > (STRLEN) INT32_MAX) {
         croak("%s: text length %" UVuf " exceeds INT32_MAX", what, (UV) len);
@@ -317,7 +310,11 @@ Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, con
     Clay_String s = { false, (int32_t) len, NULL };
     if (len == 0) return s;
     char *dst = arena_reserve(aTHX_ &self->strings, len);
-    memcpy(dst, pv, len);
+    if (encode) {
+        clay_perl_latin1_to_utf8(dst, pv, pv_len);
+    } else {
+        memcpy(dst, pv, len);
+    }
     s.chars = dst;
     return s;
 }
@@ -368,9 +365,10 @@ Clay_String clay_perl_intern_id(pTHX_ clay_perl_context *self, const char *bytes
  *
  *   layout_state   COMPLETE --Clay_BeginLayout--> DECLARING
  *                  DECLARING --Clay_EndLayout--> COMPLETE
- *                  DECLARING --the next Clay_BeginLayout re-throws a held
- *                              error--> ABANDONED
- *                  ABANDONED --Clay_BeginLayout--> DECLARING
+ *                  DECLARING --Clay_BeginLayout--> the unfinished frame is
+ *                              finished (COMPLETE), then the next one
+ *                              begins (DECLARING), unless that re-throws
+ *                              a held error
  *   open_depth, open_element_configurable
  *                  the open/close balance and whether the innermost open
  *                  element may still be configured (only right after it
@@ -465,23 +463,16 @@ static bool interned_id_held(SV *value, const void *data)
     return buffer_set_hits(holders->exiting, chars, 1);
 }
 
-/* Must run while this context is Clay's current context, before
- * Clay_BeginLayout discards the previous frame and while layout_state
- * still tells whether that frame completed. After an unfinished frame
- * the arena keeps every chunk and the id sweep waits until a frame
- * completes. */
+/* Must run while this context is Clay's current context, with the last
+ * frame completed and before Clay_BeginLayout discards it. */
 static void sweep_retained(pTHX_ clay_perl_context *self)
 {
-    if (self->layout_state != CLAY_PERL_LAYOUT_COMPLETE) {
-        arena_begin_frame(&self->strings, NULL);
-    } else {
-        buffer_set exiting = exiting_buffers_collect();
-        interned_id_holders holders = { Clay_GetPointerOverIds(), &exiting };
-        arena_begin_frame(&self->strings, &exiting);
-        registry_sweep(aTHX_ self->interned_ids, self->completed_frames, INTERNED_ID_KEEP_COMPLETED_FRAMES,
-                       interned_id_stamp, interned_id_held, &holders);
-        buffer_set_free(&exiting);
-    }
+    buffer_set exiting = exiting_buffers_collect();
+    interned_id_holders holders = { Clay_GetPointerOverIds(), &exiting };
+    arena_begin_frame(&self->strings, &exiting);
+    registry_sweep(aTHX_ self->interned_ids, self->completed_frames, INTERNED_ID_KEEP_COMPLETED_FRAMES,
+                   interned_id_stamp, interned_id_held, &holders);
+    buffer_set_free(&exiting);
     registry_sweep(aTHX_ self->hover_callbacks, self->completed_frames, HOVER_KEEP_COMPLETED_FRAMES,
                    clay_perl_hover_entry_stamp, NULL, NULL);
 }
@@ -496,18 +487,45 @@ static void reset_open_elements(clay_perl_context *self)
     self->open_element_configurable = false;
 }
 
+/* Closes the elements still open and lets Clay finish the frame with
+ * ctx as the active transition context; the frame then counts as
+ * completed. Returns Clay's commands and, through still_open, how many
+ * elements were left open. Callback errors stay held. */
+static Clay_RenderCommandArray finish_frame(clay_perl_context *self, float delta_time, int32_t *still_open)
+{
+    *still_open = self->open_depth;
+    reset_open_elements(self);
+    for (int32_t i = 0; i < *still_open; i++) {
+        Clay__CloseElement();
+    }
+
+    /* The transition trampolines find their handlers through this. */
+    clay_perl_context *outer_transition_ctx = clay_perl_active_transition_ctx;
+    clay_perl_active_transition_ctx = self;
+    Clay_RenderCommandArray commands = Clay_EndLayout(delta_time);
+    clay_perl_active_transition_ctx = outer_transition_ctx;
+
+    self->layout_state = CLAY_PERL_LAYOUT_COMPLETE;
+    self->completed_frames++;
+    return commands;
+}
+
 void clay_perl_frame_begin(pTHX_ clay_perl_context *self)
 {
+    /* Clay must never see two Clay_BeginLayout calls without a
+     * Clay_EndLayout: its transition data points into the frame being
+     * declared. A frame left unfinished (an exception interrupted its
+     * declaration) is finished first and its commands are discarded. */
+    if (self->layout_state == CLAY_PERL_LAYOUT_DECLARING) {
+        int32_t still_open;
+        (void) finish_frame(self, 0, &still_open);
+        clay_perl_exit_if_pending(aTHX_ self);
+    }
     /* Taking the held error also resets Clay's measure cache when a failed
      * measurement may have been cached, so it runs before the frame. */
     SV *leftover = clay_perl_take_held_error(aTHX_ self, " (from the previous unfinished frame)");
-    if (leftover) {
-        if (self->layout_state == CLAY_PERL_LAYOUT_DECLARING) {
-            self->layout_state = CLAY_PERL_LAYOUT_ABANDONED;
-        }
-        reset_open_elements(self);
-        croak_sv(leftover);
-    }
+    if (leftover) croak_sv(leftover);
+
     sweep_retained(aTHX_ self);
     Clay_BeginLayout();
     self->layout_state = CLAY_PERL_LAYOUT_DECLARING;
@@ -539,21 +557,10 @@ Clay_RenderCommandArray clay_perl_frame_end(pTHX_ clay_perl_context *self, float
     if (self->layout_state != CLAY_PERL_LAYOUT_DECLARING) {
         croak("Clay_EndLayout: called without a matching Clay_BeginLayout");
     }
-    /* Close what is still open, so Clay's state stays consistent. */
-    int32_t still_open = self->open_depth;
-    reset_open_elements(self);
-    for (int32_t i = 0; i < still_open; i++) {
-        Clay__CloseElement();
-    }
-
-    /* The transition trampolines find their handlers through this. */
-    clay_perl_context *outer_transition_ctx = clay_perl_active_transition_ctx;
-    clay_perl_active_transition_ctx = self;
-    Clay_RenderCommandArray commands = Clay_EndLayout(delta_time);
-    clay_perl_active_transition_ctx = outer_transition_ctx;
-
-    self->layout_state = CLAY_PERL_LAYOUT_COMPLETE;
-    self->completed_frames++;
+    /* Closes what is still open, so Clay's state stays consistent. */
+    int32_t still_open;
+    Clay_RenderCommandArray commands = finish_frame(self, delta_time, &still_open);
+    clay_perl_exit_if_pending(aTHX_ self);
     if (still_open > 0) croak_unbalanced(aTHX_ self, still_open);
     return commands;
 }
@@ -601,7 +608,7 @@ static UV chunk_count(const clay_perl_arena_chunk *chunk)
 
 SV *clay_perl_frame_stats(pTHX_ const clay_perl_context *self)
 {
-    static const char *const layout_states[] = { "complete", "declaring", "abandoned" };
+    static const char *const layout_states[] = { "complete", "declaring" };
     HV *stats = newHV();
     (void) hv_stores(stats, "arena_chunks",
                      newSVuv(chunk_count(self->strings.current) + chunk_count(self->strings.retained)));
@@ -610,5 +617,6 @@ SV *clay_perl_frame_stats(pTHX_ const clay_perl_context *self)
     (void) hv_stores(stats, "layout_state",     newSVpv(layout_states[self->layout_state], 0));
     (void) hv_stores(stats, "open_depth",       newSViv(self->open_depth));
     (void) hv_stores(stats, "completed_frames", newSVuv(self->completed_frames));
+    (void) hv_stores(stats, "callback_depth",   newSVuv(clay_perl_callback_depth));
     return newRV_noinc((SV *) stats);
 }

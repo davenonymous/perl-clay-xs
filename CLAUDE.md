@@ -58,11 +58,15 @@ through Clay::UI and replaces `userData` with widget class and id.
   `patches/0001-clay-sizing-groups.patch` adds sizing groups
   (`sizingGroup`, `Clay__ApplySizingGroups`, a cycle error type;
   members share their group's largest size and largest minimum, so
-  they still compress and wrap when their parents are too small);
+  they still compress and wrap when their parents are too small; only
+  the `declaredElementsLength` elements declared this frame take part,
+  never the exiting copies `Clay_EndLayout` appends, and exiting
+  children add nothing to their parents' extents);
   `patches/0002-clay-flow-layout.patch` adds `CLAY_LEFT_TO_RIGHT_WRAP`,
   `lineGap` and `lineSizing` (per element in `flowLines`: the X sizing
   pass records where lines start, the Y sizing pass how tall they are;
-  later passes read both instead of recomputing);
+  later passes read both instead of recomputing; an exiting child
+  before the first line aligns within that line);
   `patches/0003-clay-back-to-front.patch` adds `CLAY_BACK_TO_FRONT`
   (stack layout: both axes sized like the off axis, every child placed
   by `childAlignment`, no `betweenChildren` bars);
@@ -71,17 +75,29 @@ through Clay::UI and replaces `userData` with widget class and id.
   next one, an exit starts from the current state, no background
   rectangle under image or custom elements, every command of a floating
   element carries its zIndex, `CLAY_TEXT_WRAP_NONE` never breaks,
-  `lineHeight` boxes stack from the element's top, no `BORDER` for a
-  transparent colour, a culled clip container still emits its scissor
-  commands, a floating element may attach to an element declared later
-  in the frame (the clip lookup waits until `Clay_EndLayout`), scroll
-  containers are pruned by the frame generation they were last declared
-  in, so repeated `Clay_UpdateScrollContainers` calls between frames are
-  harmless, and the container swapped into a pruned slot is not skipped).
+  `lineHeight` boxes stack from the element's top, a culled clip
+  container still emits its scissor commands, a floating element may
+  attach to an element declared later in the frame (the clip lookup
+  waits until `Clay_EndLayout`), scroll containers are pruned by the
+  frame generation they were last declared in, so repeated
+  `Clay_UpdateScrollContainers` calls between frames are harmless, the
+  container swapped into a pruned slot is not skipped, layout matches a
+  scroll container record only if it was declared this frame (a stale
+  record never claims a new container in its old slot), an element
+  declared without a transition drops its transition data (a stale
+  clone is never read), exit clones are counted before any is written
+  and must fit above the frame's elements (`exitingElementsLength`
+  reserves them in the next frame's declarations and exit copies;
+  otherwise `CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED`, and a frame
+  over the cap drops every exit transition), the compression and grow
+  loops stop when a round changes nothing, the debug view survives
+  a full element count, and configuring or hovering an element dropped
+  at the cap writes nothing).
   The
-  `postamble` in `Makefile.PL` holds that rule and a `src/%.o : src/%.c`
-  rule; EUMM's default rule drops subdirectory objects in the CWD, so
-  removing it breaks the build.
+  `postamble` in `Makefile.PL` holds that rule and one explicit compile
+  rule per file of `@c_sources` (no GNU pattern rules); EUMM's default
+  rule drops subdirectory objects in the CWD, so removing them breaks
+  the build. A new `src/*.c` goes into `@c_sources` (and `MANIFEST`).
 - `src/clay_impl.c` is the only file defining `CLAY_IMPLEMENTATION`. It
   also holds the Perl-free helpers that read Clay internals
   (`src/clay_impl_helpers.h`) and wraps the include in `#pragma GCC
@@ -98,11 +114,19 @@ through Clay::UI and replaces `userData` with widget class and id.
   threads croak. DESTROY calls `Clay_SetCurrentContext(NULL)` before
   freeing, otherwise the next `Clay_Initialize` reads freed memory.
 - **Callbacks never croak through Clay.** Trampolines make one `G_EVAL`
-  call into `Clay::XS::_dispatch` through `invoke_callback`
+  call into the dispatcher (an anonymous XSUB with the body of
+  `Clay::XS::_dispatch`, made by BOOT and `Clay::XS::CLONE` and kept in
+  `MY_CXT`, so replacing the glob changes nothing) through `invoke_callback`
   (`src/callbacks.c`), which owns the temporaries scope, `$@` and the
   trailing userdata argument; errors are held on the context and
   rethrown by the XS wrapper after Clay returns (never while a callback
-  still runs). Per-context callbacks
+  still runs, nor while a frame is declared). The dispatch runs on its
+  own Perl stack (`PUSHSTACKi(PERLSI_MAGIC)`), so `last LABEL` and
+  friends die inside the eval, and inside a `JMPENV` that catches
+  `exit`: it is recorded in `clay_perl_pending_exit` (Perl's state is
+  unwound by then, so no Perl code may run and no further callback
+  runs) and re-issued by `clay_perl_exit_if_pending`, which every
+  `wrapper_leave` (and the frame module, before it croaks) calls first. Per-context callbacks
   live in `ctx->callbacks[kind]` (set with `clay_perl_callback_set`); a
   new kind needs an enum entry, a `store_result` case and a trampoline
   with its argument builder.
@@ -110,16 +134,21 @@ through Clay::UI and replaces `userData` with widget class and id.
   guard in `CLAY_PERL_WRAPPERS` (`lib/Clay/XS.xs`): context, mutating or
   query, counts check, frame requirement, rethrow policy. Wrappers call
   `wrapper_enter` (refuses mutating calls inside callbacks, pins the
-  context) and, when the rethrow policy is AFTER, `wrapper_leave`. A new
+  context; arguments are read only after it) and, right after their Clay
+  call, `wrapper_leave` (deferred exit, then the rethrow policy). A new
   exported XSUB needs a table row and a POD heading: `@EXPORT_OK` is built
   from the table's names, and t/19 checks that every export has a heading
   and the table against the POD. Internal `_` XSUBs (for the tests and
   Clay::UI) have no row and are not exported. "Inside a callback" spans
   the whole trampoline scope (`invoke_callback`), so DESTROYs of callback
   arguments count too.
-- **Frame state** (`layout_state`): COMPLETE, DECLARING (between
-  `Clay_BeginLayout` and `Clay_EndLayout`) or ABANDONED (a begun frame
-  whose held error the next `Clay_BeginLayout` re-threw). Functions that
+- **Frame state** (`layout_state`): COMPLETE or DECLARING (between
+  `Clay_BeginLayout` and `Clay_EndLayout`). Clay never sees two
+  `Clay_BeginLayout` calls without a `Clay_EndLayout`: a frame left
+  DECLARING (an exception interrupted it) is finished by the next
+  `Clay_BeginLayout` (auto-close, `Clay_EndLayout(0)`, commands
+  discarded, counted as completed), which then re-throws the frame's
+  held error, if any, instead of beginning a new frame. Functions that
   walk Clay's layout tree (`Clay_SetPointerState`,
   `Clay_UpdateScrollContainers`) need COMPLETE; an element may be
   configured once, right after it is opened. The frame module (the last
@@ -130,8 +159,7 @@ through Clay::UI and replaces `userData` with widget class and id.
   `Clay::XS::_context_stats($ctx)` shows it to the tests.
 - **Never give Clay a pointer it keeps into a caller's SV.** Text goes
   into a per-context chunked arena that lives an extra frame (longer for
-  chunks an exiting element still shows, and for everything after an
-  unfinished frame); element id strings are interned in private,
+  chunks an exiting element still shows); element id strings are interned in private,
   read-only SVs. Only the hashing helpers borrow the caller's buffer for
   the duration of the call. The frame module decides when they may go:
   it recycles the arena and sweeps the interned ids (kept 2 completed
@@ -153,7 +181,10 @@ through Clay::UI and replaces `userData` with widget class and id.
   `use Clay::XS qw(...)` imports are not visible inside it.
 - `to_config` collects every `contribute_<slice>(\%config)` method from
   the class, its superclasses and roles (sorted by name, cached per class).
-  Contributors must be order-independent and merge shared slices; method
+  Clay::UI's own contributors are order-independent and merge shared
+  slices; the alphabetical order is a documented guarantee (Element's
+  POD, pinned by t/11) that consumers may rely on (Term::Fabulous's
+  `contribute_look_theme` runs after `contribute_background`). Method
   names must be unique across composed roles.
 - `render` does all pointer work before `Clay_BeginLayout` (no element
   open, so listeners may change the tree): it maps `Clay_GetPointerOverIds`
@@ -227,7 +258,11 @@ through Clay::UI and replaces `userData` with widget class and id.
   `$ui->widget_for($cmd->{userData})` works; a widget setting `user_data`
   itself is an error.
 - Children are changed only through `Element`'s validating primitives;
-  the public mutators live in the `Container` role. A widget can be
+  the public mutators live in the `Container` role. `_adopt_children`
+  is the one primitive that announces nothing: a widget class uses it
+  for objects it builds itself before they join a tree (Grid's cell
+  wrappers and rows), and the primitive that attaches the finished
+  subtree announces every widget in it once. A widget can be
   attached whenever it has no parent (removed ones can come back).
   Removal is by identity (`remove_child(@widgets)`, which dies for
   anything but widgets) or by id (`remove_child_with_id`); the identity
@@ -278,7 +313,9 @@ through Clay::UI and replaces `userData` with widget class and id.
   module POD are the docs; `README.md` is a short entry point.
 - Every public function, method, parameter, event, constant group and
   struct key gets its own heading spelled as in code, so one grep finds
-  it. Code samples in the POD must run (test them).
+  it. Complete programs and SYNOPSIS blocks in the POD must run (test
+  them); a recipe fragment in the Cookbook or Manual may use the
+  variables of its recipe (`$ui`, `$root`, ...).
 - Each example starts with the header block (`Shows:`, `Features:`,
   `Requires:`, `Run with:`); `Features:` lists the exact identifiers
   used. New examples go into the README table and the Manual's
@@ -294,7 +331,9 @@ through Clay::UI and replaces `userData` with widget class and id.
   `github.com/.../blob/vVERSION/images/` URL. The script dies when the
   POD and the rendered set differ and rewrites `vVERSION` to the current
   `$Clay::UI::VERSION`, so run `make images` after changing a figure,
-  a POD reference or the version, and commit what it wrote.
+  a POD reference or the version, and commit what it wrote. `make
+  images-check` must pass before a release and after every version
+  bump.
 
 ## Conventions
 

@@ -22,14 +22,26 @@ typedef void (*clay_perl_buffer_visitor)(const char *chars, void *data);
  * element in the subtrees of the current context's exiting elements:
  * Clay keeps those clones, with the buffers of their last declaration,
  * until the exit transitions finish. Calls visit(NULL, data) when it
- * cannot tell (the last frame exceeded the element cap, so Clay made no
- * clones, or memory ran out): the caller must then keep everything. Only
- * valid while the context holds a completed layout. */
+ * cannot tell (an exiting transition after a frame over the element cap,
+ * which made no clones, or memory ran out): the caller must then keep
+ * everything. Only valid while the context holds a completed layout. */
 void clay_perl_clay_visit_exiting_buffers(clay_perl_buffer_visitor visit, void *data);
 
 /* Clay's default element and measure-cache word counts, used by
  * Clay_Initialize when no context is current. */
 void clay_perl_clay_default_counts(int32_t *element_count, int32_t *word_count);
+
+/* True while the current context's frame has more elements than its
+ * element count allows: Clay then drops every further element, and
+ * configuring or hovering one does nothing. */
+bool clay_perl_clay_max_elements_exceeded(void);
+
+/* True when the current context's scroll container with that element id
+ * was declared in the current frame (or, between frames, in the last
+ * completed one): only then does its layout element pointer, through
+ * which Clay reads the container's clip config, point at the container.
+ * False for an unknown id. */
+bool clay_perl_clay_scroll_container_declared(uint32_t element_id);
 
 /* Sets the current context's pointer state to CLAY_POINTER_DATA_RELEASED.
  * Clay zeroes it, and zero is CLAY_POINTER_DATA_PRESSED_THIS_FRAME. */

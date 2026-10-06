@@ -19,8 +19,7 @@
  *     can start an exit transition one frame after its last declaration)
  *     and for as long as an exit transition of its element is running.
  *     The arena therefore retains the previous frame's chunks and every
- *     older chunk an exiting element still points into; after an
- *     unfinished frame it retains everything until a frame completes.
+ *     older chunk an exiting element still points into.
  *     isStaticallyAllocated is always false.
  *
  *   - Element id strings (Clay_ElementId.stringId) are interned in a
@@ -35,7 +34,7 @@
  *     copies the new value before releasing the old one.
  *
  *   - hover_callbacks maps element ids (decimal strings) to plain
- *     arrayrefs [coderef, userdata, generation]; the HV owns one refcount
+ *     arrayrefs [coderef, userdata, stamp]; the HV owns one refcount
  *     per entry.
  *
  *   - clay_arena_memory is a malloc()-ed buffer owned by the context. It
@@ -108,11 +107,7 @@ typedef enum {
     /* No frame open; Clay holds the last completed layout (or none yet). */
     CLAY_PERL_LAYOUT_COMPLETE = 0,
     /* Between Clay_BeginLayout and Clay_EndLayout. */
-    CLAY_PERL_LAYOUT_DECLARING,
-    /* A frame was begun and never ended (its held error was re-thrown by
-     * the next Clay_BeginLayout); Clay's tree stays half built until the
-     * next frame completes. */
-    CLAY_PERL_LAYOUT_ABANDONED
+    CLAY_PERL_LAYOUT_DECLARING
 } clay_perl_layout_state;
 
 /* ---------------------------------------------------------------------------
@@ -186,10 +181,7 @@ typedef struct clay_perl_context {
 
     /* Held callback error: the first exception raised by a Perl
      * callback while Clay was running, re-thrown at the next safe point.
-     * Later errors of the same period are only counted. dispatch_cv is
-     * the Clay::XS::_dispatch XSUB the trampolines call (one refcount, so
-     * replacing the glob cannot free it). */
-    CV      *dispatch_cv;
+     * Later errors of the same period are only counted. */
     SV      *held_error;
     uint32_t suppressed_errors;
     bool     measure_cache_poisoned;
@@ -205,7 +197,7 @@ typedef struct clay_perl_context {
     clay_perl_callback callbacks[CLAY_PERL_DISPATCH_KIND_COUNT];
 
     /* Per-element hover callbacks, keyed by element id (decimal string).
-     * Each value is an arrayref [coderef, userdata, generation]. */
+     * Each value is an arrayref [coderef, userdata, stamp]. */
     HV *hover_callbacks;
 } clay_perl_context;
 
@@ -214,8 +206,7 @@ typedef struct clay_perl_context {
  * ------------------------------------------------------------------------ */
 
 /* Allocates a context and its Clay arena. Returns NULL (after freeing
- * everything) when the arena cannot be allocated; croaks when the
- * Clay::XS::_dispatch XSUB is missing. */
+ * everything) when the arena cannot be allocated. */
 clay_perl_context *clay_perl_context_new(pTHX_ size_t clay_arena_capacity);
 void               clay_perl_context_free(pTHX_ clay_perl_context *self);
 
@@ -242,17 +233,19 @@ clay_perl_context *clay_perl_context_peek(pTHX_ SV *sv, MAGIC **magic_out);
  * context.
  * ------------------------------------------------------------------------ */
 
-/* Clay_BeginLayout: re-throws a held error left by an unfinished frame
- * (a DECLARING frame becomes ABANDONED, the open-element bookkeeping is
- * reset, no frame begins). Otherwise recycles the string arena, sweeps
- * the interned ids and hover callbacks, calls Clay_BeginLayout and
- * moves to DECLARING. */
+/* Clay_BeginLayout: finishes a frame left DECLARING first (closes its
+ * open elements and calls Clay_EndLayout, discarding the commands; the
+ * frame counts as completed; an exit a callback called then is
+ * re-issued), then re-throws a held error left by it without beginning a
+ * frame. Otherwise recycles the string arena, sweeps the interned ids and
+ * hover callbacks, calls Clay_BeginLayout and moves to DECLARING. */
 void clay_perl_frame_begin(pTHX_ clay_perl_context *ctx);
 
 /* Clay_EndLayout: croaks unless DECLARING, closes the elements still
  * open, calls Clay_EndLayout with ctx as the active transition context,
- * moves to COMPLETE and counts the frame. Croaks for elements that were
- * still open once Clay has returned; returns Clay's commands otherwise. */
+ * moves to COMPLETE and counts the frame. Re-issues an exit a callback
+ * called, then croaks for elements that were still open once Clay has
+ * returned; returns Clay's commands otherwise. */
 Clay_RenderCommandArray clay_perl_frame_end(pTHX_ clay_perl_context *ctx, float delta_time);
 
 /* Element bookkeeping, called by the element wrappers. An element may be
@@ -265,16 +258,18 @@ void clay_perl_frame_element_configured(pTHX_ clay_perl_context *ctx, const char
 void clay_perl_frame_text_element_opened(clay_perl_context *ctx);
 void clay_perl_frame_element_closed(clay_perl_context *ctx);
 
-/* { arena_chunks, interned_ids, hover_entries, layout_state (complete,
- * declaring or abandoned), open_depth, completed_frames } as a new hash
- * reference, for Clay::XS::_context_stats. */
+/* { arena_chunks, interned_ids, hover_entries, layout_state (complete or
+ * declaring), open_depth, completed_frames, callback_depth (the thread's
+ * clay_perl_callback_depth) } as a new hash reference, for
+ * Clay::XS::_context_stats. */
 SV  *clay_perl_frame_stats(pTHX_ const clay_perl_context *ctx);
 
 /* ---------------------------------------------------------------------------
  * String arena and id interning (src/clay_perl_context.c).
  * ------------------------------------------------------------------------ */
 
-/* Copies the (UTF-8) bytes of sv into the arena. Croaks if sv is undef. */
+/* Copies the characters of sv into the arena as UTF-8 (a Latin-1 string is
+ * encoded on the way; sv is never upgraded). Croaks if sv is undef. */
 Clay_String clay_perl_arena_copy_text(pTHX_ clay_perl_context *self, SV *sv, const char *what);
 
 /* Returns a Clay_String pointing at the interned copy of the given bytes. */
@@ -400,18 +395,32 @@ SV                 *clay_pointer_data_to_sv(pTHX_ Clay_PointerData data);
 /* Render command output (src/marshal.c). */
 SV *clay_render_command_array_to_sv(pTHX_ const Clay_RenderCommandArray *array);
 
-/* ScrollContainerData and ElementData returns. */
-SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data);
+/* ScrollContainerData and ElementData returns. The scroll data hash
+ * gets its config key only when with_config is true: Clay reads the
+ * config through the container's layout element, which may by then hold
+ * another element (see clay_perl_clay_scroll_container_declared). */
+SV *clay_scroll_container_data_to_sv(pTHX_ Clay_ScrollContainerData data, bool with_config);
 SV *clay_element_data_to_sv(pTHX_ Clay_ElementData data);
 
 /* Clay bytes -> Perl character string (copied, UTF-8 flagged). */
 SV *clay_perl_utf8_sv(pTHX_ const char *bytes, int32_t length);
 
+/* Perl string -> UTF-8 bytes for Clay, never upgrading the caller's SV.
+ * A non-UTF-8 SV holds Latin-1 characters; only bytes above 0x7F need
+ * encoding (two bytes each). clay_perl_sv_utf8_bytes returns the SV's own
+ * buffer when it is UTF-8 or ASCII-only and a mortal encoded copy
+ * otherwise; get-magic must have run. */
+bool        clay_perl_latin1_needs_encoding(const char *bytes, STRLEN length);
+STRLEN      clay_perl_latin1_utf8_length(const char *bytes, STRLEN length);
+void        clay_perl_latin1_to_utf8(char *destination, const char *bytes, STRLEN length);
+const char *clay_perl_sv_utf8_bytes(pTHX_ SV *sv, STRLEN *length);
+
 /* ---------------------------------------------------------------------------
  * Callback trampolines (src/callbacks.c).
  *
  * Clay holds these as function pointers. Each one pushes its arguments and
- * calls the internal Clay::XS::_dispatch XSUB once under G_EVAL; the
+ * calls the dispatcher (clay_perl_dispatcher, the body of the internal
+ * Clay::XS::_dispatch XSUB) once under G_EVAL; the
  * dispatcher calls the user's coderef and parses its return value, so any
  * exception (from the callback or from parsing its result) lands in the
  * trampoline's G_EVAL and never unwinds through Clay's C frames.
@@ -491,6 +500,31 @@ typedef struct clay_perl_active_dispatch {
 } clay_perl_active_dispatch;
 
 extern CLAY_PERL_THREAD_LOCAL clay_perl_active_dispatch clay_perl_pending_dispatch;
+
+/* The dispatcher every trampoline calls (lib/Clay/XS.xs): an anonymous
+ * XSUB running the body of Clay::XS::_dispatch, made by BOOT for the
+ * interpreter that loads Clay::XS and by Clay::XS::CLONE for each new
+ * thread's, and kept in the interpreter's MY_CXT. No glob holds it, so
+ * replacing *Clay::XS::_dispatch changes nothing for callbacks. */
+CV *clay_perl_dispatcher(pTHX);
+
+/* An exit a callback called, caught before it could unwind Clay's C
+ * frames (see call_dispatcher in src/callbacks.c). While it is pending no
+ * callback runs, and no Perl code may run at all: Perl's own state was
+ * unwound by the exit already. */
+typedef struct clay_perl_deferred_exit {
+    bool pending;
+    U32  status;
+} clay_perl_deferred_exit;
+
+extern CLAY_PERL_THREAD_LOCAL clay_perl_deferred_exit clay_perl_pending_exit;
+
+/* Re-issues a pending exit with its status (it does not return then);
+ * returns at once otherwise. The XS wrappers call it as soon as Clay has
+ * returned, before anything that could run Perl code or croak; ctx (may
+ * be NULL) gets its measure cache reset if the exit skipped a
+ * measurement. */
+void clay_perl_exit_if_pending(pTHX_ clay_perl_context *ctx);
 
 /* The context the binding treats as current (mirrors Clay's global). The
  * trampolines use it for callbacks whose userData Clay leaves NULL. */
