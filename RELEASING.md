@@ -21,6 +21,10 @@ password your-pause-password
 Keep it private (`chmod 600 ~/.pause`). `make release` refuses to run
 without it.
 
+`make release` also reads the CI result of the release commit with the
+GitHub CLI, so install [`gh`](https://cli.github.com/) and log in once
+with `gh auth login`.
+
 ## Per-release checklist
 
 1. Make sure the working tree is clean and on `master`:
@@ -54,7 +58,7 @@ without it.
    `https://github.com/davenonymous/perl-clay-xs/blob/vVERSION/images/`
    URL. `make images` sets `vVERSION` to the tag of the current
    `$Clay::UI::VERSION`, so each release on MetaCPAN shows its own
-   figures once its tag is pushed (step 6). Keep `images/` in
+   figures once its tag is pushed (step 7). Keep `images/` in
    `MANIFEST`: the POD names the files in the dist for readers without
    HTML (`Figure: images/NAME.png in the distribution.`).
 
@@ -67,7 +71,24 @@ without it.
    make test
    ```
 
-5. Cut and upload the release:
+5. Commit the release, push it and wait for CI to pass on that commit.
+   `make release` refuses to run on a dirty tree, so this has to happen
+   first anyway:
+
+   ```sh
+   git commit -am "Release v$(perl -Ilib -MClay::UI -e 'print $Clay::UI::VERSION')"
+   git push
+   gh run watch --exit-status \
+       "$(gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" --limit 1 --json databaseId --jq '.[0].databaseId')"
+   ```
+
+   If `gh run list` finds no run yet, wait a few seconds: GitHub
+   creates it shortly after the push. Upload only when every job is
+   green, on every Perl and on Linux, macOS and Windows; `make release`
+   refuses to upload otherwise. If one fails, fix the cause, commit,
+   push and watch again.
+
+6. Cut and upload the release:
 
    ```sh
    make release
@@ -83,14 +104,15 @@ without it.
      build artefacts.
    - Refuses to proceed if the git working tree is dirty.
    - Refuses to proceed if a tag `v$(VERSION)` already exists.
+   - Refuses to proceed unless the GitHub CI run of `HEAD` has passed
+     (`make ci-check`, which needs an authenticated `gh`).
    - Refuses to proceed if a figure or an image URL is out of date
      (`make images-check`).
    - Runs `cpan-upload` on the freshly built tarball.
 
-6. Tag and push:
+7. Tag and push:
 
    ```sh
-   git commit -am "Release v$(perl -Ilib -MClay::UI -e 'print $Clay::UI::VERSION')"
    git tag -a "v$(perl -Ilib -MClay::UI -e 'print $Clay::UI::VERSION')" \
           -m "Release v$(perl -Ilib -MClay::UI -e 'print $Clay::UI::VERSION')"
    git push --follow-tags
@@ -100,7 +122,7 @@ without it.
    pushes annotated tags, so a lightweight tag would silently stay
    local.
 
-7. Wait ~1 hour, then verify on
+8. Wait ~1 hour, then verify on
    [MetaCPAN](https://metacpan.org/dist/Clay-UI).
 
 ## Recovery
