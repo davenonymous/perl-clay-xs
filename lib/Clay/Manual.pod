@@ -120,7 +120,7 @@ Choosing a layer:
     make test
     make install
 
-You need Perl 5.22 or later, a C99 compiler (GCC or Clang), the C<patch>
+You need Perl 5.26 or later, a C99 compiler (GCC or Clang), the C<patch>
 program, L<ExtUtils::MakeMaker> 7.12 or later, L<Object::Pad> 0.800 or
 later and L<Object::PadX::Enum>. Clay itself is included; there is no
 system library to install. The tests need L<Test2::V0> and

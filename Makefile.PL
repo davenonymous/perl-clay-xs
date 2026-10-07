@@ -81,13 +81,14 @@ WriteMakefile(
     },
     AUTHOR         => 'Dave',
     LICENSE        => 'zlib',
-    MIN_PERL_VERSION => '5.022',
+    MIN_PERL_VERSION => '5.026',
 
     CONFIGURE_REQUIRES => {
         'ExtUtils::MakeMaker' => '7.12',
     },
     PREREQ_PM => {
         'Exporter'         => '5.57',
+        'List::Util'       => '1.45',
         'XSLoader'         => 0,
         'Object::Pad'      => '0.800',
         'Object::PadX::Enum' => '0.01',

@@ -27,8 +27,6 @@ jobs:
           - '5.30.3'
           - '5.28.3'
           - '5.26.3'
-          - '5.24.4'
-          - '5.22.4'
         include:
           # setup-perl's own Windows Perls 5.40+ are built against
           # msvcrt, the runner's gcc against UCRT, and XS modules that
@@ -63,13 +61,6 @@ jobs:
           use Config;
           open my $env, '>>', $ENV{GITHUB_ENV} or die "GITHUB_ENV: $!";
           print {$env} "MAKE=$Config{make}\n";
-
-      # Makefile.PL needs ExtUtils::MakeMaker 7.12 (XSMULTI) to run at
-      # all, and Perl 5.22 and 5.24 ship older ones. Declaring it in
-      # CONFIGURE_REQUIRES is not enough: cpanm cannot read that before
-      # Makefile.PL has run (Object::PadX::Enum's CI hit the same)
-      - name: Bootstrap configure-time dependencies
-        run: cpanm --notest "ExtUtils::MakeMaker~>=7.12"
 
       - name: Install declared dependencies
         run: cpanm --installdeps --notest --verbose .

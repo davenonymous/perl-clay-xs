@@ -30,7 +30,7 @@ make test
 make install
 ```
 
-Requirements: Perl 5.22+, a C99 compiler (GCC or Clang), the `patch`
+Requirements: Perl 5.26+, a C99 compiler (GCC or Clang), the `patch`
 program, ExtUtils::MakeMaker 7.12+, Object::Pad 0.800+ and
 Object::PadX::Enum. Tests need Test2::V0 and JSON::PP. The examples
 that write images or PDFs need Imager or PDF::Builder (see the table

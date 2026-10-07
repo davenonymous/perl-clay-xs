@@ -26,7 +26,7 @@ perl -Ilib -Iblib/lib -Iblib/arch examples/01-minimal.pl
 Always test against `blib` (`prove -lb` or `make test`): the XS object lives
 in `blib/arch/`, and plain `prove -l` can pick up a stale installed copy.
 
-CI (`.github/workflows/ci.yml`) tests Perl 5.22 .. 5.44 on Linux and
+CI (`.github/workflows/ci.yml`) tests Perl 5.26 .. 5.44 on Linux and
 macOS, the latest Strawberry Perl on Windows (setup-perl's own Windows
 Perls 5.40+ mix C runtimes with the runner's gcc), and runs
 `make disttest`.
