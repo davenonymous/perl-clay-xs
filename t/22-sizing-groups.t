@@ -5,6 +5,9 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+use Clay::Test::ChildPerl qw(child_perl);
+
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
@@ -200,7 +203,7 @@ Clay__CloseElement();
 Clay_EndLayout();
 print "completed\n";
 PERL
-	my $pid = open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+	my $pid = open my $child, '-|', child_perl($code) or die "cannot run $^X: $!";
 	local $SIG{ALRM} = sub { kill 'KILL', $pid };
 	alarm 60;
 	my $output = do { local $/; <$child> };

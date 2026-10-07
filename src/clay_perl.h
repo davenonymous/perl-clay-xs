@@ -49,8 +49,13 @@
  * cheaper PERL_NO_GET_CONTEXT calling convention is used throughout.
  * Trampolines called by Clay (which knows nothing about Perl) fetch the
  * interpreter with dTHX.
+ *
+ * NO_XSLOCKS keeps XSUB.h from turning malloc / realloc / free into
+ * Perl's per-interpreter allocator on Windows (PERL_IMPLICIT_SYS); the
+ * binding's own buffers use the C library's allocator on every platform.
  */
 #define PERL_NO_GET_CONTEXT
+#define NO_XSLOCKS
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"

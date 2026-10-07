@@ -156,6 +156,7 @@ t/fixtures/10-flow.json
 t/fixtures/10-flow.pl
 t/fixtures/11-stack.json
 t/fixtures/11-stack.pl
+t/lib/Clay/Test/ChildPerl.pm
 t/lib/Clay/UI/Test/Box.pm
 t/lib/Clay/UI/Test/Grid.pm
 t/lib/Clay/UI/Test/GridCell.pm

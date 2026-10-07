@@ -4,7 +4,11 @@ use feature 'signatures';
 no warnings 'experimental::signatures';
 
 use Test2::V0;
+
 use Scalar::Util ();
+
+use lib "t/lib";
+use Clay::Test::ChildPerl qw(child_perl);
 
 use Clay::XS qw(:all);
 
@@ -232,12 +236,8 @@ subtest 'loop control in a callback cannot leave the callback' => sub {
 # Runs Perl code in a child perl; returns its output (STDOUT and STDERR)
 # and exit status.
 sub run_child ($code) {
-	my $pid = open my $child, '-|' // die "cannot fork: $!";
-	if (!$pid) {
-		open STDERR, '>&', \*STDOUT or die "cannot redirect STDERR: $!";
-		exec $^X, (map { "-I$_" } @INC), '-e', $code;
-		die "cannot run $^X: $!";
-	}
+	my $redirect = qq{BEGIN { open STDERR, '>&', \\*STDOUT or die "cannot redirect STDERR: \$!" }\n};
+	open my $child, '-|', child_perl($redirect . $code) or die "cannot run $^X: $!";
 	my $output = do { local $/; <$child> };
 	close $child;
 	return ($output, $? >> 8);
@@ -535,7 +535,7 @@ Clay_SetMeasureTextFunction(sub { [1, 1] });
 Clay_BeginLayout(); Clay__OpenTextElement('measured', {});
 print eval { Clay_EndLayout(); 1 } ? "measured later\n" : "died: $@";
 PERL
-	open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+	open my $child, '-|', child_perl($code) or die "cannot run $^X: $!";
 	my $output = do { local $/; <$child> };
 	close $child;
 	is( $output, "measured\nmeasured later\n",

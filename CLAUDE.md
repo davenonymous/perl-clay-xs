@@ -26,6 +26,12 @@ perl -Ilib -Iblib/lib -Iblib/arch examples/01-minimal.pl
 Always test against `blib` (`prove -lb` or `make test`): the XS object lives
 in `blib/arch/`, and plain `prove -l` can pick up a stale installed copy.
 
+CI (`.github/workflows/ci.yml`) tests Perl 5.22 .. 5.44 on Linux, macOS
+and Windows (Strawberry's gcc and gmake) and runs `make disttest`.
+Windows needs `patch --binary` (`Makefile.PL`) and `NO_XSLOCKS`
+(`src/clay_perl.h`). `RELEASING.md` is the release checklist
+(`make release`).
+
 Golden fixtures: each `t/fixtures/*.pl` returns a coderef producing render
 commands, compared against the matching `.json`. `09-ui-tree.pl` goes
 through Clay::UI and replaces `userData` with widget class and id.
@@ -341,6 +347,9 @@ through Clay::UI and replaces `userData` with widget class and id.
   no warnings 'experimental::signatures';`.
 - Helpers replacing C macros use snake_case (`sizing_fit`, `padding_all`).
 - Tests use `Test2::V0`.
+- Tests run a child perl through `child_perl`
+  (`t/lib/Clay/Test/ChildPerl.pm`), never with `-e` or an implicit-fork
+  `open '-|'`: neither works on Windows.
 
 ## Bumping Clay
 

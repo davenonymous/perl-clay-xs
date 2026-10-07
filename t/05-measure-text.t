@@ -5,6 +5,9 @@ no warnings 'experimental::signatures';
 
 use Test2::V0;
 
+use lib "t/lib";
+use Clay::Test::ChildPerl qw(child_perl);
+
 use Clay::XS qw(:all);
 
 # -----------------------------------------------------------------------------
@@ -120,7 +123,7 @@ my $ctx = Clay_Initialize(Clay_MinMemorySize(), [10, 10]);
 Clay_BeginLayout(); Clay__OpenTextElement('x', {});
 print eval { Clay_EndLayout(); 1 } ? "no error\n" : $@;
 PERL
-open my $child, '-|', $^X, (map { "-I$_" } @INC), '-e', $code or die "cannot run $^X: $!";
+open my $child, '-|', child_perl($code) or die "cannot run $^X: $!";
 my $fresh = do { local $/; <$child> };
 close $child;
 like( $fresh, qr/text measured but no measure_text function is installed for this context/,

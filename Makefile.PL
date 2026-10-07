@@ -36,6 +36,9 @@ my $ccflags = join(' ', @ccflags);
 # moved into place only when every patch succeeds, so a failed patch never
 # leaves an up-to-date-looking, unpatched src/clay/clay.h behind.
 # src/clay/clay.h is gitignored so the working tree stays clean after a build.
+# On Windows the patches are applied with --binary: Strawberry Perl's GNU
+# patch 2.5.9 fails an assertion on LF patches without it, and the BSD patch
+# of macOS does not know the option.
 # -----------------------------------------------------------------------------
 
 my @clay_patches = qw(
@@ -128,7 +131,8 @@ WriteMakefile(
 # pattern rules), so the object files land where O_FILES expects them.
 # The rule for src/clay/clay.h is built from @clay_patches (see above).
 sub MY::postamble {
-    my $apply_patches = join '', map { "\tpatch src/clay/clay.h.tmp < $_\n" } @clay_patches;
+    my $patch = $^O eq 'MSWin32' ? 'patch --binary' : 'patch';
+    my $apply_patches = join '', map { "\t$patch src/clay/clay.h.tmp < $_\n" } @clay_patches;
     my $compile_sources = join '', map {
         my $object = object_of($_);
         "$object : $_ src/clay/clay.h\n"
@@ -160,6 +164,60 @@ images : pure_all
 
 images-check : pure_all
 	$(FULLPERLRUN) -Mblib tools/make-images --check
+
+# --- Release target -------------------------------------------------
+# Usage: make release
+#
+# Tests the dist via `make disttest`, builds the tarball via
+# `make dist` (disttest alone only creates the unpacked directory),
+# then uploads it to CPAN with cpan-upload (from CPAN::Uploader).
+# Refuses to run if the git working tree is dirty, if a tag for the
+# current $(VERSION) already exists, or if a figure or an image URL
+# is out of date (images-check).
+# See RELEASING.md.
+#
+# disttest and dist run as separate sub-makes on purpose: as
+# prerequisites of one target they would share a single distdir
+# build, and the tarball would pack the blib/ that disttest left
+# behind. PAUSE refuses to index such a tarball.
+
+.PHONY: release release-check
+
+release-check : images-check
+	@git diff-index --quiet HEAD -- || { \
+	    echo "ERROR: git working tree is dirty; commit or stash first."; \
+	    exit 1; \
+	}
+	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
+	    echo "ERROR: tag v$(VERSION) already exists; bump \$$VERSION in lib/Clay/UI.pm and lib/Clay/XS.pm."; \
+	    exit 1; \
+	fi
+	@command -v cpan-upload >/dev/null 2>&1 || { \
+	    echo "ERROR: cpan-upload not found in PATH; cpanm CPAN::Uploader"; \
+	    exit 1; \
+	}
+	@test -r $(HOME)/.pause || { \
+	    echo "ERROR: ~/.pause not found; see RELEASING.md for the format."; \
+	    exit 1; \
+	}
+
+release :: release-check
+	$(MAKE) disttest
+	$(MAKE) dist
+	@test -f $(DISTVNAME).tar.gz || { \
+	    echo "ERROR: $(DISTVNAME).tar.gz was not built; refusing to upload."; \
+	    exit 1; \
+	}
+	@if tar tzf $(DISTVNAME).tar.gz | grep -qE '/(blib/|Makefile$$|MYMETA\.|pm_to_blib)'; then \
+	    echo "ERROR: $(DISTVNAME).tar.gz contains build artefacts; refusing to upload."; \
+	    exit 1; \
+	fi
+	cpan-upload $(DISTVNAME).tar.gz
+	@echo
+	@echo "Uploaded $(DISTVNAME).tar.gz to PAUSE."
+	@echo "Next:"
+	@echo "  git tag -a v$(VERSION) -m 'Release v$(VERSION)'"
+	@echo "  git push --follow-tags"
 
 POSTAMBLE
 }

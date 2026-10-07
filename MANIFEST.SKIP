@@ -99,3 +99,6 @@
 # Previous dist directories and tarballs.
 ^Clay-UI-[\d.]+/
 ^Clay-UI-[\d.]+\.tar\.gz$
+
+# Maintainer-only release checklist (not shipped).
+^RELEASING\.md$
