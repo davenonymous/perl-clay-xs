@@ -10,8 +10,6 @@ use Object::Pad 0.800;
 use Clay::UI::_validate qw(optional clay_struct copy_value);
 use Clay::UI::Revision qw(bump_revision);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Style::HasCornerRadius {
 	field $corner_radius :param = undef;
 

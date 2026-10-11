@@ -20,8 +20,6 @@ use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 # Group-id encoding: (grid_id << _LOCAL_BITS) | local_index, in Clay's
 # 32-bit sizingGroup.
 #   - local in 1..USER_GROUP_ID_MAX (_LOCAL_BITS bits, 20), one slot per

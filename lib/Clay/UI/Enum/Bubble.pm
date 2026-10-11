@@ -8,8 +8,6 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Object::PadX::Enum;
 
-our $VERSION = '0.01';
-
 enum Clay::UI::Enum::Bubble {
 	item ALWAYS;
 	item IF_CONTINUE;

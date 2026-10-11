@@ -11,8 +11,6 @@ use Clay::UI::Role::Interaction::Hoverable;
 use Clay::UI::Events::OnPress;
 use Clay::UI::Events::OnRelease;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Interaction::Pressable :does(Clay::UI::Role::Interaction::Hoverable) {
 	# The UI's interaction tracker owns the state; a widget outside a
 	# UI is never pressed.

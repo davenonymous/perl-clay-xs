@@ -13,8 +13,6 @@ use Clay::UI::Role::Core::Container;
 use Clay::UI::Role::Core::Stateful;
 use Clay::UI::Role::Events::Emitter;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Layout::HasScroll
 	:does(Clay::UI::Role::Core::Stateful)
 	:does(Clay::UI::Role::Core::Container)

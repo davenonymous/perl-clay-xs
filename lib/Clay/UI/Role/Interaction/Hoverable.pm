@@ -14,8 +14,6 @@ use Clay::UI::Events::OnHoverStart;
 use Clay::UI::Events::OnHoverStopped;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Interaction::Hoverable :does(Clay::UI::Role::Layout::HasParent)
                                             :does(Clay::UI::Role::Events::Emitter)
                                             :does(Clay::UI::Role::Style::HasStates) {

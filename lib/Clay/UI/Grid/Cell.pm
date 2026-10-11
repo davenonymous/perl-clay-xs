@@ -14,8 +14,6 @@ use Clay::UI::Role::Style::HasBackground;
 use Clay::UI::Role::Style::HasBorder;
 use Clay::UI::Role::Style::HasCornerRadius;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Grid::Cell :strict(params)
 	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Layout::HasLayout)

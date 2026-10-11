@@ -12,8 +12,6 @@ use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Style::HasStates;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Interaction::Disableable :does(Clay::UI::Role::Layout::HasParent)
                                               :does(Clay::UI::Role::Style::HasStates) {
 	field $disabled :param = 0;

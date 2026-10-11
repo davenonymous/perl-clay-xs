@@ -11,8 +11,6 @@ use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Core::TextNode :does(Clay::UI::Role::Layout::HasParent)
                               :does(Clay::UI::Role::Events::Listener) {
 	method text;

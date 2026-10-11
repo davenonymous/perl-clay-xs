@@ -9,8 +9,6 @@ use Object::Pad 0.800;
 use Scalar::Util qw(blessed refaddr weaken);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Layout::HasParent {
 	field $parent :reader = undef;
 	field $_ui_controller = undef;

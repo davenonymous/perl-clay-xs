@@ -32,7 +32,10 @@ Perls 5.40+ mix C runtimes with the runner's gcc), and runs
 `make disttest`.
 Windows needs `patch --binary` (`Makefile.PL`) and `NO_XSLOCKS`
 (`src/clay_perl.h`). `RELEASING.md` is the release checklist
-(`make release`).
+(`make release`). Only `lib/Clay/UI.pm` and `lib/Clay/XS.pm` carry a
+`$VERSION` in git; `make distdir` stamps the dist version into every
+other module (`tools/stamp-versions`), so each `.pm` must start with
+`package NAME;` and a blank line.
 
 Golden fixtures: each `t/fixtures/*.pl` returns a coderef producing render
 commands, compared against the matching `.json`. `09-ui-tree.pl` goes

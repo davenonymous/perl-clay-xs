@@ -7,7 +7,6 @@ no warnings 'experimental::signatures';
 
 use Exporter 'import';
 
-our $VERSION   = '0.01';
 our @EXPORT_OK = qw(croak_ui);
 
 # Dies with $message and the location of the first caller outside

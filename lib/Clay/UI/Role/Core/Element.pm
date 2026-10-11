@@ -18,8 +18,6 @@ use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 # Contributor method names per class. Object::Pad classes are sealed once
 # compiled, so the list never changes after the first lookup.
 my %contributors_for;

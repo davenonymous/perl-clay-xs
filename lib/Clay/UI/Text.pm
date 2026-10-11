@@ -11,8 +11,6 @@ use Clay::UI::_validate qw(optional required validate_text clay_struct clay_fiel
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::Role::Core::TextNode;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Text :does(Clay::UI::Role::Core::TextNode) {
 	field $text :param = '';
 

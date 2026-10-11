@@ -8,8 +8,6 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Events::Listener {
 	field %_handlers;
 

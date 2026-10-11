@@ -8,8 +8,6 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Core::Stateful :does(Clay::UI::Role::Core::Element) {
 	ADJUST {
 		croak_ui "Clay::UI::Role::Core::Stateful: widget '" . (ref $self) . "' requires an explicit 'id'"

@@ -79,7 +79,7 @@ WriteMakefile(
             },
         },
     },
-    AUTHOR         => 'Dave',
+    AUTHOR         => 'davenonymous <perl@davenonymous.com>',
     LICENSE        => 'zlib',
     MIN_PERL_VERSION => '5.026',
 
@@ -124,6 +124,16 @@ WriteMakefile(
         },
     },
 );
+
+# In git only lib/Clay/UI.pm and lib/Clay/XS.pm carry a $VERSION; distdir
+# (which `make disttest` and `make dist` both build on) gives every other
+# module of the dist directory the dist version with tools/stamp-versions.
+sub MY::distdir ($self, @args) {
+    my $rules = $self->MM::distdir(@args);
+    $rules =~ s{^(distdir :[^\n]*\n)}{$1\t\$(PERLRUN) tools/stamp-versions \$(DISTVNAME) \$(VERSION)\n}m
+        or die "Makefile.PL: ExtUtils::MakeMaker wrote no distdir rule to extend\n";
+    return $rules;
+}
 
 # ExtUtils::MakeMaker's default `.c.o` suffix rule does not pass `-o $@`,
 # so when a source file lives in a subdirectory the compiler still emits

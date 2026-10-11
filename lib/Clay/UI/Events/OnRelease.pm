@@ -9,8 +9,6 @@ use Object::Pad 0.800;
 
 use Clay::UI::Events::Event;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Events::OnRelease :isa(Clay::UI::Events::Event) :strict(params) {
 	field $x      :param :reader = 0;
 	field $y      :param :reader = 0;

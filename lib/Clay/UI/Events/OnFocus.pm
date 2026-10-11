@@ -9,8 +9,6 @@ use Object::Pad 0.800;
 
 use Clay::UI::Events::Event;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Events::OnFocus :isa(Clay::UI::Events::Event) :strict(params) {
 	method event_name :common { 'OnFocus' }
 }

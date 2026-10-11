@@ -9,7 +9,6 @@ use Scalar::Util qw(blessed reftype);
 use Exporter 'import';
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION   = '0.01';
 our @EXPORT_OK = qw(camelize_keys camelize_string snake_keys snake_string);
 
 # The walker camelizes every widget's config every frame, and the keys

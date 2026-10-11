@@ -13,7 +13,6 @@ use Clay::XS qw(check_struct);
 use Clay::UI::_keys qw(camelize_keys snake_keys snake_string);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION   = '0.01';
 our @EXPORT_OK = qw(
 	optional
 	required

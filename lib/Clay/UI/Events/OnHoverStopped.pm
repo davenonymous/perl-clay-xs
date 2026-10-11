@@ -10,8 +10,6 @@ use Object::Pad 0.800;
 use Clay::UI::Enum::Bubble;
 use Clay::UI::Events::Event;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Events::OnHoverStopped :isa(Clay::UI::Events::Event) :strict(params) {
 	method event_name :common { 'OnHoverStopped' }
 	method default_bubble_mode :common { Clay::UI::Enum::Bubble->NEVER }

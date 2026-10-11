@@ -7,8 +7,6 @@ no warnings 'experimental::signatures';
 
 use Object::Pad 0.800;
 
-our $VERSION = '0.01';
-
 # A marker: Clay::UI::Grid lays out a widget composing this role as the
 # cell itself, stamping the column and row sizing groups on it, instead of
 # wrapping it in an unstyled Clay::UI::Grid::Cell. The methods it needs

@@ -144,7 +144,12 @@ with `gh auth login`.
   `Makefile.PL`), and the XS object is built with it. `lib/Clay/XS.pm`
   must carry the same `$VERSION`: `XSLoader::load` refuses to load an
   object built for another version. The other modules under `lib/`
-  keep their own versions.
+  carry no `$VERSION` in git: `make distdir` (and with it `make
+  disttest` and `make dist`) runs `tools/stamp-versions`, which writes
+  `our $VERSION = '...';` with the dist version into the blank line
+  after each module's `package` line in the dist directory, so every
+  module on CPAN carries the dist version. A new module must start
+  with `package NAME;` and a blank line, or the stamp fails.
 - `Makefile.PL` is the only place the dependencies are declared; there
   is no `cpanfile`.
 - `make images` needs Imager with PNG and FreeType support,

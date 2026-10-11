@@ -10,8 +10,6 @@ use Object::Pad 0.800;
 use Clay::UI::Role::Core::Element;
 use Clay::UI::Role::Layout::HasLayout;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Grid::Row :strict(params)
 	:does(Clay::UI::Role::Core::Element)
 	:does(Clay::UI::Role::Layout::HasLayout)

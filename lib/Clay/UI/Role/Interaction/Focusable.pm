@@ -13,8 +13,6 @@ use Clay::UI::Role::Style::HasStates;
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Interaction::Focusable :does(Clay::UI::Role::Layout::HasParent)
                                             :does(Clay::UI::Role::Events::Emitter)
                                             :does(Clay::UI::Role::Style::HasStates) {

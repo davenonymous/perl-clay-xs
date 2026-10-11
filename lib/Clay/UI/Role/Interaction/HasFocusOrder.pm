@@ -9,8 +9,6 @@ use Object::Pad 0.800;
 
 use Clay::UI::Role::Layout::HasParent;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Interaction::HasFocusOrder :does(Clay::UI::Role::Layout::HasParent) {
 	method get_next_focus;
 	method get_previous_focus;

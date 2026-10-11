@@ -9,7 +9,7 @@
 # pod shows exactly the files it renders and points every image URL in
 # the pod to the tag of the current release. See the pod at the end.
 #
-# Copyright (C) 2026 Dave.
+# Copyright 2026 davenonymous
 #
 # Released under the same zlib/libpng license as Clay itself and the rest
 # of this distribution; see src/clay/LICENSE.md.

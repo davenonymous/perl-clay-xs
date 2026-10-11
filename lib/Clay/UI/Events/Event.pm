@@ -12,8 +12,6 @@ use Clay::UI::Enum::Bubble;
 use Clay::UI::Enum::Result;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 class Clay::UI::Events::Event :strict(params) {
 	field $name        :param :reader = undef;
 	field $bubble_mode :param :reader = undef;

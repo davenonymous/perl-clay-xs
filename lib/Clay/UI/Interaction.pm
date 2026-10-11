@@ -20,8 +20,6 @@ use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_validate qw(is_finite_number);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 my %UPDATE_ARGS = map { $_ => 1 } qw(over down x y scrolled);
 
 my $HOVERABLE   = 'Clay::UI::Role::Interaction::Hoverable';

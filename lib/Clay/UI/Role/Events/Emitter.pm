@@ -14,8 +14,6 @@ use Clay::UI::Role::Layout::HasParent;
 use Clay::UI::Role::Events::Listener;
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Events::Emitter :does(Clay::UI::Role::Layout::HasParent)
                                      :does(Clay::UI::Role::Events::Listener) {
 	method fire_event ($event) {

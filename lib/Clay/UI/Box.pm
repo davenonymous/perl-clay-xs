@@ -15,8 +15,6 @@ use Clay::UI::Role::Style::HasCornerRadius;
 use Clay::UI::Role::Layout::HasFloating;
 use Clay::UI::Role::Events::Emitter;
 
-our $VERSION = '0.01';
-
 role Clay::UI::Box
 	:does(Clay::UI::Role::Core::Container)
 	:does(Clay::UI::Role::Layout::HasLayout)

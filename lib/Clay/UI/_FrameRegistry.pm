@@ -8,8 +8,6 @@ no warnings 'experimental::signatures';
 use Object::Pad 0.800;
 use Scalar::Util qw(refaddr weaken);
 
-our $VERSION = '0.01';
-
 class Clay::UI::_FrameRegistry :strict(params) {
 	use Clay::XS qw(Clay_GetScrollContainerData);
 

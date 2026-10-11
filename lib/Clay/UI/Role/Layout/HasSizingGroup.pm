@@ -11,8 +11,6 @@ use Scalar::Util qw(looks_like_number);
 use Clay::UI::_validate qw(required validate_group_id);
 use Clay::UI::Revision qw(bump_revision);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Layout::HasSizingGroup {
 	field $width_group  :param = 0;
 	field $height_group :param = 0;

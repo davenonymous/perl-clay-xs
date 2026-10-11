@@ -10,8 +10,6 @@ use Object::Pad 0.800;
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 # Derived states and the reader each one is answered by. A widget
 # without the reader (no matching interaction role) never has the state.
 my %DERIVED = (hovered => 'is_hovered', pressed => 'is_pressed', focused => 'is_focused', disabled => 'disabled');

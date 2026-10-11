@@ -9,8 +9,6 @@ use Object::Pad 0.800;
 
 use Clay::UI::Events::Event;
 
-our $VERSION = '0.01';
-
 class Clay::UI::Events::OnScroll :isa(Clay::UI::Events::Event) :strict(params) {
 	field $delta_x :param :reader = 0;
 	field $delta_y :param :reader = 0;

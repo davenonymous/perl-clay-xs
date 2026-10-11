@@ -11,8 +11,6 @@ use Scalar::Util qw(refaddr weaken);
 use Clay::UI::Revision qw(bump_revision);
 use Clay::UI::_error qw(croak_ui);
 
-our $VERSION = '0.01';
-
 # Process-wide, like the revision: refaddr => [ the widget (weak), its
 # request number ], for every widget whose prepare_layout is due before its
 # UI's next layout pass. The request numbers order the widgets of a round.

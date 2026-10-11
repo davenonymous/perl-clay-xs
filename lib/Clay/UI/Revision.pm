@@ -9,7 +9,6 @@ use Exporter 'import';
 
 use Clay::XS ();
 
-our $VERSION   = '0.01';
 our @EXPORT_OK = qw(bump_revision current_revision);
 
 # One counter for the whole process: a renderer only needs to know whether

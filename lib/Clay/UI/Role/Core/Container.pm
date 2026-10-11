@@ -11,8 +11,6 @@ use Clay::UI::Role::Core::Element;
 use Clay::UI::_error qw(croak_ui);
 use Clay::UI::_validate qw(described_value);
 
-our $VERSION = '0.01';
-
 role Clay::UI::Role::Core::Container :does(Clay::UI::Role::Core::Element) {
 	method add_child (@kids) {
 		$self->_attach_children(@kids);
