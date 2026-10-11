@@ -94,6 +94,8 @@ effect at the next C<render> and returns a copy of the new value.
 The value is checked when it is set, at construction or by the
 accessor. A bad value dies naming the attribute, for example:
 
+=for highlighter language=text
+
 	Clay::UI: 'background_color' expected an array of 4 numbers, got an array of 3 elements
 	Clay::UI: 'background_color' has unknown key 'x' (known keys: r, g, b, a)
 	Clay::UI: 'background_color' expected a hash or array reference, got 'red'

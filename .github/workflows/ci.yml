@@ -94,7 +94,7 @@ jobs:
           perl-version: latest
 
       - name: Install declared dependencies
-        run: cpanm --installdeps --notest .
+        run: cpanm --installdeps --with-develop --notest .
 
       - name: Configure and build
         run: |
@@ -103,7 +103,10 @@ jobs:
 
       # make images-check compares the figures pixel by pixel, and the
       # glyphs depend on the runner's FreeType and DejaVu Sans; it runs
-      # in make release instead
+      # in make release instead. Only check that the Markdown pages
+      # match the pod
+      - name: Markdown pages are up to date
+        run: perl tools/pod2markdown --check
 
       - name: Distribution builds and passes its tests
         run: make disttest

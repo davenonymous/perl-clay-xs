@@ -114,6 +114,10 @@ WriteMakefile(
         # tools/make-images renders the figures in images/ that the
         # documentation shows; both are shipped but not installed.
         no_index    => { directory => [qw(tools images)] },
+        # tools/pod2markdown writes the Markdown pages in docs/ (make markdown)
+        prereqs     => {
+            develop => { requires => { 'Pod::Markdown' => '3.400' } },
+        },
         resources   => {
             bugtracker => { web => 'https://github.com/davenonymous/perl-clay-xs/issues' },
             repository => {
@@ -158,23 +162,54 @@ sub MY::postamble {
         . <<'POSTAMBLE';
 lib/Clay/XS$(OBJ_EXT) : src/clay/clay.h
 
+# --- Markdown pages ---------------------------------------------------
+# Usage: make markdown
+#
+# The pages in docs/ are the pod of every module and pod file under lib/
+# converted with tools/pod2markdown, a Pod::Markdown subclass that links
+# the pages to each other's Markdown files, points the figures to the
+# master branch on GitHub, removes the shared indentation of code
+# blocks, fences them with the language set by '=for highlighter' and
+# turns tables in 'text' blocks into Markdown tables. docs/ is for
+# GitHub and not shipped (see MANIFEST.SKIP). Regenerate it after any
+# pod change.
+
+.PHONY: markdown
+
+POD_MARKDOWN_CHECK = $(PERLRUN) -MPod::Markdown -e1 2>/dev/null || { \
+	    echo "ERROR: Pod::Markdown is not installed; cpanm Pod::Markdown"; \
+	    exit 1; \
+	}
+
+markdown :
+	@$(POD_MARKDOWN_CHECK)
+	$(PERLRUN) tools/pod2markdown
+
 # --- Documentation figures -------------------------------------------
 # Usage: make images         (after changing a figure or a pod reference)
-#        make images-check   (fails when a figure or an image URL is stale)
+#        make images-check   (fails when a figure, an image URL or a
+#                             Markdown page is stale)
 #
 # tools/make-images lays every figure in images/ out with the Clay::UI
 # in blib/, draws it with Imager, runs the examples that write a PNG or
 # a PDF, and points the image URLs in the pod to the tag of the current
 # version on GitHub. It fails when the pod shows a file it does not
-# render, or does not show one that it renders.
+# render, or does not show one that it renders. Then docs/ is
+# regenerated.
 
 .PHONY: images images-check
 
 images : pure_all
 	$(FULLPERLRUN) -Mblib tools/make-images
+	$(MAKE) markdown
 
 images-check : pure_all
 	$(FULLPERLRUN) -Mblib tools/make-images --check
+	@$(POD_MARKDOWN_CHECK)
+	@$(PERLRUN) tools/pod2markdown --check || { \
+	    echo "ERROR: the Markdown pages are out of date; run 'make markdown' (or 'make images')."; \
+	    exit 1; \
+	}
 
 # --- Release target -------------------------------------------------
 # Usage: make release
@@ -183,9 +218,9 @@ images-check : pure_all
 # `make dist` (disttest alone only creates the unpacked directory),
 # then uploads it to CPAN with cpan-upload (from CPAN::Uploader).
 # Refuses to run if the git working tree is dirty, if a tag for the
-# current $(VERSION) already exists, if a figure or an image URL is
-# out of date (images-check), or if the GitHub CI run of HEAD has not
-# passed (ci-check, which needs gh).
+# current $(VERSION) already exists, if a figure, an image URL or a
+# Markdown page is out of date (images-check), or if the GitHub CI run
+# of HEAD has not passed (ci-check, which needs gh).
 # See RELEASING.md.
 #
 # disttest and dist run as separate sub-makes on purpose: as

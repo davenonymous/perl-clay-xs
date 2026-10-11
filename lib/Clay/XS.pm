@@ -1616,6 +1616,8 @@ Validates a struct value without a context or a frame.
     check_struct('Clay_LayoutConfig', $layout);
     check_struct('Clay_Padding', $padding, 'layout.padding');
 
+=for highlighter language=text
+
 C<$type> is the exact C type name of a struct, one of:
 
     Clay_ElementDeclaration        Clay_LayoutConfig
@@ -2492,6 +2494,8 @@ element id hash from C<Clay_GetElementId>.
 
 =head1 CHECKING STRUCTS
 
+=for highlighter language=perl
+
     check_struct('Clay_LayoutConfig', $layout);
     check_struct('Clay_Padding', $padding, 'layout.padding');
 
@@ -2554,6 +2558,8 @@ Bad element id arguments croak one too.
 A C<Clay::XS::StructError> object is true in boolean context and stringifies like a plain
 croak message:
 
+=for highlighter language=text
+
     <path>: expected <what>, got <value>[ (<hint>)] at <file> line <n>.
 
 For example:
@@ -2605,6 +2611,8 @@ The file where the croak happened.
 The line where the croak happened.
 
 =back
+
+=for highlighter language=perl
 
     use Scalar::Util qw(blessed);
 

@@ -102,3 +102,6 @@
 
 # Maintainer-only release checklist (not shipped).
 ^RELEASING\.md$
+
+# The Markdown pages of the documentation, for GitHub (tools/pod2markdown).
+^docs/

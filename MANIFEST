@@ -162,5 +162,6 @@ t/lib/Clay/UI/Test/Grid.pm
 t/lib/Clay/UI/Test/GridCell.pm
 t/lib/Clay/UI/Test/Text.pm
 tools/make-images
+tools/pod2markdown
 tools/stamp-versions
 typemap

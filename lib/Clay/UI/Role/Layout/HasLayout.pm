@@ -150,6 +150,8 @@ The value is checked when it is set, at construction or by the
 accessor, and a bad value dies naming the attribute and the path inside
 it, for example:
 
+=for highlighter language=text
+
 	Clay::UI: 'layout' has unknown key 'paddin' (known keys: sizing, padding, ...)
 	Clay::UI: 'layout.padding.left' expected an integer in 0..65535, got '-5'
 	Clay::UI: 'layout.padding' expected a hash reference, got '5' (padding_all(N) builds one)

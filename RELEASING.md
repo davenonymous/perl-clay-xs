@@ -37,7 +37,8 @@ with `gh auth login`.
 2. Bump `$VERSION` in `lib/Clay/UI.pm` and `lib/Clay/XS.pm` (see
    "Notes on dependencies").
 
-3. Bring the figures and their URLs up to date and commit what changed:
+3. Bring the figures, their URLs and the Markdown pages in `docs/` up
+   to date and commit what changed:
 
    ```sh
    make images
@@ -61,6 +62,21 @@ with `gh auth login`.
    figures once its tag is pushed (step 7). Keep `images/` in
    `MANIFEST`: the POD names the files in the dist for readers without
    HTML (`Figure: images/NAME.png in the distribution.`).
+
+   `make images` then runs `make markdown`: `tools/pod2markdown` (it
+   needs Pod::Markdown, a develop prerequisite) writes `docs/NAME.md`
+   from every `lib/NAME.pm` and `lib/NAME.pod`, for reading on GitHub;
+   `docs/` is not shipped. The pages point to the figures in the
+   `master` branch instead of the tag. Code blocks are fenced with the
+   language set by the last `=for highlighter language=NAME` paragraph
+   in the POD (`perl` before the first one); MetaCPAN uses the same
+   marker. Put such a paragraph before every code block that is not
+   Perl (`sh`, `text`), and one with `perl` before the next Perl block.
+   In `text` blocks, tables (a header line, a line of dashes per
+   column, then the rows) become Markdown tables, and every cell must
+   lie within its column's dashes; see `perldoc tools/pod2markdown`.
+   `make images-check` and CI fail while a page is out of date. Never
+   edit the Markdown files by hand.
 
 4. Sanity-build from a clean slate:
 
@@ -106,8 +122,8 @@ with `gh auth login`.
    - Refuses to proceed if a tag `v$(VERSION)` already exists.
    - Refuses to proceed unless the GitHub CI run of `HEAD` has passed
      (`make ci-check`, which needs an authenticated `gh`).
-   - Refuses to proceed if a figure or an image URL is out of date
-     (`make images-check`).
+   - Refuses to proceed if a figure, an image URL or a Markdown page is
+     out of date (`make images-check`).
    - Runs `cpan-upload` on the freshly built tarball.
 
 7. Tag and push:

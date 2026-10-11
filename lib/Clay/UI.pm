@@ -743,6 +743,8 @@ whatever spelling was set:
 
 Both spellings of the same key in one hash die where the value is set:
 
+=for highlighter language=text
+
 	Clay::UI: key 'childGap' in 'layout' is 'child_gap' in snake_case, which is already present in the same hash
 
 The layout pass converts every key to camelCase before it passes a
@@ -842,6 +844,8 @@ C<render> works normally.
 
 =head2 new
 
+=for highlighter language=perl
+
 	my $ui = Clay::UI->new(
 		root   => $root_widget,
 		width  => 800,
@@ -871,6 +875,8 @@ It must have no parent and must not be the root of another Clay::UI;
 a widget that was removed from its parent may become a root. Read it
 back with L</root>; it cannot be replaced, but the tree below it can
 change at any time. Dies with:
+
+=for highlighter language=text
 
 	Clay::UI: 'root' must be a widget consuming Clay::UI::Role::Core::Element or TextNode
 	Clay::UI: 'root' must not have a parent; the root is the top of its widget tree
@@ -985,6 +991,8 @@ with it after the layout pass.
 =head1 METHODS
 
 =head2 root
+
+=for highlighter language=perl
 
 	my $root = $ui->root;
 

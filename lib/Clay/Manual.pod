@@ -47,6 +47,8 @@ the distribution: every function, method, attribute and struct key has a
 heading or an C<=item> of its own, spelled exactly as you type it in
 code.
 
+=for highlighter language=sh
+
     perldoc Clay::Manual                     # read this manual
     grep -rnE '^=(head.|item) (C<)?betweenChildren' lib/   # find a struct key
     grep -rln 'Features:.*floating' examples/   # find an example
@@ -105,8 +107,10 @@ call a Clay::XS function on the render commands Clay::UI returns.
 
 Choosing a layer:
 
+=for highlighter language=text
+
     You want to ...                                  Use
-    -----------------------------------------------  ----------
+    -----------------------------------------------  ---------------------------
     render a document or image from data             either; Clay::UI is shorter
     build an interactive UI with events and focus    Clay::UI
     animate elements with transitions                either
@@ -114,6 +118,8 @@ Choosing a layer:
     reuse a tree between frames                      Clay::UI
 
 =head1 INSTALLATION
+
+=for highlighter language=sh
 
     perl Makefile.PL
     make
@@ -137,6 +143,8 @@ add the build directories to Perl's include path:
 
 The script below lays out a 400x200 area with a header bar and two
 coloured columns, and prints the render commands.
+
+=for highlighter language=perl
 
     use v5.22;
     use warnings;
@@ -218,6 +226,8 @@ coloured columns, and prints the render commands.
 
 Output:
 
+=for highlighter language=text
+
     My::Box    RECTANGLE      x=  0 y=  0 w=400 h=200
     My::Box    RECTANGLE      x=  8 y=  8 w=384 h= 36
     My::Text   TEXT           x= 16 y= 16 w=220 h= 20
@@ -261,6 +271,8 @@ With the low-level binding you create a context yourself and declare
 every element, in order, between C<Clay_BeginLayout> and
 C<Clay_EndLayout>. Each element is opened, configured once, given its
 children, and closed:
+
+=for highlighter language=perl
 
     use v5.22;
     use warnings;
@@ -439,6 +451,8 @@ L<Clay::XS::Structs/layout>. In Clay::UI, you pass them in the
 C<layout> attribute (L<Clay::UI::Role::Layout::HasLayout>), spelled
 in snake_case.
 
+=for highlighter language=text
+
     Clay::XS (camelCase)   Clay::UI (snake_case)
     ---------------------  ---------------------
     sizing                 sizing
@@ -563,6 +577,8 @@ C<childGap> (Clay::UI: C<child_gap>) is the space between neighbouring
 children along the layout axis. There is no gap before the first or after
 the last child.
 
+=for highlighter language=perl
+
     layout => { padding => { left => 16, right => 16, top => 8, bottom => 8 }, childGap => 4 }
 
 Padding and gaps count as content: a FIT element includes them in its
@@ -581,6 +597,8 @@ size.
 C<< childAlignment => { x => ..., y => ... } >> (Clay::UI:
 C<child_alignment>) positions the children inside the element when they
 do not fill it:
+
+=for highlighter language=text
 
     x: CLAY_ALIGN_X_LEFT (default), CLAY_ALIGN_X_CENTER, CLAY_ALIGN_X_RIGHT
     y: CLAY_ALIGN_Y_TOP  (default), CLAY_ALIGN_Y_CENTER, CLAY_ALIGN_Y_BOTTOM
@@ -666,6 +684,8 @@ badges are floating elements.
 <p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/floating.png" alt="A row of three buttons Edit, View and Help. The View button has a dark tooltip above it, a white menu with the entries Zoom in and Zoom out hanging below it and a red badge on its top right corner; Edit and Help stay where they are. The legend gives the attach points: tooltip, element CENTER_BOTTOM at parent CENTER_TOP with offset y -6; menu, element LEFT_TOP at parent LEFT_BOTTOM with offset y 4; badge, element CENTER_CENTER at parent RIGHT_TOP."></p>
 
 =end html
+
+=for highlighter language=perl
 
     floating => {
     	attachTo     => CLAY_ATTACH_TO_PARENT,
@@ -907,8 +927,10 @@ child:
 
 The text configuration keys (L<Clay::XS::Structs/Clay_TextElementConfig>):
 
+=for highlighter language=text
+
     Clay::XS        Clay::UI          Meaning
-    --------------  ----------------  ----------------------------------------
+    --------------  ----------------  ------------------------------------------------
     fontId          font_id           your number for a font; Clay passes it on
     fontSize        font_size         font size in layout units
     textColor       text_color        [r, g, b, a]
@@ -931,6 +953,8 @@ ASCII spaces and newlines.
 Clay cannot know how wide a piece of text is in your font, so it asks a
 I<measure function> you provide. The function receives the text and its
 configuration and returns the size:
+
+=for highlighter language=perl
 
     Clay_SetMeasureTextFunction(sub ($text, $config, $userdata) {
     	my $font = $fonts{ $config->{fontId} };
@@ -1178,6 +1202,8 @@ Pass the pointer to C<render> and listen on widgets:
 
 Which widgets receive which events depends on their roles:
 
+=for highlighter language=text
+
     Role                                       Events
     -----------------------------------------  ------------------------------
     Clay::UI::Role::Interaction::Hoverable     OnHoverStart, OnHoverStopped
@@ -1220,6 +1246,8 @@ on only when B<every> listener of the current widget returned
 C<< Clay::UI::Enum::Result->CONTINUE >>. Returning anything else,
 including nothing (C<undef>), stops it. So a listener that handles an
 event simply returns; a listener that only observes returns C<CONTINUE>.
+
+=for highlighter language=perl
 
     $card->on(OnPress => sub ($event) {
     	say "something inside the card was pressed: ", $event->target->id;
@@ -1339,8 +1367,10 @@ A table that sizes columns and rows to their content.
 
 The roles they are made of, which you can also compose directly:
 
+=for highlighter language=text
+
     Role                                         Adds
-    -------------------------------------------  -----------------------------------------
+    -------------------------------------------  -----------------------------------------------------
     Clay::UI::Role::Core::Element                id, children, to_config (every element widget)
     Clay::UI::Role::Core::Container              add_child, remove_child, clear_children, ...
     Clay::UI::Role::Core::TextNode               base of text widgets
@@ -1368,6 +1398,8 @@ The roles they are made of, which you can also compose directly:
 
 Widgets are created empty and connected with the methods of
 L<Clay::UI::Role::Core::Container>:
+
+=for highlighter language=perl
 
     $panel->add_child($title, $body);         # returns $panel, so calls chain
     $panel->remove_child($body);              # the widget itself
@@ -1643,61 +1675,63 @@ examples that use it ("-" when none does). "XS" is L<Clay::XS>, "Structs" is
 L<Clay::XS::Structs>, "UI" is L<Clay::UI>, "Cookbook" is
 L<Clay::Cookbook>; role names are short for C<Clay::UI::Role::...>.
 
-    Feature                       Reference                                   Examples
-    ----------------------------  ------------------------------------------  ----------------------------
-    aspect ratio                  Structs aspectRatio                         11, 14, 15
-    background colour             Structs backgroundColor; HasBackground      most
-    borders                       Structs border; HasBorder                   01, 03, 05-08, 11, 14, 15, 16
-    borders between children      Structs betweenChildren; HasBorder          07, 11
-    bounding box of an element    UI bounding_box; XS Clay_GetElementData     09, 12-18
-    bubbling events               Manual Bubbling; Events::Event bubble_mode  12
-    check a struct                XS check_struct                             11, 14, 15
-    clipping                      Structs clip                                09, 11, 13, 15, 16
-    contexts, several             XS CONTEXTS; XS Clay_SetCurrentContext      17
-    corner radius                 Structs cornerRadius; HasCornerRadius       01, 03, 06-08, 11, 15, 16
-    culling                       XS Clay_SetCullingEnabled                   17
-    custom elements               Structs custom                              11, 16
-    custom events                 Events::Event; Events::Emitter fire_event   12
-    custom widget classes         Core::Element to_config; Manual WIDGETS     12, 14, 15, 16
-    debug view                    XS Clay_SetDebugModeEnabled                 17
-    disabled widgets              Interaction::Disableable                    12
-    element ids                   XS Clay_GetElementId; Manual ELEMENT IDS    01-03, 14, 17
-    error handler                 XS Clay_Initialize; UI new error_handler    01, 04-08, 14, 17
-    external scroll handling      XS Clay_SetExternalScrollHandlingEnabled    17
-    floating elements             Structs floating; HasFloating               09, 13, 14, 17, 18
-    flow layout (wrap)            XS FLOW LAYOUT; Structs layoutDirection     07, 15
-    focus and Tab order           Interaction FOCUS; HasFocusOrder            12, 18
-    focus inside a subtree        Interaction has_focus_within                -
-    focus scopes (modal Tab)      Interaction Focus scopes; HasFocusOrder     -
-    grids and tables              Clay::UI::Grid                              05, 16, 18
-    hover                         XS Clay_PointerOver; Hoverable              09, 12, 13, 18
-    images                        Structs image                               11, 14, 15
-    internal children             Core::Element add_internal_children         14, 18
-    max element count             XS Clay_SetMaxElementCount; UI new          14, 17
-    measure text                  XS Clay_SetMeasureTextFunction; Manual TEXT 06, 14, 15, 16, 18
-    overlay colour                Structs overlayColor                        10, 11, 14, 15
-    pagination                    Cookbook "Split a long document into pages" 16
-    PDF output                    Cookbook "Render to a PDF document"         16
-    PNG output                    Cookbook "Render to a PNG image"            06, 15
-    pointer events                UI EVENTS; UI HOW A FRAME WORKS             12, 13, 18
-    preparation (rebuild once)    Core::Preparable                            12
-    press and release             Pressable; Events::OnPress                  12, 18
-    redraw only on change         Clay::UI::Revision; UI laid_out_revision    12, 14, 18
-    render commands               XS RENDER COMMANDS                          01, 03, 09, 11
-    resize the viewport           XS Clay_SetLayoutDimensions; UI width       17, 18
-    scrolling                     XS Clay_UpdateScrollContainers; HasScroll   09, 13
-    sizing (fit/grow/fixed/%)     Structs sizing                              all
-    sizing groups                 XS SIZING GROUPS; HasSizingGroup            14, 18
-    stack layout                  XS STACK LAYOUT                             08, 15
-    states (user and derived)     Style::HasStates                            12, 18
-    subtree of a widget           Core::Element descendants                   -
-    subtree test (is X below Y)   Layout::HasParent contains                  -
-    tree changes (joined/left)    Layout::HasParent tree_changed              -
-    SVG output                    Cookbook "Render to SVG"                    03, 05, 07, 08, 11, 13
-    text wrapping                 Structs wrapMode; Text wrap_mode            06, 15, 16, 17
-    tooltips                      Cookbook "Show a tooltip on hover"          09, 13
-    transitions                   XS Clay_SetTransitionHandlers; TRANSITIONS  10
-    validation errors             XS STRUCT ERRORS; UI KEYS AND VALIDATION    11, 14, 15
+=for highlighter language=text
+
+    Feature                       Reference                                     Examples
+    ----------------------------  --------------------------------------------  -----------------------------
+    aspect ratio                  Structs aspectRatio                           11, 14, 15
+    background colour             Structs backgroundColor; HasBackground        most
+    borders                       Structs border; HasBorder                     01, 03, 05-08, 11, 14, 15, 16
+    borders between children      Structs betweenChildren; HasBorder            07, 11
+    bounding box of an element    UI bounding_box; XS Clay_GetElementData       09, 12-18
+    bubbling events               Manual Bubbling; Events::Event bubble_mode    12
+    check a struct                XS check_struct                               11, 14, 15
+    clipping                      Structs clip                                  09, 11, 13, 15, 16
+    contexts, several             XS CONTEXTS; XS Clay_SetCurrentContext        17
+    corner radius                 Structs cornerRadius; HasCornerRadius         01, 03, 06-08, 11, 15, 16
+    culling                       XS Clay_SetCullingEnabled                     17
+    custom elements               Structs custom                                11, 16
+    custom events                 Events::Event; Events::Emitter fire_event     12
+    custom widget classes         Core::Element to_config; Manual WIDGETS       12, 14, 15, 16
+    debug view                    XS Clay_SetDebugModeEnabled                   17
+    disabled widgets              Interaction::Disableable                      12
+    element ids                   XS Clay_GetElementId; Manual ELEMENT IDS      01-03, 14, 17
+    error handler                 XS Clay_Initialize; UI new error_handler      01, 04-08, 14, 17
+    external scroll handling      XS Clay_SetExternalScrollHandlingEnabled      17
+    floating elements             Structs floating; HasFloating                 09, 13, 14, 17, 18
+    flow layout (wrap)            XS FLOW LAYOUT; Structs layoutDirection       07, 15
+    focus and Tab order           Interaction FOCUS; HasFocusOrder              12, 18
+    focus inside a subtree        Interaction has_focus_within                  -
+    focus scopes (modal Tab)      Interaction Focus scopes; HasFocusOrder       -
+    grids and tables              Clay::UI::Grid                                05, 16, 18
+    hover                         XS Clay_PointerOver; Hoverable                09, 12, 13, 18
+    images                        Structs image                                 11, 14, 15
+    internal children             Core::Element add_internal_children           14, 18
+    max element count             XS Clay_SetMaxElementCount; UI new            14, 17
+    measure text                  XS Clay_SetMeasureTextFunction; Manual TEXT   06, 14, 15, 16, 18
+    overlay colour                Structs overlayColor                          10, 11, 14, 15
+    pagination                    Cookbook "Split a long document into pages"   16
+    PDF output                    Cookbook "Render to a PDF document"           16
+    PNG output                    Cookbook "Render to a PNG image"              06, 15
+    pointer events                UI EVENTS; UI HOW A FRAME WORKS               12, 13, 18
+    preparation (rebuild once)    Core::Preparable                              12
+    press and release             Pressable; Events::OnPress                    12, 18
+    redraw only on change         Clay::UI::Revision; UI laid_out_revision      12, 14, 18
+    render commands               XS RENDER COMMANDS                            01, 03, 09, 11
+    resize the viewport           XS Clay_SetLayoutDimensions; UI width         17, 18
+    scrolling                     XS Clay_UpdateScrollContainers; HasScroll     09, 13
+    sizing (fit/grow/fixed/%)     Structs sizing                                all
+    sizing groups                 XS SIZING GROUPS; HasSizingGroup              14, 18
+    stack layout                  XS STACK LAYOUT                               08, 15
+    states (user and derived)     Style::HasStates                              12, 18
+    subtree of a widget           Core::Element descendants                     -
+    subtree test (is X below Y)   Layout::HasParent contains                    -
+    tree changes (joined/left)    Layout::HasParent tree_changed                -
+    SVG output                    Cookbook "Render to SVG"                      03, 05, 07, 08, 11, 13
+    text wrapping                 Structs wrapMode; Text wrap_mode              06, 15, 16, 17
+    tooltips                      Cookbook "Show a tooltip on hover"            09, 13
+    transitions                   XS Clay_SetTransitionHandlers; TRANSITIONS    10
+    validation errors             XS STRUCT ERRORS; UI KEYS AND VALIDATION      11, 14, 15
 
 The examples by number:
 

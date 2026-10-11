@@ -604,6 +604,8 @@ C<$base> is the id of the nearest ancestor with an id (C<''> when there
 is none) and C<@indices> the positions in C<layout_children> on the way
 down from that ancestor. For example:
 
+=for highlighter language=text
+
 	root without an id                    anon:0:/
 	its third child                       anon:0:/2
 	child 1 of the widget 'list'          anon:4:list/1
@@ -624,6 +626,8 @@ The layout pass supplies the arguments; calling C<resolve_id> yourself
 is only useful in tests.
 
 =head2 mark_changed
+
+=for highlighter language=perl
 
 	$widget->mark_changed;
 

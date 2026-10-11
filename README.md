@@ -117,7 +117,11 @@ printf "%d render commands\n", scalar @$commands;    # 2: the rectangle and the 
 ## Documentation
 
 After installation, read the documents with `perldoc`; in the source
-tree, with `perldoc lib/Clay/Manual.pod`.
+tree, with `perldoc lib/Clay/Manual.pod`. On GitHub, every document
+is also a Markdown page in
+[`docs/`](https://github.com/davenonymous/perl-clay-xs/tree/master/docs),
+starting with
+[Clay::Manual](https://github.com/davenonymous/perl-clay-xs/blob/master/docs/Clay/Manual.md).
 
 | Document | What it contains |
 |---|---|

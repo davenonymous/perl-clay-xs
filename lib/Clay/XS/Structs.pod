@@ -46,8 +46,10 @@ and where they are described. The Clay::UI column names the widget
 attribute that sets the key (see L</Clay::UI spelling>); "-" means
 Clay::UI has no attribute for it.
 
+=for highlighter language=text
+
     Key                         Section                    Clay::UI attribute
-    --------------------------  -------------------------  ---------------------------
+    --------------------------  -------------------------  ------------------------------
     layout                      layout                     layout (HasLayout)
     layout.sizing               sizing                     layout => { sizing }
     layout.padding              padding                    layout => { padding }
@@ -356,6 +358,8 @@ of the frame, in alphabetical order of the method names, and passes the
 result to Clay (see L<Clay::UI::Role::Core::Element/to_config>). The
 method writes its key into the hash, in either spelling, and returns
 nothing:
+
+=for highlighter language=perl
 
     use Object::Pad;
     use Clay::UI::Box;
@@ -885,6 +889,8 @@ default the two top-left corners meet. The points are the outer box
 corners, edge centres and centre; padding is not taken into account.
 The values:
 
+=for highlighter language=text
+
     CLAY_ATTACH_POINT_LEFT_TOP       0    CLAY_ATTACH_POINT_CENTER_BOTTOM  5
     CLAY_ATTACH_POINT_LEFT_CENTER    1    CLAY_ATTACH_POINT_RIGHT_TOP      6
     CLAY_ATTACH_POINT_LEFT_BOTTOM    2    CLAY_ATTACH_POINT_RIGHT_CENTER   7
@@ -913,6 +919,8 @@ to.
 
 C<offset> is a C<Clay_Vector2>, default C<[0, 0]>: moved by this many
 pixels after the attach points are lined up.
+
+=for highlighter language=perl
 
     offset => { x => 5, y => 6 }
 
@@ -1143,6 +1151,8 @@ C<properties> is a bit set, an integer in C<0 .. 511>, default 0
 C<|>. A property that changes but is not listed takes its new value at
 once.
 
+=for highlighter language=text
+
     CLAY_TRANSITION_PROPERTY_NONE                0
     CLAY_TRANSITION_PROPERTY_X                   1
     CLAY_TRANSITION_PROPERTY_Y                   2
@@ -1253,6 +1263,8 @@ PERCENT sizes do not depend on content. Groups work across the whole
 tree (form labels in different rows, columns of a grid) and may nest;
 nesting that forms a cycle on one axis is reported as
 C<CLAY_ERROR_TYPE_SIZING_GROUP_CYCLE>. See L<Clay::XS/SIZING GROUPS>.
+
+=for highlighter language=perl
 
     # four elements in a column, all with sizingGroup => { width => 1 }:
     # content 30 px -> 80; content 80 px -> 80; sizing_fit(0, 50) -> 50; sizing_fixed(10) -> 10
@@ -1803,6 +1815,8 @@ C<Clay_EndLayout> returns an arrayref of render commands:
 
 C<renderData> by C<commandType>:
 
+=for highlighter language=text
+
     RECTANGLE (1)              backgroundColor, cornerRadius
     BORDER (2)                 color, cornerRadius, width (Clay_BorderWidth)
     TEXT (3)                   stringContents, stringOffset, textColor, fontId,
@@ -1823,6 +1837,8 @@ The transition handler installed with C<Clay_SetTransitionHandlers>
 receives, and C<Clay_EaseOut> takes, a
 C<Clay_TransitionCallbackArguments> hash (C<check_struct> knows it under
 that name):
+
+=for highlighter language=perl
 
     {
         transitionState => CLAY_TRANSITION_STATE_...,   # IDLE 0, ENTERING 1,
