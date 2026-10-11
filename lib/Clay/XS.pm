@@ -8,7 +8,7 @@ no warnings 'experimental::signatures';
 use Exporter 5.57 'import';
 use XSLoader;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -3211,7 +3211,7 @@ L<Clay::XS::Structs/sizingGroup>). L<Clay::UI::Grid> builds on it.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.06/images/sizing-groups.png" alt="Two forms with the rows Name, E-mail address and City, each a grey label followed by a blue input box. Without a sizing group every label is as wide as its text and the inputs start at different positions. With the labels in width_group 1 every label is as wide as E-mail address and the inputs line up."></p>
 
 =end html
 
@@ -3282,7 +3282,7 @@ inner width.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.06/images/flow-layout.png" alt="Two wrap containers of the same size holding the same eight tags, which wrap onto three lines. With lineSizing GROW the lines share the container's extra height and the tags grow taller; with lineSizing FIT the lines stay as tall as their tags and the bottom of the container stays empty."></p>
 
 =end html
 
@@ -3371,7 +3371,7 @@ its padding.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.06/images/stack-layout.png" alt="A stack container: a blue picture fills it, a red badge sits in its top right corner and a dark caption bar runs along its bottom. The legend lists the three children: the picture, GROW on both axes; a layer aligned x RIGHT and y TOP holding the badge; a layer aligned y BOTTOM holding the caption bar."></p>
 
 =end html
 

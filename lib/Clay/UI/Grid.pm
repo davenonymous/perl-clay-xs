@@ -546,7 +546,7 @@ the same layout pass as the rest of the UI.
 
 =begin html
 
-<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.05/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
+<p><img src="https://raw.githubusercontent.com/davenonymous/perl-clay-xs/v0.06/images/grid.png" alt="A table with a dark header row Name, E-mail, Amount; the rows Alice and Bob; a grey row reading Guests (a spanning row) across all columns; and the row Carol. Every column is as wide as its widest cell and the amounts are right-aligned."></p>
 
 =end html
 
